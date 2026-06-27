@@ -23,6 +23,26 @@ packages the process as code so that a lakehouse can be deployed, loaded, exerci
 measured with a consistent, version-controlled workflow in order to allow experiments (including
 carbon-aware scheduling) to be re-run and compared fairly.
 
+## Repository layout
+
+| Directory | Purpose |
+| --- | --- |
+| [`trino_stack/`](trino_stack/) | Deploys the Trino query engine and the lakehouse storage/catalog layer onto Kubernetes. |
+| [`loader/`](loader/) | Ingests datasets into the lakehouse and creates the tables that workloads query. |
+| [`Datasets/`](Datasets/) | Source data (or fetch scripts) used to populate the lakehouse for tests and benchmarks. |
+| [`Workloads/`](Workloads/) | The query workloads / benchmark definitions run against the deployed lakehouse. |
+| [`profile_cluster/`](profile_cluster/) | Tools for profiling cluster resource usage and query performance during runs. |
+| [`carbon_scheduling/`](carbon_scheduling/) | Carbon-aware scheduling of workloads based on grid carbon intensity. |
+| [`uncertainty_prediction/`](uncertainty_prediction/) | Forecasting (with uncertainty) that feeds the carbon-aware scheduler. |
+
+Top-level files:
+
+| File | Purpose |
+| --- | --- |
+| `install.sh` | Bootstraps the environment / dependencies. <!-- TODO: confirm exactly what this installs --> |
+| `launch_lakehouse.ipynb` | Notebook entry point for deploying and driving the lakehouse end to end. |
+| `requirements.txt` | Python dependencies. |
+
 ## Architecture
 
 ```mermaid
@@ -52,26 +72,6 @@ flowchart TD
 At a high level: `trino_stack` deploys the engine and storage layer, `loader` ingests
 `Datasets` into it, `Workloads` drive queries against it, `profile_cluster` measures what
 happens, and `carbon_scheduling` (informed by `uncertainty_prediction`) decides *when* work runs.
-
-## Repository layout
-
-| Directory | Purpose |
-| --- | --- |
-| [`trino_stack/`](trino_stack/) | Deploys the Trino query engine and the lakehouse storage/catalog layer onto Kubernetes. |
-| [`loader/`](loader/) | Ingests datasets into the lakehouse and creates the tables that workloads query. |
-| [`Datasets/`](Datasets/) | Source data (or fetch scripts) used to populate the lakehouse for tests and benchmarks. |
-| [`Workloads/`](Workloads/) | The query workloads / benchmark definitions run against the deployed lakehouse. |
-| [`profile_cluster/`](profile_cluster/) | Tools for profiling cluster resource usage and query performance during runs. |
-| [`carbon_scheduling/`](carbon_scheduling/) | Carbon-aware scheduling of workloads based on grid carbon intensity. |
-| [`uncertainty_prediction/`](uncertainty_prediction/) | Forecasting (with uncertainty) that feeds the carbon-aware scheduler. |
-
-Top-level files:
-
-| File | Purpose |
-| --- | --- |
-| `install.sh` | Bootstraps the environment / dependencies. <!-- TODO: confirm exactly what this installs --> |
-| `launch_lakehouse.ipynb` | Notebook entry point for deploying and driving the lakehouse end to end. |
-| `requirements.txt` | Python dependencies. |
 
 ## Prerequisites
 - A Kubernetes cluster you can deploy to (e.g. a managed cluster, or a local one such as `kind`/`minikube`/`k3s`), with `kubectl` configured.
