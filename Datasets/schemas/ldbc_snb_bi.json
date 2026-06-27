@@ -1,0 +1,78 @@
+{
+  "name": "ldbc_snb_bi_sf0003",
+  "csv_kwargs": {
+    "sep": "|"
+  },
+  "tables": [
+    "comment",
+    "comment_has_tag_tag",
+    "forum",
+    "forum_has_member_person",
+    "forum_has_tag_tag",
+    "organisation",
+    "person",
+    "person_has_interest_tag",
+    "person_knows_person",
+    "person_likes_comment",
+    "person_likes_post",
+    "person_study_at_university",
+    "person_work_at_company",
+    "place",
+    "post",
+    "post_has_tag_tag",
+    "tag",
+    "tag_class"
+  ],
+  "relationships": 
+    [
+  ["comment_has_tag_tag", ["comment_id"], "comment", ["id"]],
+  ["comment_has_tag_tag", ["tag_id"], "tag", ["id"]],
+
+  ["forum_has_member_person", ["forum_id"], "forum", ["id"]],
+  ["forum_has_member_person", ["person_id"], "person", ["id"]],
+
+  ["forum_has_tag_tag", ["forum_id"], "forum", ["id"]],
+  ["forum_has_tag_tag", ["tag_id"], "tag", ["id"]],
+
+  ["person_has_interest_tag", ["person_id"], "person", ["id"]],
+  ["person_has_interest_tag", ["tag_id"], "tag", ["id"]],
+
+  ["person_knows_person", ["person1_id"], "person", ["id"]],
+  ["person_knows_person", ["person2_id"], "person", ["id"]],
+
+  ["person_likes_comment", ["person_id"], "person", ["id"]],
+  ["person_likes_comment", ["comment_id"], "comment", ["id"]],
+
+  ["person_likes_post", ["person_id"], "person", ["id"]],
+  ["person_likes_post", ["post_id"], "post", ["id"]],
+
+  ["post_has_tag_tag", ["post_id"], "post", ["id"]],
+  ["post_has_tag_tag", ["tag_id"], "tag", ["id"]],
+
+  ["comment", ["creator_person_id"], "person", ["id"]],
+  ["comment", ["parent_post_id"], "post", ["id"]],
+  ["comment", ["parent_comment_id"], "comment", ["id"]],
+  ["comment", ["location_country_id"], "place", ["id"]],
+
+  ["post", ["creator_person_id"], "person", ["id"]],
+  ["post", ["container_forum_id"], "forum", ["id"]],
+  ["post", ["location_country_id"], "place", ["id"]],
+
+  ["forum", ["moderator_person_id"], "person", ["id"]],
+
+  ["person", ["location_city_id"], "place", ["id"]],
+
+  ["organisation", ["location_place_id"], "place", ["id"]],
+
+  ["person_study_at_university", ["person_id"], "person", ["id"]],
+  ["person_study_at_university", ["university_id"], "organisation", ["id"]],
+
+  ["person_work_at_company", ["person_id"], "person", ["id"]],
+  ["person_work_at_company", ["company_id"], "organisation", ["id"]],
+
+  ["place", ["part_of_place_id"], "place", ["id"]],
+
+  ["tag", ["type_tag_class_id"], "tag_class", ["id"]],
+  ["tag_class", ["subclass_of_tag_class_id"], "tag_class", ["id"]]
+]
+}

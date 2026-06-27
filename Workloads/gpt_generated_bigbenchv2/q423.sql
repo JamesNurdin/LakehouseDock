@@ -1,0 +1,24 @@
+WITH page_lengths AS (
+    SELECT
+        w_web_page_id,
+        w_web_page_name,
+        w_web_page_type,
+        length(w_web_page_name) AS name_len
+    FROM web_pages
+)
+SELECT
+    w_web_page_id,
+    w_web_page_name,
+    w_web_page_type,
+    name_len
+FROM (
+    SELECT
+        w_web_page_id,
+        w_web_page_name,
+        w_web_page_type,
+        name_len,
+        row_number() OVER (PARTITION BY w_web_page_type ORDER BY name_len DESC) AS rn
+    FROM page_lengths
+) t
+WHERE rn <= 5
+ORDER BY w_web_page_type, name_len DESC

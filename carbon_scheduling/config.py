@@ -1,0 +1,39 @@
+# Configs
+
+SEED = 42 
+
+# SYNTHETIC DATA
+N_RUNS = 5
+BASE_MEDIAN = 100.0
+MAX_MEDIAN = 150.0
+CPU_MIN = 4.0
+CPU_MAX = 16.0
+RAM_MIN = 16.0
+RAM_MAX = 64.0
+PRIORITY_HIGH = 0
+PRIORITY_LOW = 5
+PRIORITY_W0 = 1 # more negative = higher priority, more positive = more lower priority
+PRIORITY_w1 = 0.5  # smaller = wider distribution, larger = tigheter 
+
+# CI DATA
+CSV_PATH = "./carbon_scheduling/CI_data/CY_2024_5_minute.csv"
+
+START = "2024-11-21 17:00:00"
+DURATION_DAYS = 0
+DURATION_HOURS = 72 # 12 
+DURATION_MINUTES = 0
+
+# SCHEDULER CONSTRAINTS
+MAX_RAM = 128 
+MAX_CPU = 32
+
+# SCHEDULER CONFIGS
+TIME_SLOT_GRANULARITY = 200
+
+HORIZON_TIME_HOURS = None
+if HORIZON_TIME_HOURS is not None:
+    HORIZON_TIME = int(HORIZON_TIME_HOURS * 3600 / TIME_SLOT_GRANULARITY)
+else:
+    HORIZON_TIME = None
+
+

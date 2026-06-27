@@ -1,0 +1,87 @@
+WITH user_posts AS (
+    SELECT
+        p.owneruserid AS user_id,
+        COUNT(*) AS post_count,
+        COALESCE(SUM(p.score), 0) AS total_post_score,
+        COALESCE(AVG(p.score), 0) AS avg_post_score
+    FROM posts p
+    GROUP BY p.owneruserid
+),
+user_comments AS (
+    SELECT
+        c.userid AS user_id,
+        COUNT(*) AS comment_count,
+        COALESCE(SUM(c.score), 0) AS total_comment_score,
+        COALESCE(AVG(c.score), 0) AS avg_comment_score
+    FROM comments c
+    GROUP BY c.userid
+),
+user_votes AS (
+    SELECT
+        v.userid AS user_id,
+        COUNT(*) AS vote_cast_count,
+        SUM(CASE WHEN v.votetypeid = 2 THEN 1 ELSE 0 END) AS upvote_cast,
+        SUM(CASE WHEN v.votetypeid = 3 THEN 1 ELSE 0 END) AS downvote_cast
+    FROM votes v
+    GROUP BY v.userid
+),
+user_badges AS (
+    SELECT
+        b.userid AS user_id,
+        COUNT(*) AS badge_count
+    FROM badges b
+    GROUP BY b.userid
+),
+user_posthistory AS (
+    SELECT
+        ph.userid AS user_id,
+        COUNT(*) AS posthistory_count
+    FROM posthistory ph
+    GROUP BY ph.userid
+),
+user_postlinks_raw AS (
+    SELECT p.owneruserid AS user_id, pl.id AS postlink_id
+    FROM postlinks pl
+    JOIN posts p ON pl.postid = p.id
+    UNION ALL
+    SELECT p.owneruserid AS user_id, pl.id AS postlink_id
+    FROM postlinks pl
+    JOIN posts p ON pl.relatedpostid = p.id
+),
+user_postlinks AS (
+    SELECT user_id, COUNT(DISTINCT postlink_id) AS postlink_count
+    FROM user_postlinks_raw
+    GROUP BY user_id
+),
+user_tag_excerpts AS (
+    SELECT p.owneruserid AS user_id, COUNT(DISTINCT t.id) AS tag_excerpt_count
+    FROM tags t
+    JOIN posts p ON t.excerptpostid = p.id
+    GROUP BY p.owneruserid
+)
+SELECT
+    u.id AS user_id,
+    u.reputation,
+    COALESCE(up.post_count, 0) AS post_count,
+    COALESCE(up.total_post_score, 0) AS total_post_score,
+    COALESCE(up.avg_post_score, 0) AS avg_post_score,
+    COALESCE(uc.comment_count, 0) AS comment_count,
+    COALESCE(uc.total_comment_score, 0) AS total_comment_score,
+    COALESCE(uc.avg_comment_score, 0) AS avg_comment_score,
+    COALESCE(uv.vote_cast_count, 0) AS vote_cast_count,
+    COALESCE(uv.upvote_cast, 0) AS upvote_cast,
+    COALESCE(uv.downvote_cast, 0) AS downvote_cast,
+    COALESCE(ub.badge_count, 0) AS badge_count,
+    COALESCE(uph.posthistory_count, 0) AS posthistory_count,
+    COALESCE(upL.postlink_count, 0) AS postlink_count,
+    COALESCE(ut.tag_excerpt_count, 0) AS tag_excerpt_count
+FROM users u
+LEFT JOIN user_posts up ON up.user_id = u.id
+LEFT JOIN user_comments uc ON uc.user_id = u.id
+LEFT JOIN user_votes uv ON uv.user_id = u.id
+LEFT JOIN user_badges ub ON ub.user_id = u.id
+LEFT JOIN user_posthistory uph ON uph.user_id = u.id
+LEFT JOIN user_postlinks upL ON upL.user_id = u.id
+LEFT JOIN user_tag_excerpts ut ON ut.user_id = u.id
+ORDER BY u.reputation DESC
+LIMIT 100

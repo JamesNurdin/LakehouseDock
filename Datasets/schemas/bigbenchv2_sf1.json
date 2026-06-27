@@ -1,0 +1,78 @@
+{
+  "name": "bigbenchv2_sf1",
+  "csv_kwargs": {
+    "sep": "|"
+  },
+  "tables": [
+    "customers",
+    "items",
+    "product_reviews",
+    "store_sales",
+    "stores",
+    "web_logs",
+    "web_pages",
+    "web_sales"
+  ],
+  "relationships": [
+    [
+      "product_reviews",
+      [
+        "pr_item_id"
+      ],
+      "items",
+      [
+        "i_item_id"
+      ]
+    ],
+    [
+      "store_sales",
+      [
+        "ss_customer_id"
+      ],
+      "customers",
+      [
+        "c_customer_id"
+      ]
+    ],
+    [
+      "store_sales",
+      [
+        "ss_item_id"
+      ],
+      "items",
+      [
+        "i_item_id"
+      ]
+    ],
+    [
+      "store_sales",
+      [
+        "ss_store_id"
+      ],
+      "stores",
+      [
+        "s_store_id"
+      ]
+    ],
+    [
+      "web_sales",
+      [
+        "ws_customer_id"
+      ],
+      "customers",
+      [
+        "c_customer_id"
+      ]
+    ],
+    [
+      "web_sales",
+      [
+        "ws_item_id"
+      ],
+      "items",
+      [
+        "i_item_id"
+      ]
+    ]
+  ]
+}

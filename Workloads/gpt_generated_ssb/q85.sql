@@ -1,0 +1,39 @@
+WITH order_agg AS (
+    SELECT
+        d.d_year,
+        c.c_region,
+        p.p_category,
+        SUM(lo.lo_revenue) AS total_revenue,
+        SUM(lo.lo_revenue - lo.lo_supplycost) AS total_profit,
+        AVG(lo.lo_discount) AS avg_discount
+    FROM lineorder lo
+    JOIN dim_date d
+        ON CAST(lo.lo_orderdate AS varchar) = d.d_datekey
+    JOIN customer c
+        ON lo.lo_custkey = c.c_custkey
+    JOIN part p
+        ON lo.lo_partkey = p.p_partkey
+    WHERE d.d_year = '1995'
+    GROUP BY d.d_year, c.c_region, p.p_category
+),
+ranked_category AS (
+    SELECT
+        d_year,
+        c_region,
+        p_category,
+        total_revenue,
+        total_profit,
+        avg_discount,
+        ROW_NUMBER() OVER (PARTITION BY d_year, c_region ORDER BY total_revenue DESC) AS rn
+    FROM order_agg
+)
+SELECT
+    d_year,
+    c_region,
+    p_category,
+    total_revenue,
+    total_profit,
+    avg_discount
+FROM ranked_category
+WHERE rn <= 5
+ORDER BY d_year, c_region, total_revenue DESC

@@ -1,0 +1,52 @@
+# Large/generated/raw data
+Datasets/BigBenchV2
+Datasets/Stats-CEB
+Datasets/ldbc_snb
+
+Results/
+Results
+Parsed_Results/
+old/
+
+profile_cluster/demo_results
+profile_cluster/results
+
+# Python/cache/build noise
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Logs/temp files
+*.log
+*.tmp
+*.bak
+*.swp
+
+# OS/editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Ignore all Jupyter notebooks in Main
+/*.ipynb
+
+# Keep a generic launch notebook
+!/launch_lakehouse.ipynb
+
+# Password/Tokens
+git_token.txt
+
+#Proprietary CI Data
+carbon_scheduling/CI_data
+carbon_scheduling/gurobi/gurobi.lic
+carbon_scheduling/Studies
+
+

@@ -1,0 +1,65 @@
+{
+  "name": "ssb",
+  "csv_kwargs": {
+    "sep": "|"
+  },
+  "tables": [
+    "customer",
+    "dim_date",
+    "lineorder",
+    "part",
+    "supplier"
+  ],
+  "relationships": [
+    [
+      "lineorder",
+      [
+        "lo_commitdate"
+      ],
+      "dim_date",
+      [
+        "d_datekey"
+      ]
+    ],
+    [
+      "lineorder",
+      [
+        "lo_custkey"
+      ],
+      "customer",
+      [
+        "c_custkey"
+      ]
+    ],
+    [
+      "lineorder",
+      [
+        "lo_orderdate"
+      ],
+      "dim_date",
+      [
+        "d_datekey"
+      ]
+    ],
+    [
+      "lineorder",
+      [
+        "lo_partkey"
+      ],
+      "part",
+      [
+        "p_partkey"
+      ]
+    ],
+    [
+      "lineorder",
+      [
+        "lo_suppkey"
+      ],
+      "supplier",
+      [
+        "s_suppkey"
+      ]
+    ]
+  ]
+}

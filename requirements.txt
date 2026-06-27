@@ -1,0 +1,14 @@
+trino
+kubernetes
+jinja2
+pydot
+gensim
+ortools<9.15
+numpy<2
+protobuf<5
+gurobipy
+plotly
+ipywidgets
+umap-learn
+xgboost
+lightgbm

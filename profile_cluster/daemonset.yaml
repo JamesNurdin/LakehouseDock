@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-profiler
+  namespace: pgr24james
+  labels:
+    app: node-profiler
+spec:
+  selector:
+    matchLabels:
+      app: node-profiler
+  template:
+    metadata:
+      labels:
+        app: node-profiler
+    spec:
+      serviceAccountName: containerroot
+      imagePullSecrets:
+        - name: containerroot-dockercfg-qrptl
+      priority: 0
+      schedulerName: default-scheduler
+      enableServiceLinks: true
+      terminationGracePeriodSeconds: 30
+      preemptionPolicy: PreemptLowerPriority
+      securityContext:
+        seLinuxOptions:
+          level: "s0:c29,c14"
+        runAsUser: 0
+      containers:
+        - name: app-container
+          image: 2570809n/node-profiler:latest
+          imagePullPolicy: Always
+          command:
+            - /bin/sh
+            - -c
+            - |
+                sleep 10
+                python /mnt/primary/Main/profile_cluster/historical_profile.py
+                echo "Profiling complete on ${MY_NODE_NAME}"
+                tail -f /dev/null
+          env:
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: primary
+              mountPath: /mnt/primary
+          resources:
+            requests:
+              cpu: "1"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          securityContext:
+            capabilities:
+              drop:
+                - MKNOD
+      volumes:
+        - name: primary
+          persistentVolumeClaim:
+            claimName: pgr24jamesvol1claim

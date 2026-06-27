@@ -1,0 +1,50 @@
+instanceName: lakehouse-a
+
+namespace: pgr24james
+
+trino:
+  profiler: 
+    enabled: true
+    when: ['before']
+  logger: true
+  pod:
+    image: 2570809n/trino-node-exporter:latest
+  worker:
+    resources:
+      cpu: "4"
+      memory: "64Gi"
+    replicasPerNode: 1
+    count: 4
+    nodes:
+      - "idagpu-18"
+      - "os-gpu-03"
+      - "os-gpu-05"
+      - "trnode14"
+  coord:
+    resources:
+      cpu: "4"
+      memory: "64Gi"
+    nodeName: "idagpu-19"  # or "" for random
+
+test:
+  pod:
+    image: macavaney/idabox:py310-v93
+
+metastore:
+  nodeName: "idagpu-18"  # or "" for random 
+  hive:
+    pod:
+      image: bde2020/hive:latest
+  postgres:
+    pod:
+      image: postgres:13
+    
+pvc:
+  iceberg:
+    name: iceberg-1tb
+    path: /mnt/iceberg
+
+results:
+  raw:
+    name: lakehouse-raw-results
+    path: /mnt/lakehouse-raw-results
