@@ -74,11 +74,7 @@ Top-level files:
 | `requirements.txt` | Python dependencies. |
 
 ## Prerequisites
-
-<!-- TODO: confirm exact versions for your setup -->
-
 - A Kubernetes cluster you can deploy to (e.g. a managed cluster, or a local one such as `kind`/`minikube`/`k3s`), with `kubectl` configured.
-- `helm` _(if the stack is deployed via Helm charts — TODO: confirm)_.
 - Python 3.x and the packages in `requirements.txt`.
 - Jupyter, to run `launch_lakehouse.ipynb`.
 - Object storage for the lakehouse data layer (e.g. MinIO in-cluster, or an S3-compatible bucket). <!-- TODO: confirm -->
@@ -98,13 +94,11 @@ pip install -r requirements.txt
 jupyter notebook launch_lakehouse.ipynb
 ```
 
-<!-- TODO: replace the above with the exact, verified commands once confirmed. -->
-
 A typical end-to-end run:
 
-1. **Deploy** the engine and storage layer — see [`trino_stack/`](trino_stack/).
-2. **Load** data into the lakehouse — see [`loader/`](loader/) and [`Datasets/`](Datasets/).
-3. **Run** workloads against it — see [`Workloads/`](Workloads/).
+1. **Load** data into object storage — see [`loader/`](loader/) and [`Datasets/`](Datasets/).
+2. **Deploy** the engine and storage layer — see [`trino_stack/`](trino_stack/).
+3. **Run** workloads — see [`Workloads/`](Workloads/).
 4. **Profile** the run — see [`profile_cluster/`](profile_cluster/).
 5. *(Optional / research)* **Schedule** carbon-aware — see [`carbon_scheduling/`](carbon_scheduling/) and [`uncertainty_prediction/`](uncertainty_prediction/).
 
@@ -114,9 +108,4 @@ Each directory has its own README with details. Start with [`trino_stack/`](trin
 a lakehouse running, then [`loader/`](loader/) to put data in it.
 
 ## Citation
-
-<!-- TODO: add a citation block / DOI if this accompanies a paper or thesis. -->
-
 ## License
-
-<!-- TODO: choose and add a license (e.g. MIT, Apache-2.0) and a LICENSE file. -->
