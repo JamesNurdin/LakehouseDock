@@ -18,10 +18,10 @@ query workloads can be shifted in time to run when the electricity grid is clean
 ## Why
 
 Standing up a lakehouse (object storage + table format + catalog + a distributed query engine)
-and then benchmarking it reproducibly is fiddly and easy to get subtly wrong. LakehouseDock
-packages the whole thing as code so that a lakehouse can be deployed, loaded, exercised, and
-measured with a consistent, version-controlled workflow — and so that experiments (including
-carbon-aware scheduling experiments) can be re-run and compared fairly.
+and then benchmarking it reproducibly is difficult and prone to many errors. LakehouseDock
+packages the process as code so that a lakehouse can be deployed, loaded, exercised, and
+measured with a consistent, version-controlled workflow in order to allow experiments (including
+carbon-aware scheduling) to be re-run and compared fairly.
 
 ## Architecture
 
