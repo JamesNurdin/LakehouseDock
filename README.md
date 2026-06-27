@@ -4,14 +4,11 @@
 
 LakehouseDock stands up a complete data lakehouse on a Kubernetes cluster, loads it with
 data, and runs query workloads against it so that different configurations, schedulers, and
-engine settings can be benchmarked under controlled, repeatable conditions. Think of it as a
-dry dock for lakehouses: a place to bring a stack in, work on it, and put it through its paces.
+engine settings can be benchmarked under controlled, repeatable conditions. 
 
 On top of the core deploy-and-test loop, LakehouseDock includes an experimental
 **carbon-aware scheduling** layer driven by **uncertainty-aware forecasting**, for studying how
 query workloads can be shifted in time to run when the electricity grid is cleaner.
-
-> **Status:** Research / work in progress. Interfaces and layout may change.
 
 ---
 
