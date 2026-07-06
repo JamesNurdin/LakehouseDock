@@ -5,6 +5,7 @@ from .trinoNumericQueryEncoder import (
     canon_qid,
 )
 from .trinoGraphQueryEncoder import TrinoGraphWLPlanEncoder
+from .trinoGraphGINQueryEncoder import TrinoGraphGINPlanEncoder
 from .trinoLakehouseContextEncoder import LakehouseContextEncoder
 from .model import ConditionalTraceRuntimeModel, durations_from_runs
 from .evaluate import (
@@ -53,6 +54,7 @@ __all__ = [
 
     # Encoders
     "TrinoGraphWLPlanEncoder",
+    "TrinoGraphGINPlanEncoder",
     "TrinoNumericPlanEncoder",
     "LakehouseContextEncoder",
     
