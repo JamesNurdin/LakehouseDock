@@ -1,31 +1,32 @@
-WITH parsed_logs AS (
-    SELECT
-        split(line, ' ')[1] AS ip_address,
-        regexp_extract(line, '"(\S+) (\S+) (\S+)"', 1) AS request_method,
-        regexp_extract(line, '"(\S+) (\S+) (\S+)"', 2) AS request_path,
-        split(line, ' ')[9] AS status_code,
-        length(line) AS line_length
-    FROM web_logs
-    WHERE line IS NOT NULL
+WITH store_sales_data AS (
+    SELECT ss.ss_item_id AS item_id,
+           ss.ss_quantity AS quantity,
+           ss.ss_customer_id AS customer_id
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
 ),
-method_path_counts AS (
-    SELECT
-        request_method,
-        request_path,
-        status_code,
-        count(*) AS request_count,
-        avg(line_length) AS avg_line_length
-    FROM parsed_logs
-    GROUP BY request_method, request_path, status_code
+web_sales_data AS (
+    SELECT ws.ws_item_id AS item_id,
+           ws.ws_quantity AS quantity,
+           ws.ws_customer_id AS customer_id
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+),
+combined_sales AS (
+    SELECT item_id, quantity, customer_id FROM store_sales_data
+    UNION ALL
+    SELECT item_id, quantity, customer_id FROM web_sales_data
 )
-SELECT
-    request_method,
-    request_path,
-    status_code,
-    request_count,
-    avg_line_length,
-    rank() OVER (PARTITION BY request_method ORDER BY request_count DESC) AS method_path_rank
-FROM method_path_counts
-WHERE request_count > 10
-ORDER BY request_method, method_path_rank
-LIMIT 50
+SELECT i.i_category_id,
+       i.i_category,
+       SUM(cs.quantity) AS total_quantity_sold,
+       COUNT(DISTINCT cs.customer_id) AS distinct_customers,
+       SUM(i.i_price * cs.quantity) AS total_revenue,
+       AVG(pr.pr_sentiment) AS avg_sentiment,
+       COUNT(pr.pr_review_id) AS review_count
+FROM combined_sales cs
+JOIN items i ON cs.item_id = i.i_item_id
+LEFT JOIN product_reviews pr ON pr.pr_item_id = i.i_item_id
+GROUP BY i.i_category_id, i.i_category
+ORDER BY total_revenue DESC
+LIMIT 10

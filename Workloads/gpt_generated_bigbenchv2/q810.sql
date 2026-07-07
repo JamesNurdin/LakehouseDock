@@ -1,50 +1,31 @@
-WITH store_category_sales AS (
+WITH combined_sales AS (
     SELECT
-        ss.ss_store_id,
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ss.ss_quantity) AS total_store_quantity,
-        SUM(ss.ss_quantity * i.i_price) AS total_store_revenue,
-        COUNT(DISTINCT ss.ss_customer_id) AS unique_store_customers
+        c.c_customer_id AS customer_id,
+        c.c_name AS customer_name,
+        i.i_category AS item_category,
+        ss.ss_quantity * i.i_price AS revenue,
+        ss.ss_quantity AS quantity
     FROM store_sales ss
+    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
     JOIN items i ON ss.ss_item_id = i.i_item_id
-    GROUP BY ss.ss_store_id, i.i_category_id, i.i_category_name
-),
-online_category_sales AS (
+    UNION ALL
     SELECT
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ws.ws_quantity) AS total_online_quantity,
-        SUM(ws.ws_quantity * i.i_price) AS total_online_revenue
+        c.c_customer_id,
+        c.c_name,
+        i.i_category,
+        ws.ws_quantity * i.i_price,
+        ws.ws_quantity
     FROM web_sales ws
+    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
     JOIN items i ON ws.ws_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
-),
-category_reviews AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        AVG(pr.pr_rating) AS avg_rating,
-        COUNT(*) AS review_count
-    FROM product_reviews pr
-    JOIN items i ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
 )
 SELECT
-    s.s_store_name,
-    cs.i_category_name,
-    cs.total_store_quantity,
-    cs.total_store_revenue,
-    cs.unique_store_customers,
-    oc.total_online_quantity,
-    oc.total_online_revenue,
-    cr.avg_rating,
-    cr.review_count,
-    RANK() OVER (PARTITION BY s.s_store_name ORDER BY cs.total_store_revenue DESC) AS revenue_rank
-FROM store_category_sales cs
-JOIN stores s ON cs.ss_store_id = s.s_store_id
-LEFT JOIN online_category_sales oc ON cs.i_category_id = oc.i_category_id
-LEFT JOIN category_reviews cr ON cs.i_category_id = cr.i_category_id
-WHERE cs.total_store_quantity > 0
-ORDER BY s.s_store_name, revenue_rank
-LIMIT 100
+    customer_id,
+    customer_name,
+    item_category,
+    SUM(revenue) AS total_revenue,
+    SUM(quantity) AS total_quantity
+FROM combined_sales
+GROUP BY customer_id, customer_name, item_category
+ORDER BY total_revenue DESC
+LIMIT 10

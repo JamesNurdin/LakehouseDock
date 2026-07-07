@@ -1,32 +1,44 @@
-WITH item_rating AS (
-    SELECT i.i_item_id,
-           AVG(pr.pr_rating) AS avg_rating
-    FROM product_reviews pr
-    JOIN items i ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_item_id
+WITH store_sales_data AS (
+  SELECT ss.ss_item_id AS item_id,
+         i.i_category,
+         ss.ss_quantity AS quantity,
+         i.i_price AS price
+  FROM store_sales ss
+  JOIN items i ON ss.ss_item_id = i.i_item_id
 ),
-store_category_sales AS (
-    SELECT s.s_store_id,
-           s.s_store_name,
-           i.i_category_id,
-           i.i_category_name,
-           SUM(ss.ss_quantity) AS total_quantity,
-           SUM(ss.ss_quantity * i.i_price) AS total_revenue,
-           SUM(COALESCE(ir.avg_rating, 0) * ss.ss_quantity) AS weighted_rating_sum,
-           SUM(ss.ss_quantity) AS quantity_for_rating
-    FROM store_sales ss
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    JOIN stores s ON ss.ss_store_id = s.s_store_id
-    LEFT JOIN item_rating ir ON i.i_item_id = ir.i_item_id
-    GROUP BY s.s_store_id, s.s_store_name, i.i_category_id, i.i_category_name
+web_sales_data AS (
+  SELECT ws.ws_item_id AS item_id,
+         i.i_category,
+         ws.ws_quantity AS quantity,
+         i.i_price AS price
+  FROM web_sales ws
+  JOIN items i ON ws.ws_item_id = i.i_item_id
+),
+combined_sales AS (
+  SELECT item_id, i_category, quantity, price FROM store_sales_data
+  UNION ALL
+  SELECT item_id, i_category, quantity, price FROM web_sales_data
+),
+sales_agg AS (
+  SELECT i_category,
+         SUM(quantity) AS total_quantity,
+         SUM(quantity * price) AS total_revenue
+  FROM combined_sales
+  GROUP BY i_category
+),
+review_agg AS (
+  SELECT i.i_category,
+         AVG(pr.pr_sentiment) AS avg_sentiment,
+         COUNT(*) AS review_count
+  FROM product_reviews pr
+  JOIN items i ON pr.pr_item_id = i.i_item_id
+  GROUP BY i.i_category
 )
-SELECT s_store_id,
-       s_store_name,
-       i_category_id,
-       i_category_name,
-       total_quantity,
-       total_revenue,
-       CASE WHEN quantity_for_rating > 0 THEN weighted_rating_sum / quantity_for_rating ELSE NULL END AS avg_rating_weighted
-FROM store_category_sales
-ORDER BY total_revenue DESC
-LIMIT 50
+SELECT s.i_category,
+       s.total_quantity,
+       s.total_revenue,
+       r.avg_sentiment,
+       r.review_count
+FROM sales_agg s
+LEFT JOIN review_agg r ON s.i_category = r.i_category
+ORDER BY s.total_revenue DESC

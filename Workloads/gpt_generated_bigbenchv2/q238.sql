@@ -1,28 +1,32 @@
-WITH page_metrics AS (
+WITH category_sales AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
-), ranked AS (
+        i.i_category_id,
+        i.i_category,
+        SUM(ss.ss_quantity) AS total_quantity,
+        AVG(i.i_price) AS avg_price
+    FROM store_sales ss
+    JOIN items i
+        ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+category_sentiment AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        name_len,
-        row_number() OVER (PARTITION BY w_web_page_type ORDER BY name_len DESC) AS rn,
-        sum(name_len) OVER (PARTITION BY w_web_page_type) AS total_name_len,
-        count(*) OVER (PARTITION BY w_web_page_type) AS total_pages
-    FROM page_metrics
+        i.i_category_id,
+        i.i_category,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i
+        ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
 SELECT
-    w_web_page_type,
-    w_web_page_id,
-    w_web_page_name,
-    name_len,
-    total_name_len,
-    total_pages
-FROM ranked
-WHERE rn <= 3
-ORDER BY w_web_page_type, name_len DESC
+    cs.i_category_id,
+    cs.i_category,
+    cs.total_quantity,
+    cs.avg_price,
+    COALESCE(ct.avg_sentiment, 0) AS avg_sentiment
+FROM category_sales cs
+LEFT JOIN category_sentiment ct
+    ON cs.i_category_id = ct.i_category_id
+ORDER BY cs.total_quantity DESC
+LIMIT 10

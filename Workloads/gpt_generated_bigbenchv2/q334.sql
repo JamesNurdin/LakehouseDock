@@ -1,37 +1,32 @@
-WITH store_category_sales AS (
+WITH store_agg AS (
     SELECT
-        s.s_store_name,
-        i.i_category_name,
-        SUM(ss.ss_quantity) AS total_quantity,
-        SUM(ss.ss_quantity * i.i_price) AS total_revenue,
-        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers
+        ss.ss_customer_id AS customer_id,
+        SUM(ss.ss_quantity) AS total_store_quantity,
+        COUNT(DISTINCT ss.ss_item_id) AS distinct_store_items
     FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    JOIN stores s
-        ON ss.ss_store_id = s.s_store_id
-    GROUP BY s.s_store_name, i.i_category_name
+    GROUP BY ss.ss_customer_id
 ),
-category_review_stats AS (
+web_agg AS (
     SELECT
-        i.i_category_name,
-        AVG(pr.pr_rating) AS avg_rating,
-        COUNT(pr.pr_review_id) AS review_count
-    FROM product_reviews pr
-    JOIN items i
-        ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_category_name
+        ws.ws_customer_id AS customer_id,
+        SUM(ws.ws_quantity) AS total_web_quantity,
+        COUNT(DISTINCT ws.ws_item_id) AS distinct_web_items
+    FROM web_sales ws
+    GROUP BY ws.ws_customer_id
 )
 SELECT
-    sc.s_store_name,
-    sc.i_category_name,
-    sc.total_quantity,
-    sc.total_revenue,
-    sc.distinct_customers,
-    COALESCE(cr.avg_rating, 0) AS avg_rating,
-    COALESCE(cr.review_count, 0) AS review_count
-FROM store_category_sales sc
-LEFT JOIN category_review_stats cr
-    ON sc.i_category_name = cr.i_category_name
-ORDER BY sc.total_revenue DESC
-LIMIT 20
+    c.c_customer_id,
+    c.c_name,
+    COALESCE(s.total_store_quantity, 0) AS total_store_quantity,
+    COALESCE(w.total_web_quantity, 0) AS total_web_quantity,
+    COALESCE(s.total_store_quantity, 0) + COALESCE(w.total_web_quantity, 0) AS total_quantity,
+    COALESCE(s.distinct_store_items, 0) AS distinct_store_items,
+    COALESCE(w.distinct_web_items, 0) AS distinct_web_items,
+    COALESCE(s.distinct_store_items, 0) + COALESCE(w.distinct_web_items, 0) AS distinct_total_items
+FROM customers c
+LEFT JOIN store_agg s
+    ON s.customer_id = c.c_customer_id
+LEFT JOIN web_agg w
+    ON w.customer_id = c.c_customer_id
+ORDER BY total_quantity DESC
+LIMIT 10

@@ -1,47 +1,28 @@
-WITH store_customer_agg AS (
+WITH daily_counts AS (
     SELECT
-        ss.ss_store_id,
-        ss.ss_customer_id,
-        SUM(ss.ss_quantity) AS total_quantity,
-        COUNT(*) AS transaction_count
-    FROM store_sales ss
-    GROUP BY ss.ss_store_id, ss.ss_customer_id
+        date(cast(wl_timestamp AS timestamp)) AS log_date,
+        count(*) AS total_logs
+    FROM web_logs
+    GROUP BY date(cast(wl_timestamp AS timestamp))
 ),
-store_customer_rank AS (
+page_daily_counts AS (
     SELECT
-        sca.ss_store_id,
-        sca.ss_customer_id,
-        sca.total_quantity,
-        sca.transaction_count,
-        ROW_NUMBER() OVER (PARTITION BY sca.ss_store_id ORDER BY sca.total_quantity DESC) AS rank
-    FROM store_customer_agg sca
+        wl_webpage_name,
+        date(cast(wl_timestamp AS timestamp)) AS log_date,
+        count(*) AS page_logs,
+        count(DISTINCT wl_customer_id) AS unique_customers
+    FROM web_logs
+    GROUP BY wl_webpage_name, date(cast(wl_timestamp AS timestamp))
 )
 SELECT
-    s.s_store_id,
-    s.s_store_name,
-    SUM(ss.ss_quantity) AS store_total_quantity,
-    COUNT(*) AS store_total_transactions,
-    COUNT(DISTINCT ss.ss_customer_id) AS store_distinct_customers,
-    scr.rank,
-    scr.ss_customer_id,
-    c.c_name,
-    scr.total_quantity,
-    scr.transaction_count
-FROM store_sales ss
-JOIN stores s
-    ON ss.ss_store_id = s.s_store_id
-JOIN store_customer_rank scr
-    ON ss.ss_store_id = scr.ss_store_id
-   AND ss.ss_customer_id = scr.ss_customer_id
-JOIN customers c
-    ON ss.ss_customer_id = c.c_customer_id
-WHERE scr.rank <= 3
-GROUP BY
-    s.s_store_id,
-    s.s_store_name,
-    scr.rank,
-    scr.ss_customer_id,
-    c.c_name,
-    scr.total_quantity,
-    scr.transaction_count
-ORDER BY s.s_store_id, scr.rank
+    pdc.wl_webpage_name,
+    pdc.log_date,
+    pdc.page_logs,
+    pdc.unique_customers,
+    dc.total_logs,
+    (pdc.page_logs * 100.0) / dc.total_logs AS page_share_pct
+FROM page_daily_counts pdc
+JOIN daily_counts dc
+    ON pdc.log_date = dc.log_date
+ORDER BY pdc.log_date DESC, pdc.page_logs DESC
+LIMIT 100

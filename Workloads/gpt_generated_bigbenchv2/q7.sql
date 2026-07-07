@@ -1,33 +1,23 @@
-WITH item_review_stats AS (
+WITH item_sentiment AS (
     SELECT
-        items.i_item_id,
-        items.i_name,
-        items.i_category_id,
-        items.i_category_name,
-        items.i_price,
-        items.i_comp_price,
-        COUNT(*) AS review_cnt,
-        AVG(product_reviews.pr_rating) AS avg_rating
-    FROM items
-    JOIN product_reviews
-        ON product_reviews.pr_item_id = items.i_item_id
-    GROUP BY
-        items.i_item_id,
-        items.i_name,
-        items.i_category_id,
-        items.i_category_name,
-        items.i_price,
-        items.i_comp_price
+        i.i_item_id,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id
 )
 SELECT
-    i_category_id,
-    i_category_name,
-    COUNT(*) AS items_with_reviews,
-    SUM(review_cnt) AS total_reviews,
-    AVG(avg_rating) AS category_avg_rating,
-    AVG(i_price) AS avg_item_price,
-    AVG(i_price - i_comp_price) AS avg_price_diff
-FROM item_review_stats
-WHERE review_cnt >= 3
-GROUP BY i_category_id, i_category_name
-ORDER BY category_avg_rating DESC
+    s.s_store_name,
+    SUM(ss.ss_quantity) AS total_quantity_sold,
+    SUM(ss.ss_quantity * i.i_price) AS total_revenue,
+    CASE WHEN SUM(ss.ss_quantity) > 0 THEN
+        SUM(ss.ss_quantity * COALESCE(isent.avg_sentiment, 0)) / SUM(ss.ss_quantity)
+    ELSE NULL END AS weighted_avg_sentiment
+FROM store_sales ss
+JOIN customers c ON ss.ss_customer_id = c.c_customer_id
+JOIN items i ON ss.ss_item_id = i.i_item_id
+JOIN stores s ON ss.ss_store_id = s.s_store_id
+LEFT JOIN item_sentiment isent ON i.i_item_id = isent.i_item_id
+GROUP BY s.s_store_name
+ORDER BY total_revenue DESC
+LIMIT 10

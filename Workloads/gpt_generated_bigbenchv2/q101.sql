@@ -1,19 +1,16 @@
-WITH page_stats AS (
+WITH page_counts AS (
     SELECT
         w_web_page_type,
-        w_web_page_id,
-        w_web_page_name,
-        length(w_web_page_name) AS name_len,
-        count(*) OVER (PARTITION BY w_web_page_type) AS type_page_cnt,
-        row_number() OVER (PARTITION BY w_web_page_type ORDER BY length(w_web_page_name) DESC) AS rn
+        COUNT(*) AS page_count,
+        COUNT(DISTINCT w_web_page_name) AS distinct_name_count,
+        ARRAY_AGG(DISTINCT w_web_page_name) FILTER (WHERE w_web_page_name IS NOT NULL) AS page_names
     FROM web_pages
+    GROUP BY w_web_page_type
 )
 SELECT
     w_web_page_type,
-    type_page_cnt,
-    w_web_page_id,
-    w_web_page_name,
-    name_len AS longest_name_length
-FROM page_stats
-WHERE rn = 1
-ORDER BY type_page_cnt DESC
+    page_count,
+    distinct_name_count,
+    page_names
+FROM page_counts
+ORDER BY page_count DESC

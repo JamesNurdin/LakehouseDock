@@ -1,32 +1,35 @@
-WITH item_ratings AS (
+WITH revenue_by_customer AS (
     SELECT
-        pr_item_id,
-        AVG(pr_rating) AS avg_rating
-    FROM product_reviews
-    GROUP BY pr_item_id
+        c.c_customer_id,
+        c.c_name,
+        i.i_category,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_quantity * i.i_price) AS total_revenue
+    FROM web_sales ws
+    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY
+        c.c_customer_id,
+        c.c_name,
+        i.i_category
 ),
-store_category_sales AS (
+ranked AS (
     SELECT
-        s.s_store_name,
-        i.i_category_name,
-        SUM(ss.ss_quantity) AS total_quantity,
-        SUM(i.i_price * ss.ss_quantity) AS total_revenue,
-        AVG(ir.avg_rating) AS avg_item_rating
-    FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    JOIN stores s
-        ON ss.ss_store_id = s.s_store_id
-    LEFT JOIN item_ratings ir
-        ON i.i_item_id = ir.pr_item_id
-    GROUP BY s.s_store_name, i.i_category_name
+        r.c_customer_id,
+        r.c_name,
+        r.i_category,
+        r.total_quantity,
+        r.total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY r.i_category ORDER BY r.total_revenue DESC) AS rank_in_category
+    FROM revenue_by_customer r
 )
 SELECT
-    sc.s_store_name,
-    sc.i_category_name,
-    sc.total_quantity,
-    sc.total_revenue,
-    sc.avg_item_rating,
-    ROW_NUMBER() OVER (ORDER BY sc.total_revenue DESC) AS revenue_rank
-FROM store_category_sales sc
-ORDER BY sc.total_revenue DESC
+    c_customer_id,
+    c_name,
+    i_category,
+    total_quantity,
+    total_revenue,
+    rank_in_category
+FROM ranked
+WHERE rank_in_category <= 5
+ORDER BY i_category, rank_in_category

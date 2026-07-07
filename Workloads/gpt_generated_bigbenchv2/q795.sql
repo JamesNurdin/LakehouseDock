@@ -1,29 +1,37 @@
-WITH sales_enriched AS (
-    SELECT
-        ws.ws_item_id,
-        ws.ws_quantity,
-        ws.ws_customer_id,
-        ws.ws_ts,
-        i.i_category_id,
-        i.i_category_name,
-        i.i_price,
-        i.i_class_id
-    FROM web_sales ws
-    JOIN items i
-        ON ws.ws_item_id = i.i_item_id
-    WHERE ws.ws_quantity > 0
+WITH combined_sales AS (
+    SELECT ss_item_id AS item_id,
+           ss_quantity AS quantity
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id,
+           ws_quantity AS quantity
+    FROM web_sales
+),
+item_sales AS (
+    SELECT i.i_item_id,
+           i.i_name,
+           i.i_category,
+           i.i_category_id,
+           SUM(cs.quantity) AS total_quantity_sold
+    FROM combined_sales cs
+    JOIN items i ON cs.item_id = i.i_item_id
+    GROUP BY i.i_item_id, i.i_name, i.i_category, i.i_category_id
+),
+item_sentiment AS (
+    SELECT i.i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id
 )
-SELECT
-    se.i_category_name,
-    format_datetime(cast(se.ws_ts AS timestamp), '%Y-%m') AS year_month,
-    sum(se.ws_quantity) AS total_quantity,
-    sum(se.ws_quantity * se.i_price) AS total_sales,
-    avg(se.i_price) AS avg_price,
-    count(DISTINCT se.ws_customer_id) AS unique_customers,
-    count(*) AS transaction_count
-FROM sales_enriched se
-GROUP BY
-    se.i_category_name,
-    format_datetime(cast(se.ws_ts AS timestamp), '%Y-%m')
-ORDER BY total_sales DESC
-LIMIT 100
+SELECT isales.i_item_id,
+       isales.i_name,
+       isales.i_category,
+       isales.total_quantity_sold,
+       COALESCE(isent.avg_sentiment, 0) AS avg_sentiment,
+       COALESCE(isent.review_count, 0) AS review_count
+FROM item_sales isales
+LEFT JOIN item_sentiment isent ON isales.i_item_id = isent.i_item_id
+ORDER BY isales.total_quantity_sold DESC
+LIMIT 10

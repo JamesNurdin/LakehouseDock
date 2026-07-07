@@ -1,58 +1,44 @@
-WITH
-    store_sales_agg AS (
-        SELECT
-            s.s_store_id,
-            s.s_store_name,
-            i.i_category_id,
-            i.i_category_name,
-            SUM(ss.ss_quantity) AS store_quantity
-        FROM store_sales ss
-        JOIN stores s
-            ON ss.ss_store_id = s.s_store_id
-        JOIN items i
-            ON ss.ss_item_id = i.i_item_id
-        GROUP BY
-            s.s_store_id,
-            s.s_store_name,
-            i.i_category_id,
-            i.i_category_name
-    ),
-    web_sales_agg AS (
-        SELECT
-            i.i_category_id,
-            i.i_category_name,
-            SUM(ws.ws_quantity) AS web_quantity
-        FROM web_sales ws
-        JOIN items i
-            ON ws.ws_item_id = i.i_item_id
-        GROUP BY
-            i.i_category_id,
-            i.i_category_name
-    ),
-    reviews_agg AS (
-        SELECT
-            i.i_category_id,
-            i.i_category_name,
-            AVG(pr.pr_rating) AS avg_rating,
-            COUNT(pr.pr_review_id) AS review_count
-        FROM product_reviews pr
-        JOIN items i
-            ON pr.pr_item_id = i.i_item_id
-        GROUP BY
-            i.i_category_id,
-            i.i_category_name
-    )
-SELECT
-    ss.s_store_name,
-    ss.i_category_name,
-    ss.store_quantity,
-    COALESCE(ws.web_quantity, 0) AS web_quantity,
-    COALESCE(rv.avg_rating, 0) AS avg_rating,
-    COALESCE(rv.review_count, 0) AS review_count,
-    (ss.store_quantity + COALESCE(ws.web_quantity, 0)) AS total_quantity
-FROM store_sales_agg ss
-LEFT JOIN web_sales_agg ws
-    ON ss.i_category_id = ws.i_category_id
-LEFT JOIN reviews_agg rv
-    ON ss.i_category_id = rv.i_category_id
-ORDER BY total_quantity DESC
+WITH sales_detail AS (
+    SELECT ss.ss_item_id AS item_id,
+           ss.ss_quantity AS quantity,
+           ss.ss_customer_id AS customer_id
+    FROM store_sales ss
+    UNION ALL
+    SELECT ws.ws_item_id AS item_id,
+           ws.ws_quantity AS quantity,
+           ws.ws_customer_id AS customer_id
+    FROM web_sales ws
+),
+sales_agg AS (
+    SELECT item_id,
+           SUM(quantity) AS total_quantity
+    FROM sales_detail
+    GROUP BY item_id
+),
+category_customers AS (
+    SELECT i.i_category AS category,
+           COUNT(DISTINCT sd.customer_id) AS distinct_customers
+    FROM sales_detail sd
+    JOIN items i ON sd.item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+reviews_agg AS (
+    SELECT pr.pr_item_id AS item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
+)
+SELECT i.i_category,
+       SUM(COALESCE(s.total_quantity, 0)) AS total_quantity_sold,
+       AVG(i.i_price) AS avg_item_price,
+       COALESCE(SUM(r.review_count), 0) AS total_review_count,
+       AVG(r.avg_sentiment) AS avg_review_sentiment,
+       cc.distinct_customers
+FROM items i
+LEFT JOIN sales_agg s ON i.i_item_id = s.item_id
+LEFT JOIN reviews_agg r ON i.i_item_id = r.item_id
+LEFT JOIN category_customers cc ON i.i_category = cc.category
+GROUP BY i.i_category, cc.distinct_customers
+ORDER BY total_quantity_sold DESC
+LIMIT 10

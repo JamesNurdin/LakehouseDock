@@ -1,36 +1,43 @@
-WITH sales_agg AS (
+WITH unified_sales AS (
     SELECT
         i.i_item_id,
-        SUM(ss.ss_quantity) AS total_quantity,
-        SUM(i.i_price * ss.ss_quantity) AS total_revenue
+        i.i_category,
+        i.i_price,
+        ss.ss_quantity AS store_quantity,
+        NULL AS web_quantity,
+        c.c_customer_id
     FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    GROUP BY i.i_item_id
-),
-reviews_agg AS (
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
+    UNION ALL
     SELECT
         i.i_item_id,
-        AVG(pr.pr_rating) AS avg_rating,
+        i.i_category,
+        i.i_price,
+        NULL AS store_quantity,
+        ws.ws_quantity AS web_quantity,
+        c.c_customer_id
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
+),
+category_reviews AS (
+    SELECT
+        i.i_category,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
         COUNT(pr.pr_review_id) AS review_count
     FROM product_reviews pr
-    JOIN items i
-        ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_item_id
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
 SELECT
-    i.i_category_id,
-    i.i_category_name,
-    COUNT(DISTINCT i.i_item_id) AS num_items,
-    SUM(COALESCE(s.total_quantity, 0)) AS total_quantity_sold,
-    SUM(COALESCE(s.total_revenue, 0)) AS total_revenue,
-    AVG(r.avg_rating) AS avg_item_rating,
-    SUM(COALESCE(r.review_count, 0)) AS total_review_count
-FROM items i
-LEFT JOIN sales_agg s
-    ON i.i_item_id = s.i_item_id
-LEFT JOIN reviews_agg r
-    ON i.i_item_id = r.i_item_id
-GROUP BY i.i_category_id, i.i_category_name
+    us.i_category,
+    SUM(COALESCE(us.store_quantity, 0) + COALESCE(us.web_quantity, 0)) AS total_quantity,
+    SUM((COALESCE(us.store_quantity, 0) + COALESCE(us.web_quantity, 0)) * us.i_price) AS total_revenue,
+    COUNT(DISTINCT us.c_customer_id) AS distinct_customers,
+    cr.avg_sentiment,
+    cr.review_count
+FROM unified_sales us
+LEFT JOIN category_reviews cr ON cr.i_category = us.i_category
+GROUP BY us.i_category, cr.avg_sentiment, cr.review_count
 ORDER BY total_revenue DESC
-LIMIT 10

@@ -1,35 +1,38 @@
-WITH store_sales_agg AS (
-    SELECT ss_item_id,
-           SUM(ss_quantity) AS store_quantity
+WITH sales_union AS (
+    SELECT ss_item_id AS item_id,
+           ss_quantity AS quantity
     FROM store_sales
-    GROUP BY ss_item_id
-),
-web_sales_agg AS (
-    SELECT ws_item_id,
-           SUM(ws_quantity) AS web_quantity
+    UNION ALL
+    SELECT ws_item_id AS item_id,
+           ws_quantity AS quantity
     FROM web_sales
-    GROUP BY ws_item_id
 ),
-reviews_agg AS (
-    SELECT pr_item_id,
-           COUNT(*) AS review_count,
-           AVG(pr_rating) AS avg_rating
+item_sales AS (
+    SELECT s.item_id,
+           SUM(s.quantity) AS total_quantity,
+           COUNT(*) AS sales_transactions
+    FROM sales_union s
+    GROUP BY s.item_id
+),
+item_sentiment AS (
+    SELECT pr_item_id AS item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
     FROM product_reviews
     GROUP BY pr_item_id
 )
-SELECT
-    i.i_category_id,
-    i.i_category_name,
-    COUNT(DISTINCT i.i_item_id) AS item_count,
-    SUM(COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0)) AS total_quantity_sold,
-    AVG(i.i_price) AS avg_price,
-    SUM(COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0)) * AVG(i.i_price) AS revenue_estimate,
-    SUM(COALESCE(r.review_count, 0)) AS total_reviews,
-    AVG(r.avg_rating) AS avg_rating
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category,
+       i.i_price,
+       COALESCE(isales.total_quantity, 0) AS total_quantity_sold,
+       COALESCE(isales.sales_transactions, 0) AS total_sales_transactions,
+       isent.avg_sentiment,
+       COALESCE(isent.review_count, 0) AS review_count
 FROM items i
-LEFT JOIN store_sales_agg ss ON ss.ss_item_id = i.i_item_id
-LEFT JOIN web_sales_agg ws ON ws.ws_item_id = i.i_item_id
-LEFT JOIN reviews_agg r ON r.pr_item_id = i.i_item_id
-GROUP BY i.i_category_id, i.i_category_name
-ORDER BY SUM(COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0)) DESC
-LIMIT 10
+LEFT JOIN item_sales isales
+    ON i.i_item_id = isales.item_id
+LEFT JOIN item_sentiment isent
+    ON i.i_item_id = isent.item_id
+ORDER BY total_quantity_sold DESC
+LIMIT 100

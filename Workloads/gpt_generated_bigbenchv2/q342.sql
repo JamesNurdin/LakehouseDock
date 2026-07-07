@@ -1,29 +1,38 @@
-WITH item_reviews AS (
-    SELECT
-        pr.pr_item_id AS item_id,
-        AVG(pr.pr_rating) AS avg_rating
-    FROM product_reviews pr
-    GROUP BY pr.pr_item_id
-),
-store_sales_agg AS (
-    SELECT
-        ss.ss_store_id AS store_id,
-        SUM(ss.ss_quantity) AS total_quantity,
-        SUM(ss.ss_quantity * i.i_price) AS total_revenue,
-        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers,
-        SUM(ss.ss_quantity * COALESCE(ir.avg_rating, 0)) / NULLIF(SUM(ss.ss_quantity), 0) AS weighted_avg_rating
+WITH item_sales AS (
+    SELECT i.i_item_id,
+           i.i_category_id,
+           i.i_category,
+           i.i_price,
+           SUM(ss.ss_quantity) AS store_qty,
+           SUM(ss.ss_quantity * i.i_price) AS store_revenue
     FROM store_sales ss
     JOIN items i ON ss.ss_item_id = i.i_item_id
-    LEFT JOIN item_reviews ir ON i.i_item_id = ir.item_id
-    GROUP BY ss.ss_store_id
+    GROUP BY i.i_item_id, i.i_category_id, i.i_category, i.i_price
+),
+web_item_sales AS (
+    SELECT i.i_item_id,
+           SUM(ws.ws_quantity) AS web_qty,
+           SUM(ws.ws_quantity * i.i_price) AS web_revenue
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_item_id
+),
+item_reviews AS (
+    SELECT i.i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id
 )
-SELECT
-    s.s_store_name,
-    sa.total_quantity,
-    sa.total_revenue,
-    sa.distinct_customers,
-    sa.weighted_avg_rating
-FROM store_sales_agg sa
-JOIN stores s ON sa.store_id = s.s_store_id
-ORDER BY sa.total_revenue DESC
+SELECT i.i_category_id,
+       i.i_category,
+       SUM(COALESCE(s.store_qty, 0) + COALESCE(w.web_qty, 0)) AS total_quantity,
+       SUM(COALESCE(s.store_revenue, 0) + COALESCE(w.web_revenue, 0)) AS total_revenue,
+       AVG(r.avg_sentiment) AS avg_sentiment
+FROM items i
+LEFT JOIN item_sales s ON i.i_item_id = s.i_item_id
+LEFT JOIN web_item_sales w ON i.i_item_id = w.i_item_id
+LEFT JOIN item_reviews r ON i.i_item_id = r.i_item_id
+GROUP BY i.i_category_id, i.i_category
+ORDER BY total_revenue DESC
 LIMIT 10

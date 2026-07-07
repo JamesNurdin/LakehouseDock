@@ -1,50 +1,36 @@
-WITH sales_joined AS (
+WITH store_agg AS (
     SELECT
-        ws.ws_quantity,
-        CAST(ws.ws_ts AS timestamp) AS ws_timestamp,
-        c.c_customer_id,
-        c.c_name,
-        i.i_item_id,
         i.i_category_id,
-        i.i_category_name,
-        i.i_price,
-        (ws.ws_quantity * i.i_price) AS revenue
-    FROM web_sales ws
-    JOIN customers c
-        ON ws.ws_customer_id = c.c_customer_id
-    JOIN items i
-        ON ws.ws_item_id = i.i_item_id
-    WHERE ws.ws_quantity > 0
-      AND i.i_price > 0
-      AND CAST(ws.ws_ts AS timestamp) >= TIMESTAMP '2022-01-01'
+        i.i_category,
+        SUM(ss.ss_quantity) AS store_quantity,
+        SUM(ss.ss_quantity * i.i_price) AS store_revenue
+    FROM store_sales ss
+    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 ),
-aggregated_sales AS (
+web_agg AS (
     SELECT
-        c_customer_id,
-        c_name,
-        i_category_id,
-        i_category_name,
-        SUM(ws_quantity) AS total_quantity,
-        SUM(revenue) AS total_revenue,
-        AVG(i_price) AS avg_item_price,
-        COUNT(DISTINCT i_item_id) AS distinct_items
-    FROM sales_joined
-    GROUP BY
-        c_customer_id,
-        c_name,
-        i_category_id,
-        i_category_name
+        i.i_category_id,
+        i.i_category,
+        SUM(ws.ws_quantity) AS web_quantity,
+        SUM(ws.ws_quantity * i.i_price) AS web_revenue
+    FROM web_sales ws
+    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
 SELECT
-    c_customer_id,
-    c_name,
-    i_category_id,
-    i_category_name,
-    total_quantity,
-    total_revenue,
-    avg_item_price,
-    distinct_items,
-    RANK() OVER (PARTITION BY c_customer_id ORDER BY total_revenue DESC) AS category_revenue_rank
-FROM aggregated_sales
+    COALESCE(s.i_category_id, w.i_category_id) AS category_id,
+    COALESCE(s.i_category, w.i_category) AS category,
+    s.store_quantity,
+    s.store_revenue,
+    w.web_quantity,
+    w.web_revenue,
+    (COALESCE(s.store_quantity, 0) + COALESCE(w.web_quantity, 0)) AS total_quantity,
+    (COALESCE(s.store_revenue, 0) + COALESCE(w.web_revenue, 0)) AS total_revenue
+FROM store_agg s
+FULL OUTER JOIN web_agg w
+    ON s.i_category_id = w.i_category_id
 ORDER BY total_revenue DESC
-LIMIT 100
+LIMIT 10

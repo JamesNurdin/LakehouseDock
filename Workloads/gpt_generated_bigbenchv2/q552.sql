@@ -1,25 +1,15 @@
-WITH parsed_logs AS (
-  SELECT
-    line,
-    regexp_extract(line, '^([^ ]+)', 1) AS ip,
-    regexp_extract(line, '\\[(.*?)\\]', 1) AS datetime_str,
-    regexp_extract(line, '"([^ ]+) ([^ ]+) ([^"]+)"', 1) AS request_method,
-    regexp_extract(line, '"([^ ]+) ([^ ]+) ([^"]+)"', 2) AS request_path,
-    regexp_extract(line, '"([^ ]+) ([^ ]+) ([^"]+)"', 3) AS http_version,
-    regexp_extract(line, '"[^\"]+" (\\d{3})', 1) AS status_code
-  FROM web_logs
-)
 SELECT
-  request_method,
-  status_code,
-  COUNT(*) AS request_cnt,
-  COUNT(DISTINCT ip) AS unique_ip_cnt,
-  AVG(length(line)) AS avg_line_len,
-  MIN(datetime_str) AS earliest_log,
-  MAX(datetime_str) AS latest_log
-FROM parsed_logs
-WHERE request_method IS NOT NULL
-  AND status_code IS NOT NULL
-GROUP BY request_method, status_code
-ORDER BY request_cnt DESC
-LIMIT 20
+    c.c_customer_id,
+    c.c_name,
+    COUNT(DISTINCT ss.ss_transaction_id) AS transaction_count,
+    SUM(ss.ss_quantity) AS total_quantity,
+    COUNT(DISTINCT ss.ss_item_id) AS distinct_items,
+    MIN(ss.ss_ts) AS first_transaction_ts,
+    MAX(ss.ss_ts) AS last_transaction_ts
+FROM store_sales ss
+JOIN customers c
+    ON ss.ss_customer_id = c.c_customer_id
+GROUP BY c.c_customer_id, c.c_name
+HAVING SUM(ss.ss_quantity) > 10
+ORDER BY total_quantity DESC
+LIMIT 100

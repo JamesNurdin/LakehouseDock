@@ -1,31 +1,40 @@
-WITH page_lengths AS (
+WITH store_totals AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
-    WHERE w_web_page_type IS NOT NULL
+        c.c_customer_id,
+        c.c_name,
+        SUM(ss.ss_quantity * i.i_price) AS store_sales_amount
+    FROM store_sales ss
+    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY c.c_customer_id, c.c_name
 ),
-ranked_pages AS (
+web_totals AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        name_len,
-        row_number() OVER (PARTITION BY w_web_page_type ORDER BY name_len DESC) AS rn
-    FROM page_lengths
+        c.c_customer_id,
+        c.c_name,
+        SUM(ws.ws_quantity * i.i_price) AS web_sales_amount
+    FROM web_sales ws
+    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY c.c_customer_id, c.c_name
+),
+combined AS (
+    SELECT
+        COALESCE(s.c_customer_id, w.c_customer_id) AS c_customer_id,
+        COALESCE(s.c_name, w.c_name) AS c_name,
+        COALESCE(s.store_sales_amount, 0) AS store_sales_amount,
+        COALESCE(w.web_sales_amount, 0) AS web_sales_amount,
+        COALESCE(s.store_sales_amount, 0) + COALESCE(w.web_sales_amount, 0) AS total_sales_amount
+    FROM store_totals s
+    FULL OUTER JOIN web_totals w
+        ON s.c_customer_id = w.c_customer_id
 )
 SELECT
-    w_web_page_type,
-    COUNT(*) AS total_pages,
-    MIN(name_len) AS min_name_len,
-    MAX(name_len) AS max_name_len,
-    AVG(name_len) AS avg_name_len,
-    array_agg(
-        row(w_web_page_id, w_web_page_name, name_len)
-        ORDER BY rn
-    ) FILTER (WHERE rn <= 3) AS top_3_longest_pages
-FROM ranked_pages
-GROUP BY w_web_page_type
-ORDER BY total_pages DESC
+    c_customer_id,
+    c_name,
+    store_sales_amount,
+    web_sales_amount,
+    total_sales_amount
+FROM combined
+ORDER BY total_sales_amount DESC
+LIMIT 5

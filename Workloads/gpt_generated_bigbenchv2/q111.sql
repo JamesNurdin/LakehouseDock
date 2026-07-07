@@ -1,27 +1,27 @@
-WITH parsed_logs AS (
-    SELECT
-        line,
-        regexp_extract(line, '^([A-Z]+)', 1) AS method,
-        regexp_extract(line, '"\s(\d{3})\s', 1) AS status_code,
-        length(line) AS line_length
-    FROM web_logs
+WITH sales_union AS (
+    SELECT ss_item_id AS item_id, ss_quantity AS qty
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id, ws_quantity AS qty
+    FROM web_sales
 ),
-aggregated AS (
-    SELECT
-        method,
-        status_code,
-        COUNT(*) AS log_count,
-        AVG(line_length) AS avg_line_length
-    FROM parsed_logs
-    WHERE method IS NOT NULL
-    GROUP BY method, status_code
+review_agg AS (
+    SELECT pr_item_id AS item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    method,
-    status_code,
-    log_count,
-    avg_line_length,
-    SUM(log_count) OVER (ORDER BY log_count DESC) AS cumulative_log_count
-FROM aggregated
-ORDER BY log_count DESC
-LIMIT 100
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category,
+       i.i_price,
+       SUM(su.qty) AS total_quantity,
+       COALESCE(ra.avg_sentiment, 0) AS avg_sentiment,
+       COALESCE(ra.review_count, 0) AS review_count
+FROM sales_union su
+JOIN items i ON su.item_id = i.i_item_id
+LEFT JOIN review_agg ra ON i.i_item_id = ra.item_id
+GROUP BY i.i_item_id, i.i_name, i.i_category, i.i_price, ra.avg_sentiment, ra.review_count
+ORDER BY total_quantity DESC
+LIMIT 10

@@ -1,41 +1,49 @@
-WITH parsed_logs AS (
+WITH store_sales_agg AS (
     SELECT
-        line,
-        regexp_extract(line, '^([^ ]+)', 1) AS ip_address,
-        regexp_extract(line, '\\] "(\\w+) ([^ ]+) HTTP/[^\"]+" (\\d{3})', 1) AS http_method,
-        regexp_extract(line, '\\] "(\\w+) ([^ ]+) HTTP/[^\"]+" (\\d{3})', 2) AS url,
-        regexp_extract(line, '\\] "(\\w+) ([^ ]+) HTTP/[^\"]+" (\\d{3})', 3) AS status_code,
-        length(line) AS line_length
-    FROM web_logs
+        ss_item_id,
+        SUM(ss_quantity) AS store_quantity,
+        COUNT(*) AS store_transactions
+    FROM store_sales
+    GROUP BY ss_item_id
 ),
-method_url_counts AS (
+web_sales_agg AS (
     SELECT
-        http_method,
-        url,
-        status_code,
-        count(*) AS request_count,
-        avg(line_length) AS avg_line_len
-    FROM parsed_logs
-    WHERE http_method IS NOT NULL
-      AND status_code = '200'
-    GROUP BY http_method, url, status_code
+        ws_item_id,
+        SUM(ws_quantity) AS web_quantity,
+        COUNT(*) AS web_transactions
+    FROM web_sales
+    GROUP BY ws_item_id
 ),
-ranked_urls AS (
+item_sales AS (
     SELECT
-        http_method,
-        url,
-        status_code,
-        request_count,
-        avg_line_len,
-        row_number() OVER (PARTITION BY http_method ORDER BY request_count DESC) AS url_rank
-    FROM method_url_counts
+        i.i_item_id,
+        i.i_name,
+        i.i_category,
+        i.i_price,
+        COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0) AS total_quantity,
+        (COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0)) * i.i_price AS total_revenue
+    FROM items i
+    LEFT JOIN store_sales_agg ss ON ss.ss_item_id = i.i_item_id
+    LEFT JOIN web_sales_agg ws ON ws.ws_item_id = i.i_item_id
+    WHERE i.i_category = 'Electronics'
+),
+item_reviews AS (
+    SELECT
+        pr.pr_item_id,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(*) AS review_count
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
 )
 SELECT
-    http_method,
-    url,
-    status_code,
-    request_count,
-    avg_line_len
-FROM ranked_urls
-WHERE url_rank <= 5
-ORDER BY http_method, request_count DESC
+    isales.i_item_id,
+    isales.i_name,
+    isales.i_category,
+    isales.total_quantity,
+    isales.total_revenue,
+    COALESCE(reviews.avg_sentiment, 0) AS avg_sentiment,
+    COALESCE(reviews.review_count, 0) AS review_count
+FROM item_sales isales
+LEFT JOIN item_reviews reviews ON reviews.pr_item_id = isales.i_item_id
+ORDER BY isales.total_revenue DESC
+LIMIT 10

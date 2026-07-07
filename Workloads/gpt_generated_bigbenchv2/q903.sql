@@ -1,29 +1,34 @@
-WITH customer_sales AS (
+WITH store_item_sales AS (
     SELECT
-        c.c_customer_id,
-        c.c_name,
-        SUM(s.ss_quantity) AS total_quantity,
-        COUNT(DISTINCT s.ss_item_id) AS distinct_items,
-        COUNT(DISTINCT s.ss_transaction_id) AS transaction_count,
-        AVG(s.ss_quantity) AS avg_quantity_per_transaction,
-        MIN(s.ss_ts) AS first_transaction_ts,
-        MAX(s.ss_ts) AS last_transaction_ts
-    FROM store_sales s
-    JOIN customers c
-        ON s.ss_customer_id = c.c_customer_id
-    WHERE s.ss_store_id = 1
-    GROUP BY c.c_customer_id, c.c_name
+        s.s_store_id,
+        s.s_store_name,
+        i.i_category_id,
+        i.i_category,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_quantity * i.i_price) AS total_revenue
+    FROM store_sales ss
+    JOIN stores s ON ss.ss_store_id = s.s_store_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY s.s_store_id, s.s_store_name, i.i_category_id, i.i_category
+),
+item_review_sentiment AS (
+    SELECT
+        i.i_category_id,
+        i.i_category,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
 SELECT
-    cs.c_customer_id,
-    cs.c_name,
-    cs.total_quantity,
-    cs.distinct_items,
-    cs.transaction_count,
-    cs.avg_quantity_per_transaction,
-    cs.first_transaction_ts,
-    cs.last_transaction_ts,
-    RANK() OVER (ORDER BY cs.total_quantity DESC) AS quantity_rank
-FROM customer_sales cs
-ORDER BY cs.total_quantity DESC
-LIMIT 10
+    sis.s_store_name,
+    sis.i_category,
+    sis.total_quantity,
+    sis.total_revenue,
+    irs.avg_sentiment,
+    irs.review_count
+FROM store_item_sales sis
+LEFT JOIN item_review_sentiment irs
+    ON sis.i_category_id = irs.i_category_id
+ORDER BY sis.s_store_name, sis.i_category

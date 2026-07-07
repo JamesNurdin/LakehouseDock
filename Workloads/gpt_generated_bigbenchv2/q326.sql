@@ -1,28 +1,34 @@
-WITH all_sales AS (
-    SELECT ss_transaction_id AS transaction_id,
-           ss_customer_id   AS customer_id,
-           ss_item_id       AS item_id,
-           ss_quantity      AS quantity,
-           'store'          AS channel
-    FROM store_sales
-    UNION ALL
-    SELECT ws_transaction_id AS transaction_id,
-           ws_customer_id   AS customer_id,
-           ws_item_id       AS item_id,
-           ws_quantity      AS quantity,
-           'web'            AS channel
-    FROM web_sales
+WITH store_agg AS (
+  SELECT i.i_item_id,
+         i.i_name,
+         i.i_category,
+         SUM(ss.ss_quantity) AS store_quantity,
+         SUM(ss.ss_quantity * i.i_price) AS store_revenue
+  FROM store_sales ss
+  JOIN items i ON ss.ss_item_id = i.i_item_id
+  GROUP BY i.i_item_id, i.i_name, i.i_category
+),
+web_agg AS (
+  SELECT i.i_item_id,
+         i.i_name,
+         i.i_category,
+         SUM(ws.ws_quantity) AS web_quantity,
+         SUM(ws.ws_quantity * i.i_price) AS web_revenue
+  FROM web_sales ws
+  JOIN items i ON ws.ws_item_id = i.i_item_id
+  GROUP BY i.i_item_id, i.i_name, i.i_category
 )
-SELECT c.c_customer_id,
-       i.i_category_name,
-       s.channel,
-       SUM(s.quantity)                         AS total_quantity,
-       SUM(s.quantity * i.i_price)             AS total_revenue,
-       AVG(i.i_price)                          AS avg_item_price,
-       COUNT(DISTINCT s.transaction_id)        AS distinct_transactions
-FROM all_sales s
-JOIN customers c ON s.customer_id = c.c_customer_id
-JOIN items i     ON s.item_id    = i.i_item_id
-GROUP BY c.c_customer_id, i.i_category_name, s.channel
+SELECT COALESCE(s.i_item_id, w.i_item_id) AS item_id,
+       COALESCE(s.i_name, w.i_name) AS item_name,
+       COALESCE(s.i_category, w.i_category) AS category,
+       COALESCE(s.store_quantity, 0) AS store_quantity,
+       COALESCE(s.store_revenue, 0) AS store_revenue,
+       COALESCE(w.web_quantity, 0) AS web_quantity,
+       COALESCE(w.web_revenue, 0) AS web_revenue,
+       COALESCE(s.store_quantity, 0) + COALESCE(w.web_quantity, 0) AS total_quantity,
+       COALESCE(s.store_revenue, 0) + COALESCE(w.web_revenue, 0) AS total_revenue
+FROM store_agg s
+FULL OUTER JOIN web_agg w
+  ON s.i_item_id = w.i_item_id
 ORDER BY total_revenue DESC
 LIMIT 10

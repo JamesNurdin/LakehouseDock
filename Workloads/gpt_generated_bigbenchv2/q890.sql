@@ -1,20 +1,22 @@
-WITH type_stats AS (
+WITH sales_agg AS (
     SELECT
-        w_web_page_type,
-        COUNT(*) AS page_count,
-        AVG(length(w_web_page_name)) AS avg_name_len,
-        MIN(length(w_web_page_name)) AS min_name_len,
-        MAX(length(w_web_page_name)) AS max_name_len
-    FROM web_pages
-    WHERE w_web_page_type IS NOT NULL
-    GROUP BY w_web_page_type
+        s.s_store_name,
+        i.i_category,
+        SUM(ss.ss_quantity * i.i_price) AS total_sales_amount,
+        SUM(ss.ss_quantity) AS total_quantity,
+        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers
+    FROM store_sales ss
+    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    JOIN stores s ON ss.ss_store_id = s.s_store_id
+    GROUP BY s.s_store_name, i.i_category
 )
 SELECT
-    w_web_page_type,
-    page_count,
-    avg_name_len,
-    min_name_len,
-    max_name_len,
-    RANK() OVER (ORDER BY page_count DESC) AS type_rank_by_pages
-FROM type_stats
-ORDER BY page_count DESC
+    s_store_name,
+    i_category,
+    total_sales_amount,
+    total_quantity,
+    distinct_customers
+FROM sales_agg
+ORDER BY total_sales_amount DESC
+LIMIT 10

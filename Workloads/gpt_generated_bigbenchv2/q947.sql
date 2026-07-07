@@ -1,49 +1,54 @@
-WITH combined_sales AS (
-    -- Combine in‑store and online sales, preserving the store identifier for in‑store rows
+WITH store_qty AS (
     SELECT ss_item_id AS item_id,
-           ss_store_id AS store_id,
-           ss_quantity AS quantity
+           SUM(ss_quantity) AS store_qty
     FROM store_sales
-    UNION ALL
+    GROUP BY ss_item_id
+),
+web_qty AS (
     SELECT ws_item_id AS item_id,
-           NULL AS store_id,
-           ws_quantity AS quantity
+           SUM(ws_quantity) AS web_qty
     FROM web_sales
+    GROUP BY ws_item_id
 ),
-sales_by_item AS (
-    -- Aggregate quantity per item (and per store when applicable)
-    SELECT cs.item_id,
-           cs.store_id,
-           SUM(cs.quantity) AS total_quantity
-    FROM combined_sales cs
-    GROUP BY cs.item_id, cs.store_id
+item_sales AS (
+    SELECT COALESCE(s.item_id, w.item_id) AS item_id,
+           COALESCE(s.store_qty, 0) AS store_qty,
+           COALESCE(w.web_qty, 0) AS web_qty,
+           COALESCE(s.store_qty, 0) + COALESCE(w.web_qty, 0) AS total_qty
+    FROM store_qty s
+    FULL OUTER JOIN web_qty w
+        ON s.item_id = w.item_id
 ),
-item_reviews AS (
-    -- Compute average rating and review count per item
-    SELECT pr_item_id,
-           AVG(pr_rating) AS avg_rating,
+item_sentiment AS (
+    SELECT pr_item_id AS item_id,
+           SUM(pr_sentiment) AS sum_sentiment,
            COUNT(*) AS review_count
     FROM product_reviews
     GROUP BY pr_item_id
+),
+item_aggregated AS (
+    SELECT i.i_item_id AS item_id,
+           i.i_category AS category,
+           i.i_name AS item_name,
+           COALESCE(s.total_qty, 0) AS total_qty,
+           COALESCE(r.sum_sentiment, 0) AS sum_sentiment,
+           COALESCE(r.review_count, 0) AS review_count
+    FROM items i
+    LEFT JOIN item_sales s
+        ON i.i_item_id = s.item_id
+    LEFT JOIN item_sentiment r
+        ON i.i_item_id = r.item_id
 )
 SELECT
-    COALESCE(s.s_store_id, -1) AS store_id,
-    COALESCE(s.s_store_name, 'Online') AS store_name,
-    i.i_category_id,
-    i.i_category_name,
-    COUNT(DISTINCT i.i_item_id) AS distinct_items,
-    SUM(COALESCE(sbi.total_quantity, 0)) AS total_quantity_sold,
-    SUM(COALESCE(sbi.total_quantity, 0) * i.i_price) AS total_revenue,
-    AVG(COALESCE(ir.avg_rating, 0)) AS avg_item_rating,
-    SUM(COALESCE(ir.review_count, 0)) AS total_reviews
-FROM sales_by_item sbi
-JOIN items i ON i.i_item_id = sbi.item_id
-LEFT JOIN stores s ON s.s_store_id = sbi.store_id
-LEFT JOIN item_reviews ir ON ir.pr_item_id = i.i_item_id
-GROUP BY
-    COALESCE(s.s_store_id, -1),
-    COALESCE(s.s_store_name, 'Online'),
-    i.i_category_id,
-    i.i_category_name
+    ia.category,
+    SUM(ia.total_qty) AS total_quantity_sold,
+    SUM(ia.sum_sentiment) AS total_sentiment,
+    SUM(ia.review_count) AS total_reviews,
+    CASE
+        WHEN SUM(ia.review_count) > 0 THEN CAST(SUM(ia.sum_sentiment) AS double) / SUM(ia.review_count)
+        ELSE NULL
+    END AS avg_sentiment
+FROM item_aggregated ia
+GROUP BY ia.category
 ORDER BY total_quantity_sold DESC
-LIMIT 20
+LIMIT 10

@@ -1,43 +1,34 @@
-WITH revenue_by_category AS (
-    SELECT
-        ss.ss_store_id,
-        i.i_category_name,
-        SUM(i.i_price * ss.ss_quantity) AS category_revenue,
-        SUM(ss.ss_quantity) AS category_units,
-        AVG(i.i_price) AS avg_price,
-        AVG(i.i_comp_price - i.i_price) AS avg_discount,
-        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers
-    FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    JOIN customers c
-        ON ss.ss_customer_id = c.c_customer_id
-    WHERE i.i_price > 0
-    GROUP BY ss.ss_store_id, i.i_category_name
+WITH sales_union AS (
+    SELECT ss_item_id AS item_id, ss_quantity AS quantity
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id, ws_quantity AS quantity
+    FROM web_sales
 ),
-ranked_categories AS (
-    SELECT
-        r.ss_store_id,
-        r.i_category_name,
-        r.category_revenue,
-        r.category_units,
-        r.avg_price,
-        r.avg_discount,
-        r.distinct_customers,
-        ROW_NUMBER() OVER (PARTITION BY r.ss_store_id ORDER BY r.category_revenue DESC) AS category_rank
-    FROM revenue_by_category r
+sales_by_category AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           SUM(su.quantity) AS total_quantity
+    FROM sales_union su
+    JOIN items i
+      ON su.item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+review_by_category AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i
+      ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
-SELECT
-    s.s_store_name,
-    rc.i_category_name,
-    rc.category_revenue,
-    rc.category_units,
-    rc.avg_price,
-    rc.avg_discount,
-    rc.distinct_customers,
-    rc.category_rank
-FROM ranked_categories rc
-JOIN stores s
-    ON rc.ss_store_id = s.s_store_id
-WHERE rc.category_rank <= 3
-ORDER BY s.s_store_name, rc.category_rank
+SELECT sbc.i_category_id,
+       sbc.i_category,
+       sbc.total_quantity,
+       rbc.avg_sentiment
+FROM sales_by_category sbc
+LEFT JOIN review_by_category rbc
+  ON sbc.i_category_id = rbc.i_category_id
+ AND sbc.i_category = rbc.i_category
+ORDER BY sbc.total_quantity DESC

@@ -1,22 +1,26 @@
-WITH parsed_logs AS (
+WITH all_sales AS (
     SELECT
-        line,
-        length(line) AS line_length,
-        CASE
-            WHEN line LIKE '%error%' THEN 'error'
-            WHEN line LIKE '%warning%' THEN 'warning'
-            ELSE 'other'
-        END AS log_type
-    FROM web_logs
+        c.c_customer_id,
+        c.c_name,
+        ss.ss_quantity AS quantity,
+        ss.ss_transaction_id AS transaction_id
+    FROM customers c
+    JOIN store_sales ss ON ss.ss_customer_id = c.c_customer_id
+    UNION ALL
+    SELECT
+        c.c_customer_id,
+        c.c_name,
+        ws.ws_quantity AS quantity,
+        ws.ws_transaction_id AS transaction_id
+    FROM customers c
+    JOIN web_sales ws ON ws.ws_customer_id = c.c_customer_id
 )
 SELECT
-    log_type,
-    COUNT(*) AS log_count,
-    AVG(line_length) AS avg_line_length,
-    MIN(line_length) AS min_line_length,
-    MAX(line_length) AS max_line_length,
-    MIN(line) AS sample_line
-FROM parsed_logs
-GROUP BY log_type
-ORDER BY log_count DESC
-LIMIT 10
+    c_customer_id,
+    c_name,
+    SUM(quantity) AS total_quantity,
+    COUNT(transaction_id) AS total_transactions
+FROM all_sales
+GROUP BY c_customer_id, c_name
+ORDER BY total_quantity DESC
+LIMIT 100

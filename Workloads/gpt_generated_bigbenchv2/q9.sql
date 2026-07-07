@@ -1,18 +1,23 @@
-WITH page_lengths AS (
+WITH sales AS (
     SELECT
-        w_web_page_type,
-        w_web_page_id,
-        LENGTH(w_web_page_name) AS name_len
-    FROM web_pages
+        ws.ws_customer_id,
+        ws.ws_item_id,
+        ws.ws_quantity,
+        i.i_price,
+        i.i_category,
+        i.i_category_id
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
 )
 SELECT
-    w_web_page_type,
-    COUNT(*) AS page_count,
-    COUNT(DISTINCT w_web_page_id) AS distinct_page_ids,
-    MAX(w_web_page_id) AS max_page_id,
-    MIN(w_web_page_id) AS min_page_id,
-    AVG(name_len) AS avg_name_length,
-    APPROX_PERCENTILE(name_len, 0.5) AS median_name_length
-FROM page_lengths
-GROUP BY w_web_page_type
-ORDER BY page_count DESC
+    c.c_customer_id,
+    c.c_name,
+    s.i_category,
+    SUM(s.ws_quantity) AS total_quantity,
+    SUM(s.ws_quantity * s.i_price) AS total_revenue,
+    AVG(s.i_price) AS avg_item_price
+FROM sales s
+JOIN customers c ON s.ws_customer_id = c.c_customer_id
+GROUP BY c.c_customer_id, c.c_name, s.i_category
+ORDER BY total_revenue DESC
+LIMIT 10

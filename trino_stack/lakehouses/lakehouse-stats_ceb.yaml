@@ -11,27 +11,24 @@ trino:
     image: 2570809n/trino-node-exporter:latest
   worker:
     resources:
-      cpu: "4"
-      memory: "64Gi"
+      cpu: "2"
+      memory: "16Gi"
     replicasPerNode: 1
-    count: 4
+    count: 1
     nodes:
-      - "os-gpu-01"
-      - "os-gpu-05"
-      - "idagpu-21"
-      - "idagpu-18"
+      - 
   coord:
     resources:
-      cpu: "4"
-      memory: "64Gi"
-    nodeName: "idagpu-17"  # or "" for random
+      cpu: "2"
+      memory: "16Gi"
+    nodeName: ""  # or "" for random
 
 test:
   pod:
     image: macavaney/idabox:py310-v93
 
 metastore:
-  nodeName: "os-gpu-08"  # or "" for random 
+  nodeName: ""  # or "" for random 
   hive:
     pod:
       image: bde2020/hive:latest
@@ -41,7 +38,7 @@ metastore:
     
 pvc:
   iceberg:
-    name: iceberg-pvc
+    name: iceberg-stats-ceb-1tb
     path: /mnt/iceberg
 
 results:

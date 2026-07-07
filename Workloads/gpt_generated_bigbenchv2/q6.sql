@@ -1,30 +1,22 @@
-/*
-  Find the three longest‑named pages within each page type.
-  The query first computes the length of each page name, then ranks pages
-  by that length within their type, and finally returns the top three per type.
-*/
-WITH page_lengths AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        LENGTH(w_web_page_name) AS name_len
-    FROM web_pages
-),
-ranked_pages AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        name_len,
-        ROW_NUMBER() OVER (PARTITION BY w_web_page_type ORDER BY name_len DESC) AS rn
-    FROM page_lengths
+WITH item_sentiment AS (
+    SELECT i.i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i
+      ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id
 )
-SELECT
-    w_web_page_type,
-    w_web_page_id,
-    w_web_page_name,
-    name_len
-FROM ranked_pages
-WHERE rn <= 3
-ORDER BY w_web_page_type, rn
+SELECT s.s_store_id,
+       s.s_store_name,
+       SUM(ss.ss_quantity * i.i_price) AS total_revenue,
+       AVG(COALESCE(its.avg_sentiment, 0)) AS avg_item_sentiment
+FROM store_sales ss
+JOIN stores s
+  ON ss.ss_store_id = s.s_store_id
+JOIN items i
+  ON ss.ss_item_id = i.i_item_id
+LEFT JOIN item_sentiment its
+  ON i.i_item_id = its.i_item_id
+GROUP BY s.s_store_id, s.s_store_name
+ORDER BY total_revenue DESC
+LIMIT 10

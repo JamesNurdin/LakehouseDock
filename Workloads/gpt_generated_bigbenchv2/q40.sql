@@ -1,37 +1,34 @@
-WITH sales_with_customer AS (
-    SELECT
-        ss.ss_customer_id,
-        c.c_name,
-        ss.ss_quantity,
-        ss.ss_store_id,
-        ss.ss_ts
-    FROM store_sales ss
-    JOIN customers c
-        ON ss.ss_customer_id = c.c_customer_id
+WITH item_sales AS (
+    SELECT ss_item_id AS item_id,
+           SUM(ss_quantity) AS store_quantity
+    FROM store_sales
+    GROUP BY ss_item_id
 ),
-monthly_customer_sales AS (
-    SELECT
-        swc.ss_customer_id,
-        swc.c_name,
-        DATE_TRUNC('month', CAST(swc.ss_ts AS timestamp)) AS month,
-        SUM(swc.ss_quantity) AS total_quantity,
-        COUNT(DISTINCT swc.ss_store_id) AS distinct_stores,
-        AVG(swc.ss_quantity) AS avg_quantity_per_line
-    FROM sales_with_customer swc
-    GROUP BY
-        swc.ss_customer_id,
-        swc.c_name,
-        DATE_TRUNC('month', CAST(swc.ss_ts AS timestamp))
+web_item_sales AS (
+    SELECT ws_item_id AS item_id,
+           SUM(ws_quantity) AS web_quantity
+    FROM web_sales
+    GROUP BY ws_item_id
+),
+item_total_sales AS (
+    SELECT COALESCE(s.item_id, w.item_id) AS item_id,
+           COALESCE(s.store_quantity, 0) + COALESCE(w.web_quantity, 0) AS total_quantity
+    FROM item_sales s
+    FULL OUTER JOIN web_item_sales w ON s.item_id = w.item_id
+),
+item_sentiment AS (
+    SELECT pr_item_id AS item_id,
+           AVG(pr_sentiment) AS avg_sentiment
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    mcs.ss_customer_id,
-    mcs.c_name,
-    mcs.month,
-    mcs.total_quantity,
-    mcs.distinct_stores,
-    mcs.avg_quantity_per_line,
-    RANK() OVER (PARTITION BY mcs.month ORDER BY mcs.total_quantity DESC) AS monthly_quantity_rank
-FROM monthly_customer_sales mcs
-WHERE mcs.total_quantity > 0
-ORDER BY mcs.month DESC, monthly_quantity_rank
-LIMIT 20
+SELECT i.i_category,
+       SUM(ts.total_quantity) AS total_quantity_sold,
+       AVG(isent.avg_sentiment) AS avg_item_sentiment,
+       COUNT(DISTINCT i.i_item_id) AS distinct_items_sold
+FROM item_total_sales ts
+JOIN items i ON ts.item_id = i.i_item_id
+LEFT JOIN item_sentiment isent ON i.i_item_id = isent.item_id
+GROUP BY i.i_category
+ORDER BY total_quantity_sold DESC
+LIMIT 10

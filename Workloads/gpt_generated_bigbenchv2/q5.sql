@@ -1,21 +1,37 @@
-WITH type_stats AS (
-    SELECT
-        w_web_page_type,
-        COUNT(*) AS page_count,
-        AVG(LENGTH(w_web_page_name)) AS avg_name_len,
-        approx_percentile(LENGTH(w_web_page_name), 0.5) AS median_name_len,
-        MIN(w_web_page_id) AS min_page_id,
-        MAX(w_web_page_id) AS max_page_id
-    FROM web_pages
-    GROUP BY w_web_page_type
+WITH unified_sales AS (
+    SELECT ss_transaction_id AS transaction_id,
+           ss_customer_id AS customer_id,
+           ss_item_id AS item_id,
+           ss_quantity AS quantity,
+           ss_ts AS ts,
+           'store' AS channel
+    FROM store_sales
+    UNION ALL
+    SELECT ws_transaction_id AS transaction_id,
+           ws_customer_id AS customer_id,
+           ws_item_id AS item_id,
+           ws_quantity AS quantity,
+           ws_ts AS ts,
+           'web' AS channel
+    FROM web_sales
 )
 SELECT
-    w_web_page_type,
-    page_count,
-    avg_name_len,
-    median_name_len,
-    min_page_id,
-    max_page_id,
-    ROW_NUMBER() OVER (ORDER BY page_count DESC) AS type_rank
-FROM type_stats
-ORDER BY page_count DESC
+    c.c_customer_id,
+    c.c_name,
+    i.i_category_id,
+    i.i_category,
+    SUM(us.quantity) AS total_quantity,
+    SUM(us.quantity * i.i_price) AS total_revenue,
+    COUNT(DISTINCT us.transaction_id) AS distinct_transactions
+FROM unified_sales us
+JOIN customers c
+    ON us.customer_id = c.c_customer_id
+JOIN items i
+    ON us.item_id = i.i_item_id
+GROUP BY
+    c.c_customer_id,
+    c.c_name,
+    i.i_category_id,
+    i.i_category
+ORDER BY total_revenue DESC
+LIMIT 10

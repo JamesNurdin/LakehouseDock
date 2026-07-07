@@ -1,33 +1,37 @@
-WITH store_agg AS (
-    SELECT
-        ss_customer_id,
-        COUNT(ss_transaction_id) AS store_txn_cnt,
-        SUM(ss_quantity) AS store_qty
-    FROM store_sales
-    GROUP BY ss_customer_id
+WITH unified_sales AS (
+    SELECT i.i_category AS i_category,
+           ss.ss_quantity AS quantity,
+           i.i_price AS price
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    UNION ALL
+    SELECT i.i_category AS i_category,
+           ws.ws_quantity AS quantity,
+           i.i_price AS price
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
 ),
-web_agg AS (
-    SELECT
-        ws_customer_id,
-        COUNT(ws_transaction_id) AS web_txn_cnt,
-        SUM(ws_quantity) AS web_qty
-    FROM web_sales
-    GROUP BY ws_customer_id
+sales_by_category AS (
+    SELECT i_category,
+           SUM(quantity) AS total_quantity,
+           SUM(quantity * price) AS total_revenue
+    FROM unified_sales
+    GROUP BY i_category
+),
+reviews_by_category AS (
+    SELECT i.i_category AS i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
 SELECT
-    c.c_customer_id,
-    c.c_name,
-    COALESCE(sa.store_qty, 0) AS store_quantity,
-    COALESCE(sa.store_txn_cnt, 0) AS store_transactions,
-    COALESCE(wa.web_qty, 0) AS web_quantity,
-    COALESCE(wa.web_txn_cnt, 0) AS web_transactions,
-    COALESCE(sa.store_qty, 0) + COALESCE(wa.web_qty, 0) AS total_quantity,
-    COALESCE(sa.store_txn_cnt, 0) + COALESCE(wa.web_txn_cnt, 0) AS total_transactions
-FROM customers c
-LEFT JOIN store_agg sa
-    ON sa.ss_customer_id = c.c_customer_id
-LEFT JOIN web_agg wa
-    ON wa.ws_customer_id = c.c_customer_id
-WHERE COALESCE(sa.store_qty, 0) + COALESCE(wa.web_qty, 0) > 0
-ORDER BY total_quantity DESC
-LIMIT 100
+    s.i_category,
+    s.total_quantity,
+    s.total_revenue,
+    r.avg_sentiment,
+    r.review_count
+FROM sales_by_category s
+LEFT JOIN reviews_by_category r ON r.i_category = s.i_category
+ORDER BY s.total_revenue DESC

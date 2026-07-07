@@ -1,23 +1,20 @@
-WITH ws_agg AS (
+WITH category_review_stats AS (
     SELECT
-        ws_customer_id,
-        COUNT(DISTINCT ws_item_id) AS distinct_items,
-        SUM(ws_quantity) AS total_quantity,
-        MIN(ws_ts) AS first_transaction_ts,
-        MAX(ws_ts) AS last_transaction_ts
-    FROM web_sales
-    GROUP BY ws_customer_id
+        i.i_category_id,
+        i.i_category,
+        AVG(i.i_price) AS avg_price,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
 SELECT
-    c.c_customer_id,
-    c.c_name,
-    ws_agg.distinct_items,
-    ws_agg.total_quantity,
-    ws_agg.first_transaction_ts,
-    ws_agg.last_transaction_ts,
-    RANK() OVER (ORDER BY ws_agg.total_quantity DESC) AS quantity_rank
-FROM customers AS c
-JOIN ws_agg
-    ON ws_agg.ws_customer_id = c.c_customer_id
-ORDER BY ws_agg.total_quantity DESC
-LIMIT 10
+    i_category_id,
+    i_category,
+    avg_price,
+    avg_sentiment,
+    review_count
+FROM category_review_stats
+WHERE review_count >= 10
+ORDER BY avg_price DESC

@@ -174,6 +174,9 @@ def read_table(spark: SparkSession, raw_base_path: Path, table: dict[str, Any]) 
         if "delimiter" in table:
             reader = reader.option("delimiter", table["delimiter"])
 
+        if "nullValue" in table:
+            reader = reader.option("nullValue", table["nullValue"])
+
         if table.get("schema") is not None:
             reader = reader.schema(table["schema"])
 
@@ -427,4 +430,6 @@ if __name__ == "__main__":
 # called for 1TB ldbc snb
 # ./spark-3.2.1-bin-hadoop3.2/bin/spark-submit --master local[8] --driver-memory 90G --conf spark.driver.maxResultSize=4G --conf spark.sql.files.maxPartitionBytes=64m --conf spark.sql.shuffle.partitions=64 --conf spark.default.parallelism=64 --packages org.apache.iceberg:iceberg-spark-runtime-3.2_2.12:0.14.1 generate_iceberg_tables.py --dataset-name ldbc_cnb --scale-factor 1000 --conf-path /mnt/raid3/datasets/sf1000/conf.py --raw-base-path /mnt/raid3/datasets/sf1000 --warehouse-path /mnt/iceberg/warehouse/ --catalog-name iceberg --catalog-type hive --metastore-uri thrift://hive-metastore-lakehouse-a.pgr24james.svc.cluster.local:9083 --namespace ldbc_cnb_sf1000 --overwrite --no-validate
 
-#./spark-3.2.1-bin-hadoop3.2/bin/spark-submit --master local[8] --driver-memory 90G --conf spark.driver.maxResultSize=4G --conf spark.sql.files.maxPartitionBytes=512m --conf spark.sql.shuffle.partitions=64 --conf spark.default.parallelism=64 --packages org.apache.iceberg:iceberg-spark-runtime-3.2_2.12:0.14.1 generate_iceberg_tables.py --dataset-name BigBenchV2 --scale-factor 1000 --conf-path /mnt/raid3-extra/datasets/BigBenchV2/sf1000/conf.py --raw-base-path /mnt/raid3-extra/datasets/BigBenchV2/sf1000 --warehouse-path /mnt/iceberg/warehouse/ --catalog-name iceberg --catalog-type hive --metastore-uri thrift://hive-metastore-lakehouse-a.pgr24james.svc.cluster.local:9083 --namespace bigbenchv2_sf1000 --overwrite --no-validate --only-table web_logs
+# ./spark-3.2.1-bin-hadoop3.2/bin/spark-submit --master local[8] --driver-memory 90G --conf spark.driver.maxResultSize=4G --conf spark.sql.files.maxPartitionBytes=512m --conf spark.sql.shuffle.partitions=64 --conf spark.default.parallelism=64 --packages org.apache.iceberg:iceberg-spark-runtime-3.2_2.12:0.14.1 generate_iceberg_tables.py --dataset-name BigBenchV2 --scale-factor 1000 --conf-path /mnt/raid3-extra/datasets/BigBenchV2/sf1000/conf.py --raw-base-path /mnt/raid3-extra/datasets/BigBenchV2/sf1000 --warehouse-path /mnt/iceberg/warehouse/ --catalog-name iceberg --catalog-type hive --metastore-uri thrift://hive-metastore-lakehouse-a.pgr24james.svc.cluster.local:9083 --namespace bigbenchv2_sf1000 --overwrite --no-validate
+
+# ./spark-3.2.1-bin-hadoop3.2/bin/spark-submit --master local[8] --driver-memory 90G --conf spark.driver.maxResultSize=4G --conf spark.sql.files.maxPartitionBytes=512m --conf spark.sql.shuffle.partitions=64 --conf spark.default.parallelism=64 --packages org.apache.iceberg:iceberg-spark-runtime-3.2_2.12:0.14.1 generate_iceberg_tables.py --dataset-name stats_ceb --scale-factor 1000 --conf-path /mnt/raid3-extra/datasets/stats_ceb/conf.py --raw-base-path /mnt/raid3-extra/datasets/stats_ceb --warehouse-path /mnt/iceberg/warehouse/ --catalog-name iceberg --catalog-type hive --metastore-uri thrift://hive-metastore-lakehouse-a.pgr24james.svc.cluster.local:9083 --namespace stats_ceb_sf1000 --overwrite --no-validate

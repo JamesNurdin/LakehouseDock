@@ -1,45 +1,36 @@
-WITH store_item_sales AS (
+WITH item_sales AS (
     SELECT
-        ss.ss_store_id,
+        i.i_item_id,
         i.i_category_id,
-        i.i_category_name,
-        SUM(ss.ss_quantity) AS total_store_quantity,
-        COUNT(DISTINCT ss.ss_customer_id) AS distinct_store_customers
-    FROM store_sales ss
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    GROUP BY ss.ss_store_id, i.i_category_id, i.i_category_name
-),
-web_item_sales AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ws.ws_quantity) AS total_web_quantity,
-        COUNT(DISTINCT ws.ws_customer_id) AS distinct_web_customers
-    FROM web_sales ws
-    JOIN items i ON ws.ws_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
+        i.i_category,
+        COALESCE(ss.total_quantity, 0) + COALESCE(ws.total_quantity, 0) AS total_quantity
+    FROM items i
+    LEFT JOIN (
+        SELECT ss_item_id, SUM(ss_quantity) AS total_quantity
+        FROM store_sales
+        GROUP BY ss_item_id
+    ) ss ON i.i_item_id = ss.ss_item_id
+    LEFT JOIN (
+        SELECT ws_item_id, SUM(ws_quantity) AS total_quantity
+        FROM web_sales
+        GROUP BY ws_item_id
+    ) ws ON i.i_item_id = ws.ws_item_id
 ),
 item_reviews AS (
     SELECT
-        i.i_category_id,
-        i.i_category_name,
-        AVG(pr.pr_rating) AS avg_rating,
-        COUNT(pr.pr_review_id) AS review_count
+        pr.pr_item_id,
+        COUNT(*) AS review_count,
+        AVG(pr.pr_sentiment) AS avg_sentiment
     FROM product_reviews pr
-    JOIN items i ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
+    GROUP BY pr.pr_item_id
 )
 SELECT
-    s.s_store_name,
-    si.i_category_name,
-    si.total_store_quantity,
-    si.distinct_store_customers,
-    COALESCE(wi.total_web_quantity, 0) AS total_web_quantity,
-    COALESCE(wi.distinct_web_customers, 0) AS distinct_web_customers,
-    ir.avg_rating,
-    ir.review_count
-FROM store_item_sales si
-JOIN stores s ON si.ss_store_id = s.s_store_id
-LEFT JOIN web_item_sales wi ON si.i_category_id = wi.i_category_id
-LEFT JOIN item_reviews ir ON si.i_category_id = ir.i_category_id
-ORDER BY s.s_store_name, si.i_category_name
+    isales.i_category_id,
+    isales.i_category,
+    SUM(isales.total_quantity) AS total_quantity_sold,
+    SUM(COALESCE(ireviews.review_count, 0)) AS total_review_count,
+    AVG(ireviews.avg_sentiment) AS avg_sentiment_across_items
+FROM item_sales isales
+LEFT JOIN item_reviews ireviews ON isales.i_item_id = ireviews.pr_item_id
+GROUP BY isales.i_category_id, isales.i_category
+ORDER BY total_quantity_sold DESC

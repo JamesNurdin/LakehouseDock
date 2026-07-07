@@ -1,25 +1,34 @@
-/*
-  Analytical query on the web_pages table:
-  - Counts pages per type
-  - Computes average, minimum, and maximum page‑name length per type
-  - Calculates each type's share of the total page count
-*/
-WITH page_stats AS (
-    SELECT
-        w.w_web_page_type,
-        COUNT(*) AS page_cnt,
-        AVG(LENGTH(w.w_web_page_name)) AS avg_name_len,
-        MIN(LENGTH(w.w_web_page_name)) AS min_name_len,
-        MAX(LENGTH(w.w_web_page_name)) AS max_name_len
-    FROM web_pages w
-    GROUP BY w.w_web_page_type
+WITH unified_data AS (
+    SELECT ss.ss_item_id AS item_id,
+           ss.ss_quantity AS qty,
+           'store_sales' AS src,
+           NULL AS sentiment,
+           NULL AS review_id
+    FROM store_sales ss
+    UNION ALL
+    SELECT ws.ws_item_id AS item_id,
+           ws.ws_quantity AS qty,
+           'web_sales' AS src,
+           NULL AS sentiment,
+           NULL AS review_id
+    FROM web_sales ws
+    UNION ALL
+    SELECT pr.pr_item_id AS item_id,
+           NULL AS qty,
+           'reviews' AS src,
+           pr.pr_sentiment AS sentiment,
+           pr.pr_review_id AS review_id
+    FROM product_reviews pr
 )
-SELECT
-    ps.w_web_page_type,
-    ps.page_cnt,
-    ps.avg_name_len,
-    ps.min_name_len,
-    ps.max_name_len,
-    ROUND(100.0 * ps.page_cnt / SUM(ps.page_cnt) OVER (), 2) AS pct_of_total_pages
-FROM page_stats ps
-ORDER BY ps.page_cnt DESC
+SELECT i.i_category_id,
+       i.i_category,
+       SUM(CASE WHEN ud.src = 'store_sales' THEN ud.qty ELSE 0 END) AS total_store_quantity,
+       SUM(CASE WHEN ud.src = 'web_sales' THEN ud.qty ELSE 0 END) AS total_web_quantity,
+       SUM(CASE WHEN ud.src = 'store_sales' THEN ud.qty * i.i_price ELSE 0 END) AS total_store_revenue,
+       SUM(CASE WHEN ud.src = 'web_sales' THEN ud.qty * i.i_price ELSE 0 END) AS total_web_revenue,
+       AVG(CASE WHEN ud.src = 'reviews' THEN ud.sentiment END) AS avg_sentiment,
+       COUNT(CASE WHEN ud.src = 'reviews' THEN ud.review_id END) AS review_count
+FROM unified_data ud
+JOIN items i ON ud.item_id = i.i_item_id
+GROUP BY i.i_category_id, i.i_category
+ORDER BY i.i_category_id

@@ -1,52 +1,45 @@
-WITH store_agg AS (
-    SELECT
-        ss.ss_store_id,
-        s.s_store_name,
-        COUNT(DISTINCT ss.ss_transaction_id) AS transaction_count,
-        SUM(ss.ss_quantity) AS total_quantity,
-        AVG(ss.ss_quantity) AS avg_quantity,
-        MAX(ss.ss_ts) AS latest_ts
-    FROM store_sales ss
-    JOIN stores s
-        ON ss.ss_store_id = s.s_store_id
-    WHERE ss.ss_quantity > 0
-    GROUP BY ss.ss_store_id, s.s_store_name
+WITH combined_sales AS (
+    SELECT ss_item_id AS item_id,
+           ss_quantity AS quantity,
+           ss_customer_id AS customer_id,
+           ss_store_id AS store_id
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id,
+           ws_quantity AS quantity,
+           ws_customer_id AS customer_id,
+           NULL AS store_id
+    FROM web_sales
 ),
-item_agg AS (
-    SELECT
-        ss.ss_store_id,
-        ss.ss_item_id,
-        SUM(ss.ss_quantity) AS item_quantity
-    FROM store_sales ss
-    GROUP BY ss.ss_store_id, ss.ss_item_id
+sales_agg AS (
+    SELECT i.i_category,
+           i.i_category_id,
+           SUM(cs.quantity) AS total_quantity,
+           COUNT(DISTINCT cs.customer_id) AS distinct_customers
+    FROM combined_sales cs
+    JOIN items i ON cs.item_id = i.i_item_id
+    GROUP BY i.i_category,
+             i.i_category_id
 ),
-top_item_per_store AS (
-    SELECT
-        ia.ss_store_id,
-        ia.ss_item_id,
-        ia.item_quantity,
-        ROW_NUMBER() OVER (PARTITION BY ia.ss_store_id ORDER BY ia.item_quantity DESC) AS rn
-    FROM item_agg ia
-),
-top_items AS (
-    SELECT
-        ss_store_id,
-        ss_item_id AS top_item_id,
-        item_quantity AS top_item_quantity
-    FROM top_item_per_store
-    WHERE rn = 1
+review_agg AS (
+    SELECT i.i_category,
+           i.i_category_id,
+           COUNT(pr.pr_review_id) AS review_count,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category,
+             i.i_category_id
 )
-SELECT
-    sa.ss_store_id,
-    sa.s_store_name,
-    sa.total_quantity,
-    sa.transaction_count,
-    sa.avg_quantity,
-    sa.latest_ts,
-    ti.top_item_id,
-    ti.top_item_quantity
-FROM store_agg sa
-JOIN top_items ti
-    ON sa.ss_store_id = ti.ss_store_id
-ORDER BY sa.total_quantity DESC
-LIMIT 10
+SELECT s.i_category,
+       s.i_category_id,
+       s.total_quantity,
+       s.distinct_customers,
+       COALESCE(r.review_count, 0) AS review_count,
+       COALESCE(r.avg_sentiment, 0) AS avg_sentiment
+FROM sales_agg s
+LEFT JOIN review_agg r
+  ON s.i_category = r.i_category
+ AND s.i_category_id = r.i_category_id
+ORDER BY s.total_quantity DESC
+LIMIT 20

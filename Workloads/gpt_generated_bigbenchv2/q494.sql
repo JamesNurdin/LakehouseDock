@@ -1,37 +1,25 @@
-WITH review_agg AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        AVG(pr.pr_rating) AS avg_rating
-    FROM product_reviews pr
-    JOIN items i ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
-),
-store_agg AS (
-    SELECT
-        ss.ss_store_id,
-        s.s_store_name,
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ss.ss_quantity) AS total_quantity,
-        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers
+WITH combined_sales AS (
+    SELECT ss.ss_customer_id AS customer_id,
+           ss.ss_quantity AS quantity,
+           'store' AS channel
     FROM store_sales ss
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    JOIN stores s ON ss.ss_store_id = s.s_store_id
-    GROUP BY ss.ss_store_id, s.s_store_name, i.i_category_id, i.i_category_name
+    UNION ALL
+    SELECT ws.ws_customer_id AS customer_id,
+           ws.ws_quantity AS quantity,
+           'web' AS channel
+    FROM web_sales ws
 )
-SELECT
-    sa.ss_store_id AS store_id,
-    sa.s_store_name AS store_name,
-    sa.i_category_id AS category_id,
-    sa.i_category_name AS category_name,
-    sa.total_quantity,
-    sa.distinct_customers,
-    ra.avg_rating
-FROM store_agg sa
-LEFT JOIN review_agg ra
-    ON sa.i_category_id = ra.i_category_id
-   AND sa.i_category_name = ra.i_category_name
-WHERE ra.avg_rating IS NOT NULL
-  AND ra.avg_rating >= 4
-ORDER BY sa.total_quantity DESC
+SELECT c.c_customer_id,
+       c.c_name,
+       SUM(cs.quantity) AS total_quantity,
+       COUNT(cs.quantity) AS total_transactions,
+       SUM(CASE WHEN cs.channel = 'store' THEN cs.quantity ELSE 0 END) AS store_quantity,
+       SUM(CASE WHEN cs.channel = 'store' THEN 1 ELSE 0 END) AS store_transactions,
+       SUM(CASE WHEN cs.channel = 'web' THEN cs.quantity ELSE 0 END) AS web_quantity,
+       SUM(CASE WHEN cs.channel = 'web' THEN 1 ELSE 0 END) AS web_transactions
+FROM customers c
+LEFT JOIN combined_sales cs
+       ON cs.customer_id = c.c_customer_id
+GROUP BY c.c_customer_id, c.c_name
+ORDER BY total_quantity DESC
+LIMIT 100

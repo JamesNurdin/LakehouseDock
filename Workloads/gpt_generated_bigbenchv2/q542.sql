@@ -1,59 +1,48 @@
-WITH store_item_sales AS (
-    SELECT
-        ss.ss_store_id,
-        ss.ss_item_id,
-        SUM(ss.ss_quantity) AS total_store_quantity,
-        SUM(ss.ss_quantity * i.i_price) AS total_store_sales
+WITH combined_sales AS (
+    SELECT i.i_item_id,
+           i.i_category,
+           i.i_category_id,
+           i.i_price,
+           SUM(ss.ss_quantity) AS quantity_sold
     FROM store_sales ss
     JOIN items i ON ss.ss_item_id = i.i_item_id
-    GROUP BY ss.ss_store_id, ss.ss_item_id
-),
-web_item_sales AS (
-    SELECT
-        ws.ws_item_id,
-        SUM(ws.ws_quantity) AS total_web_quantity,
-        SUM(ws.ws_quantity * i.i_price) AS total_web_sales
+    GROUP BY i.i_item_id, i.i_category, i.i_category_id, i.i_price
+    UNION ALL
+    SELECT i.i_item_id,
+           i.i_category,
+           i.i_category_id,
+           i.i_price,
+           SUM(ws.ws_quantity) AS quantity_sold
     FROM web_sales ws
     JOIN items i ON ws.ws_item_id = i.i_item_id
-    GROUP BY ws.ws_item_id
+    GROUP BY i.i_item_id, i.i_category, i.i_category_id, i.i_price
 ),
-item_reviews AS (
-    SELECT
-        pr.pr_item_id,
-        AVG(pr.pr_rating) AS avg_rating,
-        COUNT(pr.pr_review_id) AS review_count
+
+sales_agg AS (
+    SELECT i_item_id,
+           i_category,
+           i_category_id,
+           i_price,
+           SUM(quantity_sold) AS total_quantity_sold,
+           SUM(i_price * quantity_sold) AS total_sales_amount
+    FROM combined_sales
+    GROUP BY i_item_id, i_category, i_category_id, i_price
+),
+
+reviews_agg AS (
+    SELECT pr.pr_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
     FROM product_reviews pr
     GROUP BY pr.pr_item_id
-),
-joined_data AS (
-    SELECT
-        s.s_store_name,
-        i.i_name,
-        i.i_category_name,
-        si.total_store_quantity,
-        si.total_store_sales,
-        wi.total_web_quantity,
-        wi.total_web_sales,
-        ir.avg_rating,
-        ir.review_count,
-        ROW_NUMBER() OVER (PARTITION BY s.s_store_name ORDER BY si.total_store_sales DESC) AS rank_per_store
-    FROM store_item_sales si
-    JOIN stores s ON si.ss_store_id = s.s_store_id
-    JOIN items i ON si.ss_item_id = i.i_item_id
-    LEFT JOIN web_item_sales wi ON si.ss_item_id = wi.ws_item_id
-    LEFT JOIN item_reviews ir ON si.ss_item_id = ir.pr_item_id
 )
-SELECT
-    s_store_name,
-    i_name,
-    i_category_name,
-    total_store_quantity,
-    total_store_sales,
-    total_web_quantity,
-    total_web_sales,
-    avg_rating,
-    review_count,
-    rank_per_store
-FROM joined_data
-WHERE rank_per_store <= 5
-ORDER BY s_store_name, rank_per_store
+SELECT s.i_category,
+       SUM(s.total_quantity_sold) AS category_quantity_sold,
+       SUM(s.total_sales_amount) AS category_sales_amount,
+       AVG(r.avg_sentiment) AS avg_category_sentiment,
+       SUM(r.review_count) AS total_reviews
+FROM sales_agg s
+LEFT JOIN reviews_agg r ON s.i_item_id = r.pr_item_id
+GROUP BY s.i_category
+ORDER BY category_sales_amount DESC
+LIMIT 10

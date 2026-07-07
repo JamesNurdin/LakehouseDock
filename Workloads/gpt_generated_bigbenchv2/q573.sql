@@ -1,44 +1,34 @@
-WITH item_ratings AS (
+WITH combined_sales AS (
     SELECT
-        i.i_item_id,
-        AVG(pr.pr_rating) AS avg_rating
-    FROM product_reviews pr
-    JOIN items i
-        ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_item_id
-),
-store_customer_sales AS (
-    SELECT
-        s.s_store_id,
-        s.s_store_name,
         c.c_customer_id,
         c.c_name,
-        SUM(ss.ss_quantity * i.i_price) AS revenue,
-        COUNT(DISTINCT ss.ss_item_id) AS distinct_items,
-        SUM(ss.ss_quantity) AS total_quantity,
-        AVG(ir.avg_rating) AS avg_item_rating
+        ss.ss_quantity AS quantity,
+        ss.ss_ts AS ts,
+        'store' AS channel
     FROM store_sales ss
-    JOIN stores s
-        ON ss.ss_store_id = s.s_store_id
-    JOIN customers c
-        ON ss.ss_customer_id = c.c_customer_id
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    LEFT JOIN item_ratings ir
-        ON i.i_item_id = ir.i_item_id
-    GROUP BY
-        s.s_store_id,
-        s.s_store_name,
+    INNER JOIN customers c ON ss.ss_customer_id = c.c_customer_id
+    UNION ALL
+    SELECT
         c.c_customer_id,
-        c.c_name
+        c.c_name,
+        ws.ws_quantity AS quantity,
+        ws.ws_ts AS ts,
+        'web' AS channel
+    FROM web_sales ws
+    INNER JOIN customers c ON ws.ws_customer_id = c.c_customer_id
 )
 SELECT
-    scs.s_store_name,
-    scs.c_name,
-    scs.revenue,
-    scs.total_quantity,
-    scs.distinct_items,
-    scs.avg_item_rating,
-    RANK() OVER (PARTITION BY scs.s_store_name ORDER BY scs.revenue DESC) AS revenue_rank
-FROM store_customer_sales scs
-ORDER BY scs.s_store_name, revenue_rank
+    c_customer_id,
+    c_name,
+    SUM(quantity) AS total_quantity,
+    COUNT(*) AS total_transactions,
+    SUM(CASE WHEN channel = 'store' THEN quantity ELSE 0 END) AS store_quantity,
+    SUM(CASE WHEN channel = 'web' THEN quantity ELSE 0 END) AS web_quantity,
+    COUNT(CASE WHEN channel = 'store' THEN 1 END) AS store_transactions,
+    COUNT(CASE WHEN channel = 'web' THEN 1 END) AS web_transactions
+FROM combined_sales
+WHERE CAST(ts AS timestamp) >= TIMESTAMP '2023-01-01 00:00:00'
+  AND CAST(ts AS timestamp) < TIMESTAMP '2024-01-01 00:00:00'
+GROUP BY c_customer_id, c_name
+ORDER BY total_quantity DESC
+LIMIT 10

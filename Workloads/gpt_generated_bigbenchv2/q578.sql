@@ -1,51 +1,32 @@
 WITH store_sales_agg AS (
-    SELECT
-        ss.ss_store_id,
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ss.ss_quantity) AS store_quantity
-    FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    GROUP BY
-        ss.ss_store_id,
-        i.i_category_id,
-        i.i_category_name
+    SELECT ss_item_id AS i_item_id,
+           SUM(ss_quantity) AS store_quantity
+    FROM store_sales
+    GROUP BY ss_item_id
 ),
 web_sales_agg AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ws.ws_quantity) AS web_quantity
-    FROM web_sales ws
-    JOIN items i
-        ON ws.ws_item_id = i.i_item_id
-    GROUP BY
-        i.i_category_id,
-        i.i_category_name
+    SELECT ws_item_id AS i_item_id,
+           SUM(ws_quantity) AS web_quantity
+    FROM web_sales
+    GROUP BY ws_item_id
 ),
-rating_agg AS (
-    SELECT
-        i.i_category_id,
-        AVG(pr.pr_rating) AS avg_rating
-    FROM product_reviews pr
-    JOIN items i
-        ON pr.pr_item_id = i.i_item_id
-    GROUP BY
-        i.i_category_id
+review_agg AS (
+    SELECT pr_item_id AS i_item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    s.s_store_name,
-    ss.i_category_name AS category_name,
-    ss.store_quantity,
-    COALESCE(w.web_quantity, 0) AS web_quantity,
-    r.avg_rating
-FROM store_sales_agg ss
-JOIN stores s
-    ON ss.ss_store_id = s.s_store_id
-LEFT JOIN web_sales_agg w
-    ON ss.i_category_id = w.i_category_id
-LEFT JOIN rating_agg r
-    ON ss.i_category_id = r.i_category_id
-ORDER BY ss.store_quantity DESC
-LIMIT 20
+SELECT i.i_item_id,
+       i.i_category,
+       i.i_price,
+       COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0) AS total_quantity,
+       (COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0)) * i.i_price AS total_revenue,
+       r.avg_sentiment,
+       r.review_count
+FROM items i
+LEFT JOIN store_sales_agg ss ON ss.i_item_id = i.i_item_id
+LEFT JOIN web_sales_agg ws ON ws.i_item_id = i.i_item_id
+LEFT JOIN review_agg r ON r.i_item_id = i.i_item_id
+ORDER BY total_revenue DESC
+LIMIT 10

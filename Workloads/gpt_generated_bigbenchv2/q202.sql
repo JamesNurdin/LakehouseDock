@@ -1,22 +1,28 @@
-WITH type_stats AS (
-    SELECT
-        w_web_page_type,
-        COUNT(*) AS page_count,
-        COUNT(DISTINCT w_web_page_name) AS distinct_name_count,
-        AVG(LENGTH(w_web_page_name)) AS avg_name_length,
-        MIN(LENGTH(w_web_page_name)) AS min_name_length,
-        MAX(LENGTH(w_web_page_name)) AS max_name_length
-    FROM web_pages
-    WHERE w_web_page_name IS NOT NULL
-    GROUP BY w_web_page_type
+WITH store_agg AS (
+    SELECT i.i_category AS category,
+           SUM(ss.ss_quantity) AS total_store_quantity,
+           SUM(ss.ss_quantity * i.i_price) AS total_store_revenue
+    FROM store_sales ss
+    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+web_agg AS (
+    SELECT i.i_category AS category,
+           SUM(ws.ws_quantity) AS total_web_quantity,
+           SUM(ws.ws_quantity * i.i_price) AS total_web_revenue
+    FROM web_sales ws
+    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
-SELECT
-    w_web_page_type,
-    page_count,
-    distinct_name_count,
-    avg_name_length,
-    min_name_length,
-    max_name_length,
-    RANK() OVER (ORDER BY page_count DESC) AS page_count_rank
-FROM type_stats
-ORDER BY page_count DESC
+SELECT COALESCE(s.category, w.category) AS category,
+       COALESCE(s.total_store_quantity, 0) AS store_quantity,
+       COALESCE(s.total_store_revenue, 0) AS store_revenue,
+       COALESCE(w.total_web_quantity, 0) AS web_quantity,
+       COALESCE(w.total_web_revenue, 0) AS web_revenue,
+       COALESCE(s.total_store_quantity, 0) + COALESCE(w.total_web_quantity, 0) AS total_quantity,
+       COALESCE(s.total_store_revenue, 0) + COALESCE(w.total_web_revenue, 0) AS total_revenue
+FROM store_agg s
+FULL OUTER JOIN web_agg w ON s.category = w.category
+ORDER BY total_revenue DESC

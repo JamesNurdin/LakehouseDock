@@ -1,12 +1,32 @@
-SELECT
-    w_web_page_type,
-    count(*) AS page_count,
-    avg(length(w_web_page_name)) AS avg_name_len,
-    max(length(w_web_page_name)) AS max_name_len,
-    max_by(w_web_page_name, length(w_web_page_name)) AS longest_page_name,
-    approx_percentile(length(w_web_page_name), 0.5) AS median_name_len
-FROM web_pages
-WHERE w_web_page_type IS NOT NULL
-GROUP BY w_web_page_type
-HAVING count(*) >= 10
-ORDER BY page_count DESC
+WITH store_sales_data AS (
+    SELECT s.s_store_name AS store_name,
+           i.i_category AS category,
+           ss.ss_customer_id AS customer_id,
+           ss.ss_quantity * i.i_price AS revenue
+    FROM store_sales ss
+    JOIN stores s
+      ON ss.ss_store_id = s.s_store_id
+    JOIN items i
+      ON ss.ss_item_id = i.i_item_id
+),
+web_sales_data AS (
+    SELECT 'Online' AS store_name,
+           i.i_category AS category,
+           ws.ws_customer_id AS customer_id,
+           ws.ws_quantity * i.i_price AS revenue
+    FROM web_sales ws
+    JOIN items i
+      ON ws.ws_item_id = i.i_item_id
+)
+SELECT store_name,
+       category,
+       SUM(revenue) AS total_revenue,
+       COUNT(DISTINCT customer_id) AS distinct_customers
+FROM (
+    SELECT store_name, category, customer_id, revenue FROM store_sales_data
+    UNION ALL
+    SELECT store_name, category, customer_id, revenue FROM web_sales_data
+) AS unified_sales
+GROUP BY store_name, category
+ORDER BY total_revenue DESC
+LIMIT 20

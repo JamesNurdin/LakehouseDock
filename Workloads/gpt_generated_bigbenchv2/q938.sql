@@ -1,23 +1,27 @@
-/*
-  Analytical query on the web_logs table.
-  It computes, for each distinct log line, the total occurrence count, the average length of the line,
-  the percentage that the line contributes to the overall log volume, and its rank by frequency.
-  The result is limited to the top 10 most frequent log lines.
-*/
-WITH line_stats AS (
-    SELECT
-        line,
-        COUNT(*) AS cnt,
-        AVG(LENGTH(line)) AS avg_len
-    FROM web_logs
-    GROUP BY line
+WITH total_logs AS (
+  SELECT wl_customer_id, COUNT(*) AS total_logs
+  FROM web_logs
+  GROUP BY wl_customer_id
+),
+customer_page_counts AS (
+  SELECT wl_customer_id, wl_webpage_name, COUNT(*) AS page_view_cnt
+  FROM web_logs
+  GROUP BY wl_customer_id, wl_webpage_name
+),
+customer_top_page AS (
+  SELECT wl_customer_id,
+         wl_webpage_name,
+         page_view_cnt,
+         ROW_NUMBER() OVER (PARTITION BY wl_customer_id ORDER BY page_view_cnt DESC) AS rn
+  FROM customer_page_counts
 )
-SELECT
-    line,
-    cnt,
-    avg_len,
-    cnt * 100.0 / SUM(cnt) OVER () AS pct_of_total,
-    ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rank
-FROM line_stats
-ORDER BY cnt DESC
+SELECT tp.wl_customer_id,
+       tp.wl_webpage_name,
+       tp.page_view_cnt,
+       tl.total_logs
+FROM customer_top_page tp
+JOIN total_logs tl
+  ON tp.wl_customer_id = tl.wl_customer_id
+WHERE tp.rn = 1
+ORDER BY tp.page_view_cnt DESC
 LIMIT 10

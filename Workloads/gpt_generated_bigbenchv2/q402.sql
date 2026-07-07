@@ -1,15 +1,15 @@
--- Top 10 IP addresses by request count and their average line length
-WITH ip_stats AS (
+WITH logs_by_date AS (
     SELECT
-        split_part(line, ' ', 1) AS ip_address,
-        length(line) AS line_len
+        wl_webpage_name,
+        date(cast(wl_timestamp AS timestamp)) AS view_date
     FROM web_logs
+    WHERE wl_customer_id IS NOT NULL
 )
 SELECT
-    ip_address,
-    count(*) AS request_count,
-    avg(line_len) AS avg_line_length
-FROM ip_stats
-GROUP BY ip_address
-ORDER BY request_count DESC
-LIMIT 10
+    wl_webpage_name,
+    view_date,
+    count(*) AS view_count
+FROM logs_by_date
+GROUP BY wl_webpage_name, view_date
+ORDER BY view_date DESC, view_count DESC
+LIMIT 100

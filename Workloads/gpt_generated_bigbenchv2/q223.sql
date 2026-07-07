@@ -1,44 +1,39 @@
-WITH page_lengths AS (
+WITH store_item_sales AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
+        ss.ss_store_id,
+        i.i_category,
+        SUM(ss.ss_quantity) AS store_quantity
+    FROM store_sales ss
+    JOIN items i ON i.i_item_id = ss.ss_item_id
+    GROUP BY ss.ss_store_id, i.i_category
 ),
-type_stats AS (
+web_category_sales AS (
     SELECT
-        w_web_page_type,
-        COUNT(*) AS total_pages,
-        COUNT(DISTINCT w_web_page_name) AS distinct_names,
-        AVG(name_len) AS avg_name_len,
-        MAX(name_len) AS max_name_len,
-        MIN(name_len) AS min_name_len
-    FROM page_lengths
-    GROUP BY w_web_page_type
+        i.i_category,
+        SUM(ws.ws_quantity) AS web_quantity
+    FROM web_sales ws
+    JOIN items i ON i.i_item_id = ws.ws_item_id
+    GROUP BY i.i_category
 ),
-top_long_names AS (
+review_category_agg AS (
     SELECT
-        w_web_page_type,
-        w_web_page_name,
-        name_len,
-        ROW_NUMBER() OVER (PARTITION BY w_web_page_type ORDER BY name_len DESC) AS rn
-    FROM page_lengths
+        i.i_category,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON i.i_item_id = pr.pr_item_id
+    GROUP BY i.i_category
 )
 SELECT
-    ts.w_web_page_type,
-    ts.total_pages,
-    ts.distinct_names,
-    ts.avg_name_len,
-    ts.max_name_len,
-    ts.min_name_len,
-    tn.w_web_page_name AS longest_page_name,
-    tn.name_len AS longest_name_len
-FROM type_stats ts
-LEFT JOIN (
-    SELECT w_web_page_type, w_web_page_name, name_len
-    FROM top_long_names
-    WHERE rn = 1
-) tn
-    ON ts.w_web_page_type = tn.w_web_page_type
-ORDER BY ts.total_pages DESC
+    s.s_store_name,
+    si.i_category,
+    si.store_quantity,
+    wc.web_quantity,
+    rc.avg_sentiment,
+    rc.review_count
+FROM store_item_sales si
+JOIN stores s ON s.s_store_id = si.ss_store_id
+LEFT JOIN web_category_sales wc ON wc.i_category = si.i_category
+LEFT JOIN review_category_agg rc ON rc.i_category = si.i_category
+ORDER BY si.store_quantity DESC
+LIMIT 10

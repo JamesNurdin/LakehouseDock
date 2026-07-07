@@ -1,34 +1,34 @@
-WITH item_ratings AS (
+WITH store_agg AS (
     SELECT
-        pr.pr_item_id,
-        AVG(pr.pr_rating) AS avg_rating,
-        COUNT(*) AS review_count
-    FROM product_reviews pr
-    GROUP BY pr.pr_item_id
-),
-store_item_sales AS (
-    SELECT
-        ss.ss_store_id,
-        ss.ss_customer_id,
-        ss.ss_item_id,
+        i.i_category,
         SUM(ss.ss_quantity) AS total_quantity,
-        SUM(i.i_price * ss.ss_quantity) AS total_revenue
+        AVG(pr.pr_sentiment) AS avg_sentiment
     FROM store_sales ss
     JOIN items i ON ss.ss_item_id = i.i_item_id
-    GROUP BY ss.ss_store_id, ss.ss_customer_id, ss.ss_item_id
+    LEFT JOIN product_reviews pr ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+web_agg AS (
+    SELECT
+        i.i_category,
+        SUM(ws.ws_quantity) AS total_quantity,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    LEFT JOIN product_reviews pr ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
 SELECT
-    s.s_store_name,
-    SUM(sis.total_revenue) AS store_total_revenue,
-    SUM(sis.total_quantity) AS store_total_quantity,
-    COUNT(DISTINCT sis.ss_customer_id) AS distinct_customers,
-    CASE WHEN SUM(sis.total_quantity) > 0 THEN
-        SUM(sis.total_quantity * COALESCE(ir.avg_rating, 0)) / SUM(sis.total_quantity)
-    ELSE NULL END AS weighted_avg_rating,
-    SUM(COALESCE(ir.review_count, 0)) AS total_reviews
-FROM store_item_sales sis
-JOIN stores s ON sis.ss_store_id = s.s_store_id
-LEFT JOIN item_ratings ir ON sis.ss_item_id = ir.pr_item_id
-GROUP BY s.s_store_name
-ORDER BY store_total_revenue DESC
-LIMIT 10
+    s.i_category,
+    'store' AS channel,
+    s.total_quantity,
+    s.avg_sentiment
+FROM store_agg s
+UNION ALL
+SELECT
+    w.i_category,
+    'web' AS channel,
+    w.total_quantity,
+    w.avg_sentiment
+FROM web_agg w
+ORDER BY i_category, channel

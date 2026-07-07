@@ -1,27 +1,37 @@
-WITH store_category_revenue AS (
-    SELECT
-        s.s_store_name,
-        i.i_category_name,
-        SUM(ss.ss_quantity * i.i_price) AS total_revenue,
-        SUM(ss.ss_quantity) AS total_quantity,
-        AVG(i.i_price - i.i_comp_price) AS avg_price_diff,
-        COUNT(DISTINCT c.c_customer_id) AS distinct_customers
-    FROM store_sales ss
-    JOIN customers c
-        ON ss.ss_customer_id = c.c_customer_id
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    JOIN stores s
-        ON ss.ss_store_id = s.s_store_id
-    GROUP BY s.s_store_name, i.i_category_name
+WITH item_reviews AS (
+  SELECT
+    pr.pr_item_id AS item_id,
+    AVG(pr.pr_sentiment) AS avg_sentiment
+  FROM product_reviews pr
+  GROUP BY pr.pr_item_id
+),
+store_item_sales AS (
+  SELECT
+    ss.ss_store_id AS store_id,
+    ss.ss_item_id AS item_id,
+    SUM(ss.ss_quantity) AS quantity,
+    SUM(ss.ss_quantity * i.i_price) AS revenue
+  FROM store_sales ss
+  JOIN items i ON ss.ss_item_id = i.i_item_id
+  GROUP BY ss.ss_store_id, ss.ss_item_id
+),
+store_sales_summary AS (
+  SELECT
+    sis.store_id,
+    SUM(sis.quantity) AS total_quantity,
+    SUM(sis.revenue) AS total_revenue,
+    SUM(sis.quantity * COALESCE(ir.avg_sentiment, 0)) / NULLIF(SUM(sis.quantity), 0) AS weighted_avg_sentiment
+  FROM store_item_sales sis
+  LEFT JOIN item_reviews ir ON sis.item_id = ir.item_id
+  GROUP BY sis.store_id
 )
 SELECT
-    scr.s_store_name,
-    scr.i_category_name,
-    scr.total_revenue,
-    scr.total_quantity,
-    scr.avg_price_diff,
-    scr.distinct_customers,
-    ROW_NUMBER() OVER (PARTITION BY scr.s_store_name ORDER BY scr.total_revenue DESC) AS category_rank
-FROM store_category_revenue scr
-ORDER BY scr.s_store_name, category_rank
+  s.s_store_id,
+  s.s_store_name,
+  ss.total_quantity,
+  ss.total_revenue,
+  ss.weighted_avg_sentiment
+FROM stores s
+JOIN store_sales_summary ss ON s.s_store_id = ss.store_id
+ORDER BY ss.total_revenue DESC
+LIMIT 10

@@ -1,21 +1,12 @@
-WITH parsed_logs AS (
-    SELECT
-        line,
-        regexp_extract(line, '^([^ ]+)', 1) AS ip_address,
-        regexp_extract(line, '\\[(.*?)\\]', 1) AS timestamp_str,
-        regexp_extract(line, '"([^ ]+) [^ ]+ HTTP/[^\"]+"', 1) AS http_method,
-        regexp_extract(line, '"[^ ]+ ([^ ]+) HTTP/[^\"]+"', 1) AS request_path,
-        CAST(regexp_extract(line, '"[^\"]+" ([0-9]{3})', 1) AS INTEGER) AS status_code,
-        TRY_CAST(regexp_extract(line, '"[^\"]+" [0-9]{3} ([0-9]+)', 1) AS BIGINT) AS response_bytes
-    FROM web_logs
-)
 SELECT
-    http_method,
-    status_code,
-    COUNT(*) AS request_count,
-    SUM(response_bytes) AS total_bytes
-FROM parsed_logs
-WHERE status_code IS NOT NULL
-GROUP BY http_method, status_code
-ORDER BY request_count DESC
-LIMIT 10
+    wl_webpage_name,
+    date(CAST(wl_timestamp AS timestamp)) AS log_date,
+    COUNT(*) AS page_views,
+    COUNT(DISTINCT wl_customer_id) AS unique_customers,
+    SUM(wl_key1) AS total_key1,
+    AVG(wl_key2) AS avg_key2
+FROM web_logs
+WHERE wl_key1 IS NOT NULL
+GROUP BY wl_webpage_name, date(CAST(wl_timestamp AS timestamp))
+ORDER BY page_views DESC
+LIMIT 100

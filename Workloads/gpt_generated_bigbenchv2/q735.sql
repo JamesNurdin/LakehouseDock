@@ -1,23 +1,35 @@
-WITH page_stats AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len,
-        CASE
-            WHEN length(w_web_page_name) <= 10 THEN 'short'
-            WHEN length(w_web_page_name) <= 20 THEN 'medium'
-            ELSE 'long'
-        END AS name_len_category
-    FROM web_pages
+WITH store_sales_agg AS (
+    SELECT ss.ss_item_id AS item_id,
+           SUM(ss.ss_quantity) AS store_quantity
+    FROM store_sales ss
+    GROUP BY ss.ss_item_id
+),
+web_sales_agg AS (
+    SELECT ws.ws_item_id AS item_id,
+           SUM(ws.ws_quantity) AS web_quantity
+    FROM web_sales ws
+    GROUP BY ws.ws_item_id
+),
+sales_agg AS (
+    SELECT i.i_item_id,
+           i.i_category,
+           COALESCE(s.store_quantity, 0) + COALESCE(w.web_quantity, 0) AS total_quantity
+    FROM items i
+    LEFT JOIN store_sales_agg s ON s.item_id = i.i_item_id
+    LEFT JOIN web_sales_agg w ON w.item_id = i.i_item_id
+),
+reviews_agg AS (
+    SELECT i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON i.i_item_id = pr.pr_item_id
+    GROUP BY i.i_category
 )
-SELECT
-    w_web_page_type,
-    name_len_category,
-    COUNT(*) AS page_count,
-    AVG(name_len) AS avg_name_len,
-    MIN(name_len) AS min_name_len,
-    MAX(name_len) AS max_name_len
-FROM page_stats
-GROUP BY w_web_page_type, name_len_category
-ORDER BY w_web_page_type, page_count DESC
+SELECT r.i_category,
+       r.avg_sentiment,
+       s.total_quantity,
+       r.avg_sentiment * s.total_quantity AS weighted_sentiment
+FROM reviews_agg r
+JOIN sales_agg s ON s.i_category = r.i_category
+ORDER BY weighted_sentiment DESC
+LIMIT 10

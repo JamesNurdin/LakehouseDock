@@ -1,51 +1,35 @@
 WITH store_sales_agg AS (
-    SELECT
-        ss.ss_store_id,
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ss.ss_quantity) AS store_quantity,
-        SUM(ss.ss_quantity * i.i_price) AS store_revenue
+    SELECT ss.ss_item_id AS i_item_id,
+           SUM(ss.ss_quantity) AS store_quantity
     FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    GROUP BY ss.ss_store_id, i.i_category_id, i.i_category_name
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY ss.ss_item_id
 ),
 web_sales_agg AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ws.ws_quantity) AS web_quantity,
-        SUM(ws.ws_quantity * i.i_price) AS web_revenue
+    SELECT ws.ws_item_id AS i_item_id,
+           SUM(ws.ws_quantity) AS web_quantity
     FROM web_sales ws
-    JOIN items i
-        ON ws.ws_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY ws.ws_item_id
 ),
-reviews_agg AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        COUNT(pr.pr_review_id) AS review_count,
-        AVG(pr.pr_rating) AS avg_rating
+product_reviews_agg AS (
+    SELECT pr.pr_item_id AS i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
     FROM product_reviews pr
-    JOIN items i
-        ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY pr.pr_item_id
 )
-SELECT
-    s.s_store_name,
-    ssagg.i_category_name,
-    ssagg.store_quantity,
-    ssagg.store_revenue,
-    COALESCE(wsagg.web_quantity, 0) AS web_quantity,
-    COALESCE(wsagg.web_revenue, 0) AS web_revenue,
-    COALESCE(ragg.review_count, 0) AS review_count,
-    ragg.avg_rating
-FROM store_sales_agg ssagg
-JOIN stores s
-    ON ssagg.ss_store_id = s.s_store_id
-LEFT JOIN web_sales_agg wsagg
-    ON ssagg.i_category_id = wsagg.i_category_id
-LEFT JOIN reviews_agg ragg
-    ON ssagg.i_category_id = ragg.i_category_id
-ORDER BY s.s_store_name, ssagg.store_revenue DESC
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category,
+       i.i_price,
+       COALESCE(ssa.store_quantity, 0) + COALESCE(wsa.web_quantity, 0) AS total_quantity,
+       pra.avg_sentiment,
+       pra.review_count
+FROM items i
+LEFT JOIN store_sales_agg ssa ON i.i_item_id = ssa.i_item_id
+LEFT JOIN web_sales_agg wsa ON i.i_item_id = wsa.i_item_id
+LEFT JOIN product_reviews_agg pra ON i.i_item_id = pra.i_item_id
+ORDER BY total_quantity DESC
+LIMIT 10

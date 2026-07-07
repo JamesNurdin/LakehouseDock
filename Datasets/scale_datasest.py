@@ -30,6 +30,83 @@ from pathlib import Path
 
 
 # ===========================================================================
+# Column order per table.
+# Read from the conf.py used by the importer (its TABLES list of StructType
+# schemas), so conf.py stays the single source of truth for column order.
+# Built at runtime via load_headers_from_conf(); no hardcoded duplicate.
+# ===========================================================================
+def load_headers_from_conf(conf_path):
+    """
+    Import a conf.py and return {table_name: [col, col, ...]} taken from each
+    entry's StructType schema, preserving field order. conf.py is expected to
+    define a TABLES list of dicts with 'name' and 'schema' keys (StructType).
+    """
+    import importlib.util
+
+    conf_path = str(conf_path)
+    spec = importlib.util.spec_from_file_location("_scaler_conf", conf_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load conf module from {conf_path}")
+    conf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(conf)
+
+    if not hasattr(conf, "TABLES"):
+        raise AttributeError(f"{conf_path} defines no TABLES list")
+
+    headers = {}
+    for entry in conf.TABLES:
+        name = entry["name"]
+        schema = entry["schema"]
+        # StructType supports .fieldNames(); fall back to iterating fields.
+        try:
+            cols = list(schema.fieldNames())
+        except AttributeError:
+            cols = [f.name for f in schema.fields]
+        headers[name] = cols
+    return headers
+
+
+def merge_table_parts(target_dir, table, sep, write_header, headers):
+    """
+    Concatenate all Spark part-*.csv files for one table into a single
+    <target_dir>/<table>.csv, in part-file order, prepending the header from
+    `headers` if write_header is True. Streams bytes so it works on multi-GB
+    outputs. Removes the table subdirectory afterwards.
+    """
+    table_dir = os.path.join(target_dir, table)
+    if not os.path.isdir(table_dir):
+        raise FileNotFoundError(f"No output directory to merge: {table_dir}")
+
+    parts = sorted(
+        os.path.join(table_dir, fn)
+        for fn in os.listdir(table_dir)
+        if fn.startswith("part-") and fn.endswith(".csv")
+    )
+    if not parts:
+        raise FileNotFoundError(f"No part-*.csv files found in {table_dir}")
+
+    out_path = os.path.join(target_dir, f"{table}.csv")
+    with open(out_path, "wb") as out:
+        if write_header:
+            header = sep.join(headers[table]) + "\n"
+            out.write(header.encode("utf-8"))
+        for p in parts:
+            with open(p, "rb") as src:
+                # stream in chunks to avoid loading whole part into memory
+                while True:
+                    chunk = src.read(16 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+
+    # only remove the dir once the merged file exists and is non-empty
+    if os.path.getsize(out_path) > 0:
+        import shutil
+        shutil.rmtree(table_dir)
+    return out_path
+
+
+# ===========================================================================
 # Schema helpers (no framework deps)
 # ===========================================================================
 def load_schema(path):
@@ -213,7 +290,7 @@ def _dir_size_bytes(dirs):
 
 def scale_to_target_csv(spark, schema, data_dir, target_dir, target_gb,
                         primary_keys=None, write_header=False, source_header=True,
-                        batch=64, out_partitions=None):
+                        batch=64, out_partitions=None, headers=None):
     """
     Generate CSV until the on-disk total reaches target_gb.
 
@@ -227,6 +304,22 @@ def scale_to_target_csv(spark, schema, data_dir, target_dir, target_gb,
     scale_columns = build_scale_columns(schema, primary_keys)
     sep = schema["csv_kwargs"]["sep"]
     target_bytes = target_gb * (1024 ** 3)
+
+    # Fail fast: if we're going to write headers, make sure we have one for every
+    # table BEFORE spending hours generating data.
+    if write_header:
+        if not headers:
+            raise ValueError("write_header=True but no headers provided "
+                             "(pass --conf-path so headers can be read from conf.py).")
+        missing = [t for t in schema["tables"] if t not in headers]
+        if missing:
+            raise KeyError(
+                f"--write-header set but conf.py has no schema for: {missing}. "
+                f"Check the table names match between the JSON schema and conf.py TABLES."
+            )
+        for t in schema["tables"]:
+            n = len(headers[t])
+            print(f"  header[{t}] = {sep.join(headers[t])}  ({n} cols)")
 
     # upfront scale estimate (CSV-accurate)
     plan = calibrate_scale_csv(data_dir, schema, target_gb, primary_keys)
@@ -250,9 +343,12 @@ def scale_to_target_csv(spark, schema, data_dir, target_dir, target_gb,
             out = scale_table_spark(spark, table_dfs[t], t, scale_columns, maxes,
                                     schema["relationships"], k0, k1)
             if out_partitions:
-                out = out.repartition(out_partitions)
+                out = out.coalesce(out_partitions)
+            # Always write WITHOUT a Spark header: the post-generation merge step
+            # prepends a single correct header per table. Letting Spark write headers
+            # here would put a header in every part file -> header rows mid-data.
             (out.write.mode(mode)
-                .option("header", str(write_header).lower()).option("sep", sep)
+                .option("header", "false").option("sep", sep)
                 .option("nullValue", "NULL")
                 .csv(os.path.join(target_dir, t)))
 
@@ -273,7 +369,16 @@ def scale_to_target_csv(spark, schema, data_dir, target_dir, target_gb,
         print(f"  scale={scale}  size={size/1024**3:.2f} / {target_gb} GB")
 
     print(f"Reached {size/1024**3:.2f} GB at scale {scale}.")
-    return {"scale": scale, "measured_gb": size / (1024 ** 3)}
+
+    print("Merging part files into single <table>.csv per table ...")
+    merged = {}
+    for t in schema["tables"]:
+        path = merge_table_parts(target_dir, t, sep, write_header, headers)
+        mb = os.path.getsize(path) / 1024 ** 2
+        print(f"  {t}.csv  ({mb:.1f} MB)")
+        merged[t] = path
+
+    return {"scale": scale, "measured_gb": size / (1024 ** 3), "merged": merged}
 
 
 # ===========================================================================
@@ -325,7 +430,24 @@ if __name__ == "__main__":
     parser.add_argument(
         "--write-header",
         action="store_true",
-        help="Write headers to generated CSV files.",
+        help="Prepend a header row to each merged <table>.csv. Column order is "
+             "read from the conf.py given by --conf-path (its TABLES schemas).",
+    )
+
+    parser.add_argument(
+        "--conf-path",
+        default=None,
+        help="Path to the importer's conf.py. Required with --write-header: "
+             "column names/order for headers are read from its TABLES list.",
+    )
+
+    parser.add_argument(
+        "--out-partitions",
+        type=int,
+        default=None,
+        help="Coalesce each table's output to this many part files per batch "
+             "before the merge step. Lower = fewer/larger parts (less merge I/O), "
+             "but too low starves parallelism. Default: leave Spark's partitioning.",
     )
 
     parser.add_argument(
@@ -375,6 +497,19 @@ if __name__ == "__main__":
         if not args.target_dir:
             raise ValueError("--target-dir is required when using --generate")
 
+        # Load headers from conf.py up front so a bad path/missing table fails
+        # before Spark spins up, not hours into generation.
+        headers = None
+        if args.write_header:
+            if not args.conf_path:
+                raise ValueError("--write-header requires --conf-path "
+                                 "(headers are read from conf.py).")
+            conf_path = Path(args.conf_path)
+            if not conf_path.exists():
+                raise FileNotFoundError(f"conf.py not found: {conf_path}")
+            headers = load_headers_from_conf(conf_path)
+            print(f"Loaded headers for {len(headers)} tables from {conf_path}")
+
         target_dir = Path(args.target_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -395,6 +530,8 @@ if __name__ == "__main__":
             write_header=args.write_header,
             source_header=args.source_header,
             batch=args.batch,
+            out_partitions=args.out_partitions,
+            headers=headers,
         )
 
         print(res)
@@ -402,4 +539,4 @@ if __name__ == "__main__":
 # python ./scale_datasest.py --schema-path /mnt/primary/Main/Datasets/schemas/stats_ceb_sf1.json --data-dir /mnt/primary/Main/Datasets/Stats-CEB/datasets --target-gb 1024 --csv-sep ","
 
 #pip install pyspark==3.5.1
-# python ./scale_datasest.py --schema-path /mnt/primary/Main/Datasets/schemas/stats_ceb_sf1.json --data-dir /mnt/primary/Main/Datasets/Stats-CEB/datasets --target-dir /mnt/raid3-extra/datasets/stats_ceb --target-gb 1024 --csv-sep "," --generate --batch 64
+# python ./scale_datasest.py --schema-path /mnt/primary/Main/Datasets/schemas/stats_ceb_sf1.json --data-dir /mnt/primary/Main/Datasets/Stats-CEB/datasets --target-dir /mnt/raid3-extra/datasets/stats_ceb --target-gb 1024 --csv-sep "," --generate --batch 64 --write-header --conf-path /mnt/primary/Main/Datasets/Stats-CEB/conf.py

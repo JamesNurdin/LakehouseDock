@@ -1,17 +1,20 @@
-WITH page_lengths AS (
+WITH parsed_logs AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_length
-    FROM web_pages
+        wl_id,
+        wl_customer_id,
+        wl_item_id,
+        wl_webpage_name,
+        date_parse(wl_timestamp, '%Y-%m-%d %H:%i:%s') AS ts
+    FROM web_logs
+    WHERE wl_timestamp IS NOT NULL
 )
 SELECT
-    w_web_page_type,
-    COUNT(*) AS page_count,
-    AVG(name_length) AS avg_name_length,
-    MAX(name_length) AS max_name_length,
-    slice(array_agg(w_web_page_name ORDER BY name_length DESC), 1, 3) AS top_3_longest_names
-FROM page_lengths
-GROUP BY w_web_page_type
-ORDER BY page_count DESC
+    wl_webpage_name,
+    date_trunc('day', ts) AS log_date,
+    COUNT(*) AS page_views,
+    COUNT(DISTINCT wl_customer_id) AS unique_customers
+FROM parsed_logs
+WHERE ts >= date_add('day', -30, current_timestamp)
+GROUP BY wl_webpage_name, date_trunc('day', ts)
+ORDER BY page_views DESC
+LIMIT 100

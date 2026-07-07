@@ -1,39 +1,37 @@
-WITH sales_detail AS (
-    SELECT
-        ss.ss_store_id,
-        ss.ss_item_id,
-        ss.ss_customer_id,
-        ss.ss_quantity,
-        i.i_price,
-        i.i_comp_price,
-        i.i_category_name,
-        s.s_store_name
+WITH store_sales_agg AS (
+    SELECT i.i_item_id,
+           SUM(ss.ss_quantity) AS total_store_quantity
     FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    JOIN stores s
-        ON ss.ss_store_id = s.s_store_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_item_id
 ),
-store_category_sales AS (
-    SELECT
-        s_store_name,
-        i_category_name,
-        SUM(ss_quantity * i_price) AS total_revenue,
-        SUM(ss_quantity) AS total_units,
-        COUNT(DISTINCT ss_customer_id) AS distinct_customers,
-        SUM(CASE WHEN i_comp_price < i_price THEN ss_quantity * (i_price - i_comp_price) ELSE 0 END) AS lost_revenue_due_to_competition
-    FROM sales_detail
-    GROUP BY s_store_name, i_category_name
-    HAVING SUM(ss_quantity * i_price) > 0
+web_sales_agg AS (
+    SELECT i.i_item_id,
+           SUM(ws.ws_quantity) AS total_web_quantity
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_item_id
+),
+reviews_agg AS (
+    SELECT i.i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id
 )
-SELECT
-    s_store_name,
-    i_category_name,
-    total_revenue,
-    total_units,
-    distinct_customers,
-    lost_revenue_due_to_competition,
-    ROW_NUMBER() OVER (PARTITION BY s_store_name ORDER BY total_revenue DESC) AS category_rank
-FROM store_category_sales
-ORDER BY s_store_name, category_rank
-LIMIT 200
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category,
+       i.i_price,
+       COALESCE(ssa.total_store_quantity, 0) AS total_store_quantity,
+       COALESCE(wsa.total_web_quantity, 0) AS total_web_quantity,
+       r.avg_sentiment,
+       r.review_count
+FROM items i
+LEFT JOIN store_sales_agg ssa ON i.i_item_id = ssa.i_item_id
+LEFT JOIN web_sales_agg wsa ON i.i_item_id = wsa.i_item_id
+LEFT JOIN reviews_agg r ON i.i_item_id = r.i_item_id
+WHERE i.i_category IS NOT NULL
+ORDER BY i.i_category, i.i_name
+LIMIT 100

@@ -1,51 +1,32 @@
-WITH base_categories AS (
-  SELECT DISTINCT i.i_category_id,
-         i.i_category_name
-  FROM items i
+WITH sales_union AS (
+    SELECT ss_customer_id AS customer_id,
+           ss_item_id AS item_id,
+           ss_quantity AS quantity,
+           'store' AS channel
+    FROM store_sales
+    UNION ALL
+    SELECT ws_customer_id AS customer_id,
+           ws_item_id AS item_id,
+           ws_quantity AS quantity,
+           'web' AS channel
+    FROM web_sales
 ),
-category_review_agg AS (
-  SELECT i.i_category_id,
-         i.i_category_name,
-         avg(pr.pr_rating) AS avg_rating
-  FROM product_reviews pr
-  JOIN items i ON pr.pr_item_id = i.i_item_id
-  GROUP BY i.i_category_id, i.i_category_name
-),
-store_sales_agg AS (
-  SELECT i.i_category_id,
-         i.i_category_name,
-         SUM(ss.ss_quantity) AS store_quantity,
-         SUM(ss.ss_quantity * i.i_price) AS store_revenue,
-         COUNT(DISTINCT ss.ss_customer_id) AS store_customers,
-         COUNT(DISTINCT ss.ss_store_id) AS store_count
-  FROM store_sales ss
-  JOIN items i ON ss.ss_item_id = i.i_item_id
-  GROUP BY i.i_category_id, i.i_category_name
-),
-web_sales_agg AS (
-  SELECT i.i_category_id,
-         i.i_category_name,
-         SUM(ws.ws_quantity) AS web_quantity,
-         SUM(ws.ws_quantity * i.i_price) AS web_revenue,
-         COUNT(DISTINCT ws.ws_customer_id) AS web_customers
-  FROM web_sales ws
-  JOIN items i ON ws.ws_item_id = i.i_item_id
-  GROUP BY i.i_category_id, i.i_category_name
+product_review_agg AS (
+    SELECT pr_item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-  bc.i_category_id AS category_id,
-  bc.i_category_name AS category_name,
-  coalesce(ss.store_quantity, 0) + coalesce(ws.web_quantity, 0) AS total_quantity,
-  coalesce(ss.store_revenue, 0) + coalesce(ws.web_revenue, 0) AS total_revenue,
-  cr.avg_rating,
-  coalesce(ss.store_customers, 0) + coalesce(ws.web_customers, 0) AS total_customers,
-  coalesce(ss.store_count, 0) AS store_count
-FROM base_categories bc
-LEFT JOIN store_sales_agg ss
-  ON bc.i_category_id = ss.i_category_id
-LEFT JOIN web_sales_agg ws
-  ON bc.i_category_id = ws.i_category_id
-LEFT JOIN category_review_agg cr
-  ON bc.i_category_id = cr.i_category_id
+SELECT i.i_category_id,
+       i.i_category,
+       SUM(s.quantity) AS total_quantity,
+       SUM(i.i_price * s.quantity) AS total_revenue,
+       AVG(pr.avg_sentiment) AS avg_review_sentiment,
+       COUNT(DISTINCT s.customer_id) AS distinct_customers
+FROM sales_union s
+JOIN items i ON s.item_id = i.i_item_id
+LEFT JOIN product_review_agg pr ON i.i_item_id = pr.pr_item_id
+GROUP BY i.i_category_id, i.i_category
 ORDER BY total_revenue DESC
 LIMIT 10

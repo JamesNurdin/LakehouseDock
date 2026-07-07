@@ -1,23 +1,34 @@
-SELECT
-    s.s_store_id,
-    s.s_store_name,
-    i.i_category_name,
-    SUM(ss.ss_quantity) AS total_quantity,
-    SUM(ss.ss_quantity * i.i_price) AS total_revenue,
-    COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers,
-    SUM(ss.ss_quantity * COALESCE(
-        (SELECT AVG(pr.pr_rating)
-         FROM product_reviews pr
-         WHERE pr.pr_item_id = i.i_item_id), 0)
-    ) / SUM(ss.ss_quantity) AS weighted_avg_rating
-FROM store_sales ss
-JOIN stores s
-    ON ss.ss_store_id = s.s_store_id
-JOIN items i
-    ON ss.ss_item_id = i.i_item_id
-JOIN customers c
-    ON ss.ss_customer_id = c.c_customer_id
-WHERE i.i_category_name = 'Electronics'
-GROUP BY s.s_store_id, s.s_store_name, i.i_category_name
-ORDER BY total_revenue DESC
+WITH sales_agg AS (
+    SELECT i.i_item_id,
+           i.i_name,
+           i.i_category,
+           i.i_category_id,
+           SUM(s.quantity) AS total_quantity_sold
+    FROM (
+        SELECT ss_item_id AS item_id, ss_quantity AS quantity
+        FROM store_sales
+        UNION ALL
+        SELECT ws_item_id AS item_id, ws_quantity AS quantity
+        FROM web_sales
+    ) AS s
+    JOIN items i ON i.i_item_id = s.item_id
+    GROUP BY i.i_item_id, i.i_name, i.i_category, i.i_category_id
+),
+reviews_agg AS (
+    SELECT i.i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON i.i_item_id = pr.pr_item_id
+    GROUP BY i.i_item_id
+)
+SELECT s.i_item_id,
+       s.i_name,
+       s.i_category,
+       s.total_quantity_sold,
+       COALESCE(r.avg_sentiment, 0) AS avg_sentiment,
+       COALESCE(r.review_count, 0) AS review_count
+FROM sales_agg s
+LEFT JOIN reviews_agg r ON r.i_item_id = s.i_item_id
+ORDER BY s.total_quantity_sold DESC
 LIMIT 10

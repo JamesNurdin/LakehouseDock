@@ -1,19 +1,28 @@
-WITH page_lengths AS (
+WITH store_agg AS (
     SELECT
-        w_web_page_type,
-        length(w_web_page_name) AS name_len,
-        w_web_page_id
-    FROM web_pages
-    WHERE w_web_page_name IS NOT NULL
+        i.i_category,
+        SUM(ss.ss_quantity) AS store_quantity,
+        SUM(ss.ss_quantity * i.i_price) AS store_revenue
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+web_agg AS (
+    SELECT
+        i.i_category,
+        SUM(ws.ws_quantity) AS web_quantity,
+        SUM(ws.ws_quantity * i.i_price) AS web_revenue
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
 SELECT
-    w_web_page_type,
-    COUNT(*) AS total_pages,
-    COUNT(DISTINCT w_web_page_id) AS distinct_page_ids,
-    AVG(name_len) AS avg_name_len,
-    MIN(name_len) AS min_name_len,
-    MAX(name_len) AS max_name_len
-FROM page_lengths
-GROUP BY w_web_page_type
-HAVING COUNT(*) > 5
-ORDER BY total_pages DESC
+    COALESCE(sa.i_category, wa.i_category) AS category,
+    COALESCE(sa.store_quantity, 0) AS store_quantity,
+    COALESCE(sa.store_revenue, 0) AS store_revenue,
+    COALESCE(wa.web_quantity, 0) AS web_quantity,
+    COALESCE(wa.web_revenue, 0) AS web_revenue
+FROM store_agg sa
+FULL OUTER JOIN web_agg wa
+    ON sa.i_category = wa.i_category
+ORDER BY category

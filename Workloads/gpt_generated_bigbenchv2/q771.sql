@@ -1,37 +1,42 @@
-WITH transaction_metrics AS (
-    SELECT
-        ss.ss_transaction_id,
-        ss.ss_customer_id,
-        ss.ss_store_id,
-        ss.ss_quantity,
-        ss.ss_quantity * i.i_price AS revenue,
-        ss.ss_quantity * (i.i_price - i.i_comp_price) AS price_diff
-    FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
+WITH combined_sales AS (
+    SELECT ss_transaction_id AS transaction_id,
+           ss_customer_id AS customer_id,
+           ss_item_id AS item_id,
+           ss_quantity AS quantity,
+           ss_store_id AS store_id,
+           ss_ts AS ts
+    FROM store_sales
+    UNION ALL
+    SELECT ws_transaction_id AS transaction_id,
+           ws_customer_id AS customer_id,
+           ws_item_id AS item_id,
+           ws_quantity AS quantity,
+           CAST(NULL AS bigint) AS store_id,
+           ws_ts AS ts
+    FROM web_sales
 ),
-customer_store_agg AS (
-    SELECT
-        tm.ss_customer_id,
-        tm.ss_store_id,
-        SUM(tm.revenue) AS total_revenue,
-        SUM(tm.price_diff) AS total_price_diff,
-        SUM(tm.ss_quantity) AS total_quantity,
-        COUNT(DISTINCT tm.ss_transaction_id) AS transaction_count
-    FROM transaction_metrics tm
-    GROUP BY tm.ss_customer_id, tm.ss_store_id
+sales_agg AS (
+    SELECT cs.item_id,
+           SUM(cs.quantity) AS total_quantity,
+           SUM(cs.quantity * i.i_price) AS total_revenue
+    FROM combined_sales cs
+    JOIN items i ON cs.item_id = i.i_item_id
+    GROUP BY cs.item_id
+),
+review_agg AS (
+    SELECT pr_item_id AS item_id,
+           AVG(pr_sentiment) AS avg_sentiment
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    c.c_customer_id,
-    c.c_name,
-    cs.ss_store_id,
-    cs.total_revenue,
-    cs.total_price_diff,
-    cs.total_quantity,
-    cs.transaction_count,
-    ROW_NUMBER() OVER (PARTITION BY cs.ss_store_id ORDER BY cs.total_revenue DESC) AS revenue_rank_in_store
-FROM customer_store_agg cs
-JOIN customers c
-    ON cs.ss_customer_id = c.c_customer_id
-ORDER BY cs.total_revenue DESC
-LIMIT 100
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category,
+       s.total_quantity,
+       s.total_revenue,
+       r.avg_sentiment
+FROM items i
+JOIN sales_agg s ON i.i_item_id = s.item_id
+LEFT JOIN review_agg r ON i.i_item_id = r.item_id
+ORDER BY s.total_revenue DESC
+LIMIT 10

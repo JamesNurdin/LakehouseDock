@@ -1,26 +1,40 @@
-WITH page_lengths AS (
+WITH store_item_sales AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len,
-        ROW_NUMBER() OVER (PARTITION BY w_web_page_type ORDER BY length(w_web_page_name) DESC) AS rn
-    FROM web_pages
+        ss.ss_store_id AS store_id,
+        i.i_category AS category,
+        SUM(ss.ss_quantity) AS total_store_quantity,
+        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY ss.ss_store_id, i.i_category
 ),
-page_stats AS (
+item_reviews AS (
     SELECT
-        w_web_page_type,
-        COUNT(*) AS total_pages,
-        AVG(name_len) AS avg_name_len,
-        ARRAY_AGG(w_web_page_name) FILTER (WHERE rn <= 3) AS top_3_longest_names
-    FROM page_lengths
-    GROUP BY w_web_page_type
+        i.i_category AS category,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+web_item_sales AS (
+    SELECT
+        i.i_category AS category,
+        SUM(ws.ws_quantity) AS total_web_quantity
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
 SELECT
-    w_web_page_type,
-    total_pages,
-    avg_name_len,
-    ROW_NUMBER() OVER (ORDER BY total_pages DESC) AS type_rank,
-    top_3_longest_names
-FROM page_stats
-ORDER BY type_rank
+    s.s_store_name,
+    sis.category,
+    sis.total_store_quantity,
+    wis.total_web_quantity,
+    ir.avg_sentiment,
+    ir.review_count,
+    sis.distinct_customers
+FROM store_item_sales sis
+JOIN stores s ON sis.store_id = s.s_store_id
+LEFT JOIN item_reviews ir ON sis.category = ir.category
+LEFT JOIN web_item_sales wis ON sis.category = wis.category
+ORDER BY s.s_store_name, sis.category

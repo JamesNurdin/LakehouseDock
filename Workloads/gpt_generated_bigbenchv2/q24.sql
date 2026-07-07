@@ -1,18 +1,37 @@
-WITH page_lengths AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        LENGTH(w_web_page_name) AS name_len
-    FROM web_pages
+WITH store_sales_agg AS (
+    SELECT ss_item_id,
+           SUM(ss_quantity) AS store_quantity,
+           COUNT(*) AS store_transactions
+    FROM store_sales
+    GROUP BY ss_item_id
+),
+web_sales_agg AS (
+    SELECT ws_item_id,
+           SUM(ws_quantity) AS web_quantity,
+           COUNT(*) AS web_transactions
+    FROM web_sales
+    GROUP BY ws_item_id
+),
+review_agg AS (
+    SELECT pr_item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    w_web_page_type,
-    COUNT(*) AS total_pages,
-    AVG(name_len) AS avg_name_len,
-    MIN(name_len) AS min_name_len,
-    MAX(name_len) AS max_name_len,
-    COUNT(DISTINCT w_web_page_id) AS distinct_pages
-FROM page_lengths
-GROUP BY w_web_page_type
-ORDER BY total_pages DESC
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category,
+       i.i_price,
+       COALESCE(sa.store_quantity, 0) + COALESCE(wa.web_quantity, 0) AS total_quantity_sold,
+       COALESCE(sa.store_quantity, 0) AS store_quantity,
+       COALESCE(wa.web_quantity, 0) AS web_quantity,
+       ra.avg_sentiment,
+       COALESCE(ra.review_count, 0) AS review_count,
+       (COALESCE(sa.store_quantity, 0) + COALESCE(wa.web_quantity, 0)) * i.i_price AS total_revenue
+FROM items i
+LEFT JOIN store_sales_agg sa ON i.i_item_id = sa.ss_item_id
+LEFT JOIN web_sales_agg wa ON i.i_item_id = wa.ws_item_id
+LEFT JOIN review_agg ra ON i.i_item_id = ra.pr_item_id
+ORDER BY total_quantity_sold DESC
+LIMIT 20

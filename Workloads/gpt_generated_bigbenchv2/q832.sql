@@ -1,59 +1,35 @@
-WITH
-    item_ratings AS (
-        SELECT i.i_item_id,
-               AVG(pr.pr_rating) AS avg_rating,
-               COUNT(*) AS review_count
-        FROM items i
-        JOIN product_reviews pr ON pr.pr_item_id = i.i_item_id
-        GROUP BY i.i_item_id
-    ),
-    customer_store_sales AS (
-        SELECT ss.ss_customer_id,
-               SUM(ss.ss_quantity) AS store_quantity,
-               SUM(ss.ss_quantity * i.i_price) AS store_revenue,
-               COUNT(DISTINCT ss.ss_item_id) AS distinct_items_store
-        FROM store_sales ss
-        JOIN items i ON ss.ss_item_id = i.i_item_id
-        GROUP BY ss.ss_customer_id
-    ),
-    customer_web_sales AS (
-        SELECT ws.ws_customer_id,
-               SUM(ws.ws_quantity) AS web_quantity,
-               SUM(ws.ws_quantity * i.i_price) AS web_revenue,
-               COUNT(DISTINCT ws.ws_item_id) AS distinct_items_web
-        FROM web_sales ws
-        JOIN items i ON ws.ws_item_id = i.i_item_id
-        GROUP BY ws.ws_customer_id
-    ),
-    customer_item_ratings AS (
-        SELECT cs.ss_customer_id AS c_id,
-               AVG(ir.avg_rating) AS avg_item_rating
-        FROM store_sales cs
-        JOIN item_ratings ir ON cs.ss_item_id = ir.i_item_id
-        GROUP BY cs.ss_customer_id
-        UNION ALL
-        SELECT cw.ws_customer_id AS c_id,
-               AVG(ir.avg_rating) AS avg_item_rating
-        FROM web_sales cw
-        JOIN item_ratings ir ON cw.ws_item_id = ir.i_item_id
-        GROUP BY cw.ws_customer_id
-    ),
-    customer_avg_rating AS (
-        SELECT c_id,
-               AVG(avg_item_rating) AS avg_item_rating
-        FROM customer_item_ratings
-        GROUP BY c_id
-    )
-SELECT c.c_customer_id,
-       c.c_name,
-       COALESCE(cs.store_quantity, 0) AS total_store_quantity,
-       COALESCE(cs.store_revenue, 0) AS total_store_revenue,
-       COALESCE(ws.web_quantity, 0) AS total_web_quantity,
-       COALESCE(ws.web_revenue, 0) AS total_web_revenue,
-       COALESCE(ar.avg_item_rating, 0) AS avg_item_rating
-FROM customers c
-LEFT JOIN customer_store_sales cs ON cs.ss_customer_id = c.c_customer_id
-LEFT JOIN customer_web_sales ws ON ws.ws_customer_id = c.c_customer_id
-LEFT JOIN customer_avg_rating ar ON ar.c_id = c.c_customer_id
-ORDER BY total_store_revenue DESC
+WITH store_category_sales AS (
+    SELECT
+        ss.ss_store_id,
+        i.i_category_id,
+        i.i_category,
+        SUM(ss.ss_quantity) AS total_quantity
+    FROM store_sales ss
+    JOIN items i
+        ON ss.ss_item_id = i.i_item_id
+    GROUP BY ss.ss_store_id, i.i_category_id, i.i_category
+),
+category_sentiment AS (
+    SELECT
+        i.i_category_id,
+        i.i_category,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(*) AS review_cnt
+    FROM product_reviews pr
+    JOIN items i
+        ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+)
+SELECT
+    s.s_store_name,
+    cs.i_category,
+    scs.total_quantity,
+    cs.avg_sentiment,
+    cs.review_cnt
+FROM store_category_sales scs
+JOIN stores s
+    ON scs.ss_store_id = s.s_store_id
+JOIN category_sentiment cs
+    ON scs.i_category_id = cs.i_category_id
+ORDER BY scs.total_quantity DESC
 LIMIT 100

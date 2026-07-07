@@ -1,11 +1,18 @@
+WITH sales_by_customer_store AS (
+    SELECT
+        ss.ss_store_id,
+        ss.ss_customer_id,
+        SUM(ss.ss_quantity) AS total_quantity,
+        COUNT(DISTINCT ss.ss_transaction_id) AS transaction_count
+    FROM store_sales ss
+    GROUP BY ss.ss_store_id, ss.ss_customer_id
+)
 SELECT
-    w_web_page_type,
-    COUNT(*) AS page_count,
-    COUNT(DISTINCT w_web_page_name) AS distinct_name_count,
-    AVG(length(w_web_page_name)) AS avg_name_length,
-    MAX(length(w_web_page_name)) AS max_name_length
-FROM web_pages
-WHERE w_web_page_type IS NOT NULL
-GROUP BY w_web_page_type
-HAVING COUNT(*) > 5
-ORDER BY page_count DESC
+    s.s_store_name,
+    c.c_name,
+    sbcs.total_quantity,
+    sbcs.transaction_count
+FROM sales_by_customer_store sbcs
+INNER JOIN stores s ON sbcs.ss_store_id = s.s_store_id
+INNER JOIN customers c ON sbcs.ss_customer_id = c.c_customer_id
+ORDER BY s.s_store_name, sbcs.total_quantity DESC

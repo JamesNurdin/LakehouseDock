@@ -1,26 +1,29 @@
-WITH customer_store_sales AS (
-    SELECT
-        ss.ss_store_id,
-        ss.ss_customer_id,
-        SUM(ss.ss_quantity) AS total_quantity
+WITH combined_sales AS (
+    SELECT ss.ss_transaction_id AS transaction_id,
+           ss.ss_customer_id AS customer_id,
+           ss.ss_item_id AS item_id,
+           ss.ss_quantity AS quantity,
+           'store' AS channel
     FROM store_sales ss
-    GROUP BY ss.ss_store_id, ss.ss_customer_id
-),
-ranked_sales AS (
-    SELECT
-        cs.ss_store_id,
-        cs.ss_customer_id,
-        cs.total_quantity,
-        ROW_NUMBER() OVER (PARTITION BY cs.ss_store_id ORDER BY cs.total_quantity DESC) AS rn
-    FROM customer_store_sales cs
+    UNION ALL
+    SELECT ws.ws_transaction_id AS transaction_id,
+           ws.ws_customer_id AS customer_id,
+           ws.ws_item_id AS item_id,
+           ws.ws_quantity AS quantity,
+           'web' AS channel
+    FROM web_sales ws
 )
-SELECT
-    s.s_store_name,
-    c.c_name,
-    rs.total_quantity,
-    rs.rn AS customer_rank_in_store
-FROM ranked_sales rs
-JOIN stores s ON rs.ss_store_id = s.s_store_id
-JOIN customers c ON rs.ss_customer_id = c.c_customer_id
-WHERE rs.rn <= 5
-ORDER BY s.s_store_name, rs.rn
+SELECT i.i_category_id,
+       i.i_category,
+       cs.channel,
+       SUM(cs.quantity) AS total_quantity_sold,
+       COUNT(DISTINCT cs.customer_id) AS distinct_customers,
+       AVG(pr.pr_sentiment) AS avg_sentiment,
+       MIN(i.i_price) AS min_price,
+       MAX(i.i_price) AS max_price
+FROM combined_sales cs
+JOIN items i ON cs.item_id = i.i_item_id
+LEFT JOIN product_reviews pr ON i.i_item_id = pr.pr_item_id
+GROUP BY i.i_category_id, i.i_category, cs.channel
+ORDER BY total_quantity_sold DESC
+LIMIT 10

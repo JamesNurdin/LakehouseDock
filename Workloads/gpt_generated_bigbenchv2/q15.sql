@@ -1,28 +1,28 @@
-WITH page_lengths AS (
+WITH store_sales_agg AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
+        ss.ss_store_id,
+        ss.ss_item_id,
+        SUM(ss.ss_quantity) AS total_quantity_sold
+    FROM store_sales ss
+    GROUP BY ss.ss_store_id, ss.ss_item_id
 ),
-ranked_pages AS (
+reviews_agg AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        name_len,
-        row_number() OVER (PARTITION BY w_web_page_type ORDER BY name_len DESC) AS rn,
-        count(*) OVER (PARTITION BY w_web_page_type) AS type_page_count
-    FROM page_lengths
+        pr.pr_item_id,
+        COUNT(*) AS review_count,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
 )
 SELECT
-    w_web_page_type,
-    w_web_page_id,
-    w_web_page_name,
-    name_len AS name_length,
-    rn AS rank_within_type,
-    type_page_count
-FROM ranked_pages
-WHERE rn <= 3
-ORDER BY w_web_page_type, rn
+    s.s_store_name,
+    i.i_category,
+    i.i_category_id,
+    ss_agg.total_quantity_sold,
+    COALESCE(r_agg.review_count, 0) AS review_count,
+    r_agg.avg_sentiment
+FROM store_sales_agg ss_agg
+JOIN stores s ON ss_agg.ss_store_id = s.s_store_id
+JOIN items i ON ss_agg.ss_item_id = i.i_item_id
+LEFT JOIN reviews_agg r_agg ON i.i_item_id = r_agg.pr_item_id
+ORDER BY s.s_store_name, i.i_category_id

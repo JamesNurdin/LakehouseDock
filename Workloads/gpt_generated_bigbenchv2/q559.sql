@@ -1,35 +1,40 @@
-WITH purchases AS (
-    SELECT ss.ss_customer_id AS customer_id,
-           ss.ss_item_id AS item_id,
-           ss.ss_quantity AS quantity
-    FROM store_sales ss
-    UNION ALL
-    SELECT ws.ws_customer_id AS customer_id,
-           ws.ws_item_id AS item_id,
-           ws.ws_quantity AS quantity
-    FROM web_sales ws
+WITH sales AS (
+    SELECT ss_item_id AS item_id,
+           SUM(ss_quantity) AS store_qty
+    FROM store_sales
+    GROUP BY ss_item_id
 ),
-customer_purchases AS (
-    SELECT
-        p.customer_id,
-        SUM(p.quantity) AS total_quantity,
-        COUNT(DISTINCT p.item_id) AS distinct_items,
-        AVG(pr.pr_rating) AS avg_rating,
-        COUNT(pr.pr_review_id) AS review_count
-    FROM purchases p
-    JOIN customers c ON c.c_customer_id = p.customer_id
-    JOIN items i ON i.i_item_id = p.item_id
-    LEFT JOIN product_reviews pr ON pr.pr_item_id = i.i_item_id
-    GROUP BY p.customer_id
+web AS (
+    SELECT ws_item_id AS item_id,
+           SUM(ws_quantity) AS web_qty
+    FROM web_sales
+    GROUP BY ws_item_id
+),
+sales_combined AS (
+    SELECT COALESCE(s.item_id, w.item_id) AS item_id,
+           COALESCE(s.store_qty, 0) AS store_qty,
+           COALESCE(w.web_qty, 0) AS web_qty,
+           COALESCE(s.store_qty, 0) + COALESCE(w.web_qty, 0) AS total_qty
+    FROM sales s
+    FULL OUTER JOIN web w ON s.item_id = w.item_id
+),
+reviews AS (
+    SELECT pr_item_id AS item_id,
+           COUNT(*) AS review_count,
+           AVG(pr_sentiment) AS avg_sentiment
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    c.c_customer_id,
-    c.c_name,
-    cp.total_quantity,
-    cp.distinct_items,
-    cp.avg_rating,
-    cp.review_count
-FROM customer_purchases cp
-JOIN customers c ON c.c_customer_id = cp.customer_id
-ORDER BY cp.total_quantity DESC
-LIMIT 20
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category,
+       sc.total_qty,
+       sc.store_qty,
+       sc.web_qty,
+       r.review_count,
+       r.avg_sentiment
+FROM sales_combined sc
+JOIN items i ON sc.item_id = i.i_item_id
+LEFT JOIN reviews r ON i.i_item_id = r.item_id
+ORDER BY sc.total_qty DESC
+LIMIT 10
