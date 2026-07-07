@@ -189,6 +189,47 @@ def quantile_pinball_loss(y: np.ndarray, qhat: float, p: float) -> float:
     u = y - float(qhat)
     return float(np.mean(np.maximum(p * u, (p - 1.0) * u)))
 
+
+# -----------------------------
+# CRPS (Continuous Ranked Probability Score)
+# -----------------------------
+
+def crps_gaussian(y: float, mu: float, sigma: float) -> float:
+    """
+    Closed-form CRPS for a Gaussian predictive N(mu, sigma^2) and scalar obs y
+    (Gneiting & Raftery 2007). Lower is better; a proper scoring rule.
+
+    We evaluate in the same space as the predictive parameters. For the
+    lognormal runtime heads (mu_log, sigma_log), call with y = log(T) to obtain
+    the log-space CRPS, which is comparable across all Gaussian-in-log models.
+    """
+    from scipy.stats import norm
+    sigma = _clip_sigma(float(sigma))
+    z = (float(y) - float(mu)) / sigma
+    return float(sigma * (z * (2.0 * norm.cdf(z) - 1.0) + 2.0 * norm.pdf(z) - 1.0 / np.sqrt(np.pi)))
+
+
+def crps_ensemble(y: float, samples: np.ndarray) -> float:
+    """
+    Empirical CRPS from predictive samples (energy form):
+        CRPS = E|X - y| - 0.5 E|X - X'|
+    Suitable for sample- or quantile-based heads. Uses the O(m log m) sorted
+    identity for the second term.
+    """
+    s = np.asarray(samples, dtype=float)
+    s = s[np.isfinite(s)]
+    m = s.size
+    if m == 0:
+        return float("nan")
+    y = float(y)
+    term1 = float(np.mean(np.abs(s - y)))
+    s_sorted = np.sort(s)
+    i = np.arange(1, m + 1)
+    # sum_{j,k} |s_j - s_k| = 2 * sum_i (2i - m - 1) * s_sorted[i]
+    pair_sum = 2.0 * float(np.sum((2.0 * i - m - 1.0) * s_sorted))
+    term2 = 0.5 * pair_sum / (m * m)
+    return float(term1 - term2)
+
 # -----------------------------
 # Baseline evaluation
 # -----------------------------
@@ -438,6 +479,8 @@ def evaluate_unseen_queries(
         runtime_mae_mean = float(abs(T - mean_pred))
         runtime_mae_median = float(abs(T - median_pred))
         runtime_nll = lognormal_nll(np.asarray([T], dtype=float), mu_log, sigma_log)
+        # CRPS in log-space (comparable across all Gaussian-in-log runtime heads)
+        runtime_crps = crps_gaussian(float(np.log(max(T, 1e-12))), mu_log, sigma_log)
 
         runtime_cov = {}
         runtime_pinball = {}
@@ -511,6 +554,7 @@ def evaluate_unseen_queries(
             "runtime_mae_mean": runtime_mae_mean,
             "runtime_mae_median": runtime_mae_median,
             "runtime_nll": runtime_nll,
+            "runtime_crps": runtime_crps,
 
             # Trace errors
             "trace_mae_tau": trace_mae_tau,
