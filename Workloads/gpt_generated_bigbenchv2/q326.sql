@@ -1,0 +1,34 @@
+WITH store_agg AS (
+  SELECT i.i_item_id,
+         i.i_name,
+         i.i_category,
+         SUM(ss.ss_quantity) AS store_quantity,
+         SUM(ss.ss_quantity * i.i_price) AS store_revenue
+  FROM store_sales ss
+  JOIN items i ON ss.ss_item_id = i.i_item_id
+  GROUP BY i.i_item_id, i.i_name, i.i_category
+),
+web_agg AS (
+  SELECT i.i_item_id,
+         i.i_name,
+         i.i_category,
+         SUM(ws.ws_quantity) AS web_quantity,
+         SUM(ws.ws_quantity * i.i_price) AS web_revenue
+  FROM web_sales ws
+  JOIN items i ON ws.ws_item_id = i.i_item_id
+  GROUP BY i.i_item_id, i.i_name, i.i_category
+)
+SELECT COALESCE(s.i_item_id, w.i_item_id) AS item_id,
+       COALESCE(s.i_name, w.i_name) AS item_name,
+       COALESCE(s.i_category, w.i_category) AS category,
+       COALESCE(s.store_quantity, 0) AS store_quantity,
+       COALESCE(s.store_revenue, 0) AS store_revenue,
+       COALESCE(w.web_quantity, 0) AS web_quantity,
+       COALESCE(w.web_revenue, 0) AS web_revenue,
+       COALESCE(s.store_quantity, 0) + COALESCE(w.web_quantity, 0) AS total_quantity,
+       COALESCE(s.store_revenue, 0) + COALESCE(w.web_revenue, 0) AS total_revenue
+FROM store_agg s
+FULL OUTER JOIN web_agg w
+  ON s.i_item_id = w.i_item_id
+ORDER BY total_revenue DESC
+LIMIT 10
