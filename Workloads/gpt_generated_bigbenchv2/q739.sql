@@ -1,17 +1,44 @@
-WITH page_lengths AS (
-    SELECT
-        w_web_page_type,
-        LENGTH(w_web_page_name) AS name_len
-    FROM web_pages
-    WHERE w_web_page_type IS NOT NULL
+WITH combined_sales AS (
+    SELECT ss_item_id AS item_id,
+           ss_quantity AS quantity,
+           'store' AS channel
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id,
+           ws_quantity AS quantity,
+           'web' AS channel
+    FROM web_sales
+),
+sales_agg AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           SUM(CASE WHEN cs.channel = 'store' THEN cs.quantity ELSE 0 END) AS total_store_quantity,
+           SUM(CASE WHEN cs.channel = 'store' THEN i.i_price * cs.quantity ELSE 0 END) AS total_store_revenue,
+           SUM(CASE WHEN cs.channel = 'web' THEN cs.quantity ELSE 0 END) AS total_web_quantity,
+           SUM(CASE WHEN cs.channel = 'web' THEN i.i_price * cs.quantity ELSE 0 END) AS total_web_revenue
+    FROM combined_sales cs
+    JOIN items i
+      ON cs.item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+review_agg AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i
+      ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
-SELECT
-    w_web_page_type,
-    COUNT(*) AS page_count,
-    AVG(name_len) AS avg_name_len,
-    approx_percentile(name_len, 0.5) AS median_name_len,
-    MIN(name_len) AS min_name_len,
-    MAX(name_len) AS max_name_len
-FROM page_lengths
-GROUP BY w_web_page_type
-ORDER BY page_count DESC
+SELECT sa.i_category_id,
+       sa.i_category,
+       sa.total_store_quantity,
+       sa.total_store_revenue,
+       sa.total_web_quantity,
+       sa.total_web_revenue,
+       ra.avg_sentiment
+FROM sales_agg sa
+LEFT JOIN review_agg ra
+  ON sa.i_category_id = ra.i_category_id
+ORDER BY (sa.total_store_revenue + sa.total_web_revenue) DESC
+LIMIT 20

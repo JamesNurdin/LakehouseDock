@@ -1,18 +1,33 @@
-WITH page_stats AS (
+WITH store_sales_enriched AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        length(w_web_page_name) AS name_length,
-        w_web_page_type
-    FROM web_pages
-    WHERE w_web_page_name IS NOT NULL
+        ss.ss_quantity AS quantity,
+        i.i_price AS price,
+        i.i_category AS category,
+        s.s_store_name AS store_name
+    FROM store_sales ss
+    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    JOIN stores s ON ss.ss_store_id = s.s_store_id
+),
+web_sales_enriched AS (
+    SELECT
+        ws.ws_quantity AS quantity,
+        i.i_price AS price,
+        i.i_category AS category,
+        CAST('Online' AS varchar) AS store_name
+    FROM web_sales ws
+    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
+    JOIN items i ON ws.ws_item_id = i.i_item_id
 )
 SELECT
-    w_web_page_type,
-    COUNT(*) AS page_count,
-    AVG(name_length) AS avg_name_length,
-    MAX(name_length) AS max_name_length,
-    MIN(name_length) AS min_name_length
-FROM page_stats
-GROUP BY w_web_page_type
-ORDER BY page_count DESC
+    all_sales.category,
+    all_sales.store_name,
+    SUM(all_sales.quantity) AS total_quantity,
+    SUM(all_sales.quantity * all_sales.price) AS total_revenue
+FROM (
+    SELECT * FROM store_sales_enriched
+    UNION ALL
+    SELECT * FROM web_sales_enriched
+) AS all_sales
+GROUP BY all_sales.category, all_sales.store_name
+ORDER BY total_revenue DESC

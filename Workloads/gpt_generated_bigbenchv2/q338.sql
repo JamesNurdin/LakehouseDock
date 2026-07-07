@@ -1,36 +1,28 @@
-WITH sales_with_date AS (
+WITH customer_page_views AS (
     SELECT
-        ss_store_id,
-        ss_customer_id,
-        ss_quantity,
-        date(CAST(ss_ts AS TIMESTAMP)) AS transaction_date
-    FROM store_sales
-),
-aggregated AS (
-    SELECT
-        swd.ss_store_id,
-        swd.transaction_date,
-        SUM(swd.ss_quantity) AS total_quantity,
-        COUNT(DISTINCT swd.ss_customer_id) AS distinct_customers,
-        COUNT(*) AS total_transactions,
-        AVG(swd.ss_quantity) AS avg_quantity_per_transaction
-    FROM sales_with_date swd
-    GROUP BY
-        swd.ss_store_id,
-        swd.transaction_date
+        wl_customer_id,
+        wl_webpage_name,
+        COUNT(*) AS view_count,
+        MIN(CAST(wl_timestamp AS timestamp)) AS first_view,
+        MAX(CAST(wl_timestamp AS timestamp)) AS last_view
+    FROM web_logs
+    WHERE CAST(wl_timestamp AS timestamp) >= TIMESTAMP '2023-01-01'
+      AND CAST(wl_timestamp AS timestamp) < TIMESTAMP '2024-01-01'
+    GROUP BY wl_customer_id, wl_webpage_name
 )
 SELECT
-    s.s_store_name,
-    agg.transaction_date,
-    agg.total_quantity,
-    agg.distinct_customers,
-    agg.total_transactions,
-    agg.avg_quantity_per_transaction,
-    RANK() OVER (PARTITION BY agg.transaction_date ORDER BY agg.total_quantity DESC) AS rank_by_quantity
-FROM aggregated agg
-JOIN stores s
-    ON agg.ss_store_id = s.s_store_id
-ORDER BY
-    agg.transaction_date DESC,
-    rank_by_quantity
-LIMIT 20
+    wl.wl_id,
+    wl.wl_customer_id,
+    wl.wl_item_id,
+    wl.wl_webpage_name,
+    wl.wl_timestamp,
+    cpv.view_count,
+    cpv.first_view,
+    cpv.last_view
+FROM web_logs wl
+JOIN customer_page_views cpv
+    ON wl.wl_customer_id = cpv.wl_customer_id
+   AND wl.wl_webpage_name = cpv.wl_webpage_name
+WHERE cpv.view_count > 10
+ORDER BY cpv.view_count DESC, cpv.first_view ASC
+LIMIT 100

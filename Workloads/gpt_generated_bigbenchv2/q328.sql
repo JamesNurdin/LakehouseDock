@@ -1,48 +1,32 @@
-WITH item_sales AS (
-    SELECT
-        i.i_item_id,
-        i.i_name,
-        i.i_category_id,
-        i.i_category_name,
-        i.i_price,
-        i.i_comp_price,
-        i.i_class_id,
-        SUM(ws.ws_quantity) AS total_quantity,
-        SUM(ws.ws_quantity * i.i_price) AS total_revenue,
-        MAX(ws.ws_ts) AS latest_ts
-    FROM web_sales ws
-    JOIN items i
-        ON ws.ws_item_id = i.i_item_id
-    GROUP BY
-        i.i_item_id,
-        i.i_name,
-        i.i_category_id,
-        i.i_category_name,
-        i.i_price,
-        i.i_comp_price,
-        i.i_class_id
+WITH sales AS (
+    SELECT ss_item_id AS item_id, ss_quantity AS quantity
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id, ws_quantity AS quantity
+    FROM web_sales
 ),
-ranked_items AS (
-    SELECT
-        i_category_id,
-        i_category_name,
-        i_item_id,
-        i_name,
-        total_quantity,
-        total_revenue,
-        latest_ts,
-        ROW_NUMBER() OVER (PARTITION BY i_category_id ORDER BY total_revenue DESC) AS rank_in_category
-    FROM item_sales
+item_sales AS (
+    SELECT s.item_id,
+           SUM(s.quantity) AS total_quantity
+    FROM sales s
+    GROUP BY s.item_id
+),
+item_reviews AS (
+    SELECT pr.pr_item_id AS item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
 )
-SELECT
-    i_category_id,
-    i_category_name,
-    i_item_id,
-    i_name,
-    total_quantity,
-    total_revenue,
-    latest_ts,
-    rank_in_category
-FROM ranked_items
-WHERE rank_in_category <= 3
-ORDER BY i_category_id, rank_in_category
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category,
+       COALESCE(isales.total_quantity, 0) AS total_quantity_sold,
+       COALESCE(isales.total_quantity, 0) * i.i_price AS total_revenue,
+       ir.avg_sentiment
+FROM items i
+LEFT JOIN item_sales isales
+    ON i.i_item_id = isales.item_id
+LEFT JOIN item_reviews ir
+    ON i.i_item_id = ir.item_id
+ORDER BY total_quantity_sold DESC
+LIMIT 10

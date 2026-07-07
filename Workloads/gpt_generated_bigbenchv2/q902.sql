@@ -1,23 +1,38 @@
-WITH sales_ts AS (
+WITH store_agg AS (
     SELECT
-        ss_transaction_id,
-        ss_customer_id,
-        ss_store_id,
-        ss_item_id,
-        ss_quantity,
-        CAST(ss_ts AS timestamp) AS ts
+        ss_item_id AS i_item_id,
+        SUM(ss_quantity) AS store_qty
     FROM store_sales
+    GROUP BY ss_item_id
+),
+web_agg AS (
+    SELECT
+        ws_item_id AS i_item_id,
+        SUM(ws_quantity) AS web_qty
+    FROM web_sales
+    GROUP BY ws_item_id
+),
+review_agg AS (
+    SELECT
+        pr_item_id AS i_item_id,
+        AVG(pr_sentiment) AS avg_sentiment,
+        COUNT(*) AS review_cnt
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
 SELECT
-    s.s_store_name,
-    date_trunc('hour', st.ts) AS hour_ts,
-    sum(st.ss_quantity) AS total_quantity
-FROM sales_ts st
-JOIN stores s
-    ON st.ss_store_id = s.s_store_id
-WHERE st.ss_quantity > 0
-GROUP BY
-    s.s_store_name,
-    date_trunc('hour', st.ts)
-ORDER BY total_quantity DESC
+    i.i_item_id,
+    i.i_name,
+    i.i_category,
+    COALESCE(s.store_qty, 0) AS store_qty,
+    COALESCE(w.web_qty, 0) AS web_qty,
+    COALESCE(s.store_qty, 0) + COALESCE(w.web_qty, 0) AS total_qty,
+    r.avg_sentiment,
+    r.review_cnt
+FROM items i
+LEFT JOIN store_agg s ON i.i_item_id = s.i_item_id
+LEFT JOIN web_agg w ON i.i_item_id = w.i_item_id
+LEFT JOIN review_agg r ON i.i_item_id = r.i_item_id
+WHERE COALESCE(s.store_qty, 0) + COALESCE(w.web_qty, 0) > 0
+ORDER BY total_qty DESC
 LIMIT 10

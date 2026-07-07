@@ -1,21 +1,39 @@
-WITH parsed_logs AS (
-    SELECT
-        line,
-        regexp_extract(line, '\\"(GET|POST|PUT|DELETE|HEAD|OPTIONS)\\s', 1) AS method,
-        CAST(regexp_extract(line, '\\"\\s(\\d{3})\\s', 1) AS integer) AS status_code,
-        length(line) AS line_len
-    FROM web_logs
-    WHERE line IS NOT NULL
+WITH store_agg AS (
+    SELECT ss.ss_item_id AS i_item_id,
+           SUM(ss.ss_quantity) AS total_store_quantity,
+           SUM(ss.ss_quantity * i.i_price) AS total_store_revenue
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY ss.ss_item_id
+),
+web_agg AS (
+    SELECT ws.ws_item_id AS i_item_id,
+           SUM(ws.ws_quantity) AS total_web_quantity,
+           SUM(ws.ws_quantity * i.i_price) AS total_web_revenue
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY ws.ws_item_id
+),
+review_agg AS (
+    SELECT pr.pr_item_id AS i_item_id,
+           COUNT(pr.pr_review_id) AS review_count,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
 )
-SELECT
-    method,
-    status_code,
-    COUNT(*) AS request_cnt,
-    AVG(line_len) AS avg_line_len,
-    MIN(line_len) AS min_line_len,
-    MAX(line_len) AS max_line_len
-FROM parsed_logs
-WHERE method IS NOT NULL AND status_code IS NOT NULL
-GROUP BY method, status_code
-ORDER BY request_cnt DESC
-LIMIT 20
+SELECT i.i_category,
+       i.i_category_id,
+       SUM(COALESCE(sa.total_store_quantity, 0)) AS total_store_quantity,
+       SUM(COALESCE(wa.total_web_quantity, 0)) AS total_web_quantity,
+       SUM(COALESCE(sa.total_store_revenue, 0)) AS total_store_revenue,
+       SUM(COALESCE(wa.total_web_revenue, 0)) AS total_web_revenue,
+       SUM(COALESCE(ra.review_count, 0)) AS total_review_count,
+       AVG(ra.avg_sentiment) AS avg_sentiment_across_items
+FROM items i
+LEFT JOIN store_agg sa ON i.i_item_id = sa.i_item_id
+LEFT JOIN web_agg wa ON i.i_item_id = wa.i_item_id
+LEFT JOIN review_agg ra ON i.i_item_id = ra.i_item_id
+WHERE i.i_category IS NOT NULL
+GROUP BY i.i_category, i.i_category_id
+ORDER BY total_store_revenue + total_web_revenue DESC
+LIMIT 10

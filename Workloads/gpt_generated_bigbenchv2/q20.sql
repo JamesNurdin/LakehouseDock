@@ -1,44 +1,32 @@
-WITH store_agg AS (
-    SELECT
-        i.i_category_name,
-        s.s_store_name,
-        'store' AS channel,
-        SUM(ss.ss_quantity) AS total_quantity,
-        SUM(ss.ss_quantity * i.i_price) AS total_sales_amount
-    FROM store_sales ss
-    JOIN customers c
-        ON ss.ss_customer_id = c.c_customer_id
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    JOIN stores s
-        ON ss.ss_store_id = s.s_store_id
-    GROUP BY i.i_category_name, s.s_store_name
+WITH item_review_stats AS (
+    SELECT i.i_item_id AS item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id
 ),
-web_agg AS (
-    SELECT
-        i.i_category_name,
-        CAST(NULL AS varchar) AS s_store_name,
-        'web' AS channel,
-        SUM(ws.ws_quantity) AS total_quantity,
-        SUM(ws.ws_quantity * i.i_price) AS total_sales_amount
-    FROM web_sales ws
-    JOIN customers c
-        ON ws.ws_customer_id = c.c_customer_id
-    JOIN items i
-        ON ws.ws_item_id = i.i_item_id
-    GROUP BY i.i_category_name
-)
-SELECT
-    i_category_name,
-    s_store_name,
-    channel,
-    total_quantity,
-    total_sales_amount
-FROM (
-    SELECT i_category_name, s_store_name, channel, total_quantity, total_sales_amount
-    FROM store_agg
+sales_data AS (
+    SELECT ss.ss_item_id AS item_id,
+           ss.ss_quantity AS quantity,
+           ss.ss_store_id AS store_id,
+           'store' AS channel
+    FROM store_sales ss
     UNION ALL
-    SELECT i_category_name, s_store_name, channel, total_quantity, total_sales_amount
-    FROM web_agg
-) AS combined
-ORDER BY i_category_name, channel, total_sales_amount DESC
+    SELECT ws.ws_item_id AS item_id,
+           ws.ws_quantity AS quantity,
+           NULL AS store_id,
+           'web' AS channel
+    FROM web_sales ws
+)
+SELECT i.i_category,
+       SUM(s.quantity) AS total_quantity,
+       AVG(i.i_price) AS avg_price,
+       AVG(r.avg_sentiment) AS avg_sentiment,
+       SUM(r.review_count) AS total_reviews
+FROM sales_data s
+JOIN items i ON s.item_id = i.i_item_id
+LEFT JOIN item_review_stats r ON i.i_item_id = r.item_id
+LEFT JOIN stores st ON s.store_id = st.s_store_id
+GROUP BY i.i_category
+ORDER BY total_quantity DESC

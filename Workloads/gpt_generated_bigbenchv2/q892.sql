@@ -1,22 +1,28 @@
-WITH page_stats AS (
+WITH item_review_stats AS (
     SELECT
-        w_web_page_type,
-        COUNT(*) AS page_count,
-        COUNT(DISTINCT w_web_page_name) AS distinct_name_count,
-        AVG(LENGTH(w_web_page_name)) AS avg_name_len,
-        MAX(LENGTH(w_web_page_name)) AS max_name_len,
-        MIN(LENGTH(w_web_page_name)) AS min_name_len
-    FROM web_pages
-    GROUP BY w_web_page_type
+        i.i_item_id,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i
+        ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id
 )
 SELECT
-    w_web_page_type,
-    page_count,
-    distinct_name_count,
-    avg_name_len,
-    max_name_len,
-    min_name_len,
-    RANK() OVER (ORDER BY page_count DESC) AS type_rank,
-    SUM(page_count) OVER (ORDER BY page_count DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_page_count
-FROM page_stats
-ORDER BY page_count DESC
+    s.s_store_id,
+    s.s_store_name,
+    SUM(ss.ss_quantity) AS total_quantity_sold,
+    SUM(ss.ss_quantity * i.i_price) AS total_revenue,
+    CASE
+        WHEN SUM(ss.ss_quantity) > 0 THEN SUM(ss.ss_quantity * COALESCE(ir.avg_sentiment, 0)) / SUM(ss.ss_quantity)
+        ELSE NULL
+    END AS weighted_avg_sentiment
+FROM store_sales ss
+JOIN items i
+    ON ss.ss_item_id = i.i_item_id
+JOIN stores s
+    ON ss.ss_store_id = s.s_store_id
+LEFT JOIN item_review_stats ir
+    ON i.i_item_id = ir.i_item_id
+GROUP BY s.s_store_id, s.s_store_name
+ORDER BY total_revenue DESC
+LIMIT 10

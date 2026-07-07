@@ -1,25 +1,37 @@
-WITH item_avg_ratings AS (
-    SELECT i.i_item_id,
-           avg(pr.pr_rating) AS avg_rating
+WITH store_sales_agg AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           SUM(ss.ss_quantity) AS store_quantity
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+web_sales_agg AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           SUM(ws.ws_quantity) AS web_quantity
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+reviews_agg AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           COUNT(pr.pr_review_id) AS review_count,
+           AVG(pr.pr_sentiment) AS avg_sentiment
     FROM product_reviews pr
-    JOIN items i
-        ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_item_id
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
-SELECT s.s_store_id,
-       s.s_store_name,
-       sum(ss.ss_quantity) AS total_quantity_sold,
-       sum(ss.ss_quantity * i.i_price) AS total_revenue,
-       sum(ss.ss_quantity * coalesce(ir.avg_rating, 0)) / nullif(sum(ss.ss_quantity), 0) AS avg_weighted_rating,
-       count(distinct ss.ss_customer_id) AS distinct_customers,
-       count(distinct ss.ss_item_id) AS distinct_items_sold
-FROM store_sales ss
-JOIN stores s
-    ON ss.ss_store_id = s.s_store_id
-JOIN items i
-    ON ss.ss_item_id = i.i_item_id
-LEFT JOIN item_avg_ratings ir
-    ON i.i_item_id = ir.i_item_id
-GROUP BY s.s_store_id, s.s_store_name
-ORDER BY total_revenue DESC
-LIMIT 10
+SELECT COALESCE(ss.i_category_id, ws.i_category_id, rev.i_category_id) AS category_id,
+       COALESCE(ss.i_category, ws.i_category, rev.i_category) AS category_name,
+       COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0) AS total_quantity,
+       COALESCE(rev.review_count, 0) AS review_count,
+       rev.avg_sentiment
+FROM store_sales_agg ss
+FULL OUTER JOIN web_sales_agg ws
+    ON ss.i_category_id = ws.i_category_id
+FULL OUTER JOIN reviews_agg rev
+    ON COALESCE(ss.i_category_id, ws.i_category_id) = rev.i_category_id
+ORDER BY total_quantity DESC
+LIMIT 5

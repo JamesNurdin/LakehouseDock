@@ -1,23 +1,40 @@
-WITH parsed_logs AS (
+WITH store_sales_agg AS (
     SELECT
-        line,
-        regexp_extract(line, '\"(\S+)\s', 1)               AS request_method,
-        regexp_extract(line, '\"\S+\s(\S+)\s', 1)         AS request_path,
-        regexp_extract(line, '\"\s+(\d{3})\s+', 1)        AS status_code,
-        try_cast(regexp_extract(line, '\s(\d+)$', 1) AS bigint) AS response_size
-    FROM web_logs
-    WHERE line IS NOT NULL
+        s.s_store_name,
+        i.i_category,
+        SUM(ss.ss_quantity) AS store_qty
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    JOIN stores s ON ss.ss_store_id = s.s_store_id
+    GROUP BY s.s_store_name, i.i_category
+),
+web_sales_agg AS (
+    SELECT
+        i.i_category,
+        SUM(ws.ws_quantity) AS web_qty
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+reviews_agg AS (
+    SELECT
+        i.i_category,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(*) AS review_cnt
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
 SELECT
-    request_method,
-    request_path,
-    status_code,
-    COUNT(*)                         AS request_count,
-    AVG(response_size)               AS avg_response_size,
-    MIN(response_size)               AS min_response_size,
-    MAX(response_size)               AS max_response_size
-FROM parsed_logs
-WHERE status_code IS NOT NULL
-GROUP BY request_method, request_path, status_code
-ORDER BY request_count DESC
-LIMIT 20
+    ss.s_store_name,
+    ss.i_category,
+    ss.store_qty,
+    COALESCE(ws.web_qty, 0) AS web_qty,
+    ss.store_qty + COALESCE(ws.web_qty, 0) AS total_quantity,
+    r.avg_sentiment,
+    r.review_cnt
+FROM store_sales_agg ss
+LEFT JOIN web_sales_agg ws ON ss.i_category = ws.i_category
+LEFT JOIN reviews_agg r ON ss.i_category = r.i_category
+ORDER BY total_quantity DESC
+LIMIT 10

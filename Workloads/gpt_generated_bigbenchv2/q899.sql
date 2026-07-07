@@ -1,18 +1,21 @@
-WITH page_lengths AS (
+WITH item_sentiment AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
+        pr_item_id,
+        AVG(pr_sentiment) AS avg_sentiment
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
 SELECT
-    w_web_page_type,
-    COUNT(*) AS page_count,
-    AVG(name_len) AS avg_name_length,
-    MIN(name_len) AS min_name_length,
-    MAX(name_len) AS max_name_length,
-    max_by(w_web_page_name, name_len) AS longest_page_name
-FROM page_lengths
-GROUP BY w_web_page_type
-ORDER BY page_count DESC
+    s.s_store_id,
+    s.s_store_name,
+    i.i_category,
+    SUM(ss.ss_quantity) AS total_quantity,
+    SUM(ss.ss_quantity * i.i_price) AS total_revenue,
+    AVG(COALESCE(isent.avg_sentiment, 0)) AS avg_item_sentiment
+FROM store_sales ss
+JOIN stores s ON ss.ss_store_id = s.s_store_id
+JOIN items i ON ss.ss_item_id = i.i_item_id
+LEFT JOIN item_sentiment isent ON i.i_item_id = isent.pr_item_id
+GROUP BY s.s_store_id, s.s_store_name, i.i_category
+ORDER BY total_revenue DESC
+LIMIT 10

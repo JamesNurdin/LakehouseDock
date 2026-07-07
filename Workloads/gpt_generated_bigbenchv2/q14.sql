@@ -1,20 +1,32 @@
-WITH parsed_logs AS (
+WITH item_sales AS (
     SELECT
-        line,
-        length(line) AS line_len,
-        regexp_extract(line, '(\\d{4}-\\d{2}-\\d{2})', 1) AS log_date
-    FROM web_logs
-    WHERE line IS NOT NULL
+        i.i_item_id,
+        SUM(s.quantity) AS total_quantity
+    FROM (
+        SELECT ss_item_id AS item_id, ss_quantity AS quantity FROM store_sales
+        UNION ALL
+        SELECT ws_item_id AS item_id, ws_quantity AS quantity FROM web_sales
+    ) s
+    JOIN items i ON i.i_item_id = s.item_id
+    GROUP BY i.i_item_id
+),
+item_reviews AS (
+    SELECT
+        i.i_item_id,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON i.i_item_id = pr.pr_item_id
+    GROUP BY i.i_item_id
 )
 SELECT
-    log_date,
-    COUNT(*) AS total_logs,
-    COUNT(DISTINCT line) AS unique_lines,
-    AVG(line_len) AS avg_line_length,
-    MAX(line_len) AS max_line_length,
-    MIN(line_len) AS min_line_length
-FROM parsed_logs
-WHERE log_date IS NOT NULL
-GROUP BY log_date
-ORDER BY total_logs DESC
-LIMIT 10
+    i.i_category,
+    i.i_category_id,
+    SUM(COALESCE(isales.total_quantity, 0)) AS total_quantity_sold,
+    AVG(irev.avg_sentiment) AS avg_sentiment,
+    AVG(i.i_price) AS avg_price
+FROM items i
+LEFT JOIN item_sales isales ON isales.i_item_id = i.i_item_id
+LEFT JOIN item_reviews irev ON irev.i_item_id = i.i_item_id
+GROUP BY i.i_category, i.i_category_id
+ORDER BY total_quantity_sold DESC
+LIMIT 20

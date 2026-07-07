@@ -1,32 +1,22 @@
-WITH store_item_sales AS (
+WITH logs_jan2023 AS (
     SELECT
-        ss.ss_store_id,
-        ss.ss_item_id,
-        SUM(ss.ss_quantity) AS store_quantity,
-        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers
-    FROM store_sales ss
-    GROUP BY ss.ss_store_id, ss.ss_item_id
-),
-item_reviews AS (
-    SELECT
-        pr.pr_item_id,
-        AVG(pr.pr_rating) AS avg_rating,
-        COUNT(*) AS review_count
-    FROM product_reviews pr
-    GROUP BY pr.pr_item_id
+        wl_id,
+        wl_customer_id,
+        wl_item_id,
+        wl_webpage_name,
+        try_cast(wl_timestamp AS timestamp) AS wl_ts,
+        wl_key1
+    FROM web_logs
+    WHERE try_cast(wl_timestamp AS timestamp) >= TIMESTAMP '2023-01-01 00:00:00'
+      AND try_cast(wl_timestamp AS timestamp) < TIMESTAMP '2023-02-01 00:00:00'
 )
 SELECT
-    s.s_store_id,
-    s.s_store_name,
-    i.i_item_id,
-    i.i_name,
-    i.i_category_name,
-    sis.store_quantity,
-    sis.distinct_customers,
-    COALESCE(ir.avg_rating, 0) AS avg_rating,
-    COALESCE(ir.review_count, 0) AS review_count
-FROM store_item_sales sis
-JOIN stores s ON s.s_store_id = sis.ss_store_id
-JOIN items i ON i.i_item_id = sis.ss_item_id
-LEFT JOIN item_reviews ir ON ir.pr_item_id = i.i_item_id
-ORDER BY s.s_store_name, i.i_name
+    wl_webpage_name,
+    date_trunc('hour', wl_ts) AS hour_ts,
+    COUNT(*) AS visit_count,
+    COUNT(DISTINCT wl_customer_id) AS unique_customers,
+    AVG(wl_key1) AS avg_key1
+FROM logs_jan2023
+GROUP BY wl_webpage_name, date_trunc('hour', wl_ts)
+ORDER BY visit_count DESC
+LIMIT 20

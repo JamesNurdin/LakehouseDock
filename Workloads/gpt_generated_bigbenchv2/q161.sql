@@ -1,38 +1,21 @@
-WITH item_reviews AS (
+WITH customer_sales AS (
     SELECT
-        pr_item_id,
-        COUNT(*) AS review_cnt,
-        AVG(pr_rating) AS avg_rating,
-        SUM(pr_rating) AS total_rating
-    FROM product_reviews
-    GROUP BY pr_item_id
-),
-item_details AS (
-    SELECT
-        i.i_item_id,
-        i.i_name,
-        i.i_category_id,
-        i.i_category_name,
-        i.i_price,
-        i.i_comp_price,
-        i.i_class_id,
-        COALESCE(ir.review_cnt, 0) AS review_cnt,
-        COALESCE(ir.avg_rating, 0) AS avg_rating,
-        i.i_price - i.i_comp_price AS price_diff
-    FROM items i
-    LEFT JOIN item_reviews ir
-        ON ir.pr_item_id = i.i_item_id
+        ws.ws_customer_id AS c_customer_id,
+        COUNT(DISTINCT ws.ws_transaction_id) AS transaction_count,
+        SUM(ws.ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws.ws_item_id) AS distinct_items
+    FROM web_sales ws
+    GROUP BY ws.ws_customer_id
 )
 SELECT
-    id.i_category_name,
-    COUNT(DISTINCT id.i_item_id) AS num_items,
-    SUM(id.review_cnt) AS total_reviews,
-    AVG(id.avg_rating) FILTER (WHERE id.review_cnt > 0) AS avg_rating_per_item,
-    AVG(id.i_price) AS avg_price,
-    AVG(id.price_diff) AS avg_price_diff,
-    MAX(id.avg_rating) AS max_item_rating,
-    MIN(id.avg_rating) AS min_item_rating
-FROM item_details id
-GROUP BY id.i_category_name
-ORDER BY avg_rating_per_item DESC
+    c.c_customer_id,
+    c.c_name,
+    cs.transaction_count,
+    cs.total_quantity,
+    cs.distinct_items,
+    cs.total_quantity / cs.transaction_count AS avg_quantity_per_tx
+FROM customers c
+JOIN customer_sales cs
+    ON c.c_customer_id = cs.c_customer_id
+ORDER BY avg_quantity_per_tx DESC
 LIMIT 10

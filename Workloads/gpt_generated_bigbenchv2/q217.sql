@@ -1,32 +1,31 @@
-WITH customer_store_spend AS (
-    SELECT
-        ss.ss_store_id,
-        ss.ss_customer_id,
-        SUM(ss.ss_quantity * i.i_price) AS spend,
-        SUM(ss.ss_quantity) AS quantity
-    FROM store_sales ss
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    GROUP BY ss.ss_store_id, ss.ss_customer_id
+WITH combined_sales AS (
+    SELECT ss_item_id AS item_id, ss_quantity AS quantity
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id, ws_quantity AS quantity
+    FROM web_sales
 ),
-ranked_customers AS (
-    SELECT
-        cs.ss_store_id,
-        cs.ss_customer_id,
-        cs.spend,
-        cs.quantity,
-        RANK() OVER (PARTITION BY cs.ss_store_id ORDER BY cs.spend DESC) AS spend_rank
-    FROM customer_store_spend cs
+sales_agg AS (
+    SELECT item_id, SUM(quantity) AS total_qty
+    FROM combined_sales
+    GROUP BY item_id
+),
+reviews_agg AS (
+    SELECT pr_item_id AS item_id, AVG(pr_sentiment) AS avg_sentiment
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
 SELECT
-    rc.ss_store_id,
-    s.s_store_name,
-    rc.ss_customer_id,
-    c.c_name,
-    rc.spend,
-    rc.quantity,
-    rc.spend_rank
-FROM ranked_customers rc
-JOIN stores s ON rc.ss_store_id = s.s_store_id
-JOIN customers c ON rc.ss_customer_id = c.c_customer_id
-WHERE rc.spend_rank <= 5
-ORDER BY rc.ss_store_id, rc.spend_rank
+    i.i_category_id,
+    i.i_category,
+    SUM(s.total_qty) AS total_quantity_sold,
+    SUM(i.i_price * s.total_qty) AS total_revenue,
+    AVG(r.avg_sentiment) AS avg_review_sentiment
+FROM sales_agg s
+JOIN items i
+    ON s.item_id = i.i_item_id
+LEFT JOIN reviews_agg r
+    ON i.i_item_id = r.item_id
+GROUP BY i.i_category_id, i.i_category
+ORDER BY total_quantity_sold DESC
+LIMIT 10

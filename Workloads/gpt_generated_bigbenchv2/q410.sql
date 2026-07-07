@@ -1,26 +1,19 @@
-WITH parsed_logs AS (
+WITH first_visit AS (
     SELECT
-        line,
-        regexp_extract(line, '^([^ ]+)', 1) AS ip,
-        regexp_extract(line, '\\[([^]]+)\\]', 1) AS timestamp,
-        regexp_extract(line, '"([^\"]+)"', 1) AS request,
-        split_part(regexp_extract(line, '"([^\"]+)"', 1), ' ', 1) AS method,
-        split_part(regexp_extract(line, '"([^\"]+)"', 1), ' ', 2) AS url,
-        split_part(regexp_extract(line, '"([^\"]+)"', 1), ' ', 3) AS protocol,
-        regexp_extract(line, '\\s(\\d{3})\\s', 1) AS status_code,
-        regexp_extract(line, '\\s(\\d+)$', 1) AS bytes_sent
+        wl_customer_id,
+        min(cast(wl_timestamp AS timestamp)) AS first_visit_ts
     FROM web_logs
+    GROUP BY wl_customer_id
 )
 SELECT
-    method,
-    url,
-    status_code,
-    COUNT(*) AS request_count,
-    AVG(CAST(bytes_sent AS BIGINT)) AS avg_bytes,
-    MIN(CAST(bytes_sent AS BIGINT)) AS min_bytes,
-    MAX(CAST(bytes_sent AS BIGINT)) AS max_bytes
-FROM parsed_logs
-WHERE status_code IS NOT NULL
-GROUP BY method, url, status_code
-ORDER BY request_count DESC
-LIMIT 20
+    wl.wl_customer_id,
+    COUNT(*) AS total_logs,
+    COUNT(DISTINCT wl.wl_webpage_name) AS distinct_pages,
+    AVG(date_diff('second', fv.first_visit_ts, cast(wl.wl_timestamp AS timestamp))) AS avg_seconds_since_first
+FROM web_logs wl
+JOIN first_visit fv
+    ON wl.wl_customer_id = fv.wl_customer_id
+WHERE cast(wl.wl_timestamp AS timestamp) >= date_add('day', -30, current_timestamp)
+GROUP BY wl.wl_customer_id
+ORDER BY total_logs DESC
+LIMIT 100

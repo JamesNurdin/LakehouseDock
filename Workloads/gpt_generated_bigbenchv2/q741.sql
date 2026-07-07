@@ -1,32 +1,30 @@
-WITH parsed_logs AS (
-    SELECT
-        line,
-        -- Extract a timestamp string at the start of the line (e.g., "2023-07-01 12:34:56" or "2023-07-01T12:34:56Z")
-        regexp_extract(line, '^(\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2})', 1) AS ts_str,
-        -- Extract a log level token if present (INFO, WARN, ERROR, DEBUG)
-        regexp_extract(line, '\\b(INFO|WARN|ERROR|DEBUG)\\b', 1) AS log_level,
-        length(line) AS line_len
-    FROM web_logs
+WITH item_sales AS (
+    SELECT ss_item_id AS item_id, ss_quantity AS quantity
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id, ws_quantity AS quantity
+    FROM web_sales
 ),
-enriched_logs AS (
-    SELECT
-        line,
-        ts_str,
-        log_level,
-        line_len,
-        try_cast(ts_str AS timestamp) AS ts
-    FROM parsed_logs
+item_sales_agg AS (
+    SELECT item_id, SUM(quantity) AS total_quantity
+    FROM item_sales
+    GROUP BY item_id
+),
+item_sentiment AS (
+    SELECT pr_item_id AS item_id, AVG(pr_sentiment) AS avg_sentiment
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
 SELECT
-    log_level,
-    date_trunc('hour', ts) AS hour,
-    COUNT(*) AS log_count,
-    AVG(line_len) AS avg_line_length,
-    MIN(line_len) AS min_line_length,
-    MAX(line_len) AS max_line_length
-FROM enriched_logs
-WHERE log_level IS NOT NULL
-  AND ts IS NOT NULL
-GROUP BY log_level, date_trunc('hour', ts)
-ORDER BY log_count DESC
-LIMIT 20
+    i.i_category AS category,
+    i.i_category_id AS category_id,
+    COUNT(DISTINCT i.i_item_id) AS num_items,
+    SUM(COALESCE(sa.total_quantity, 0)) AS total_quantity_sold,
+    AVG(i.i_price) AS avg_item_price,
+    AVG(se.avg_sentiment) AS avg_item_sentiment
+FROM items i
+LEFT JOIN item_sales_agg sa ON i.i_item_id = sa.item_id
+LEFT JOIN item_sentiment se ON i.i_item_id = se.item_id
+GROUP BY i.i_category, i.i_category_id
+ORDER BY total_quantity_sold DESC
+LIMIT 10

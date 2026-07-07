@@ -1,19 +1,33 @@
-WITH type_stats AS (
-    SELECT
-        w_web_page_type,
-        COUNT(*) AS page_count,
-        AVG(length(w_web_page_name)) AS avg_name_length,
-        approx_percentile(length(w_web_page_name), 0.5) AS median_name_length
-    FROM web_pages
-    WHERE w_web_page_name IS NOT NULL
-    GROUP BY w_web_page_type
+WITH store_sales_agg AS (
+    SELECT ss.ss_store_id,
+           i.i_category,
+           SUM(ss.ss_quantity) AS total_store_quantity
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY ss.ss_store_id, i.i_category
+),
+web_sales_agg AS (
+    SELECT i.i_category,
+           SUM(ws.ws_quantity) AS total_web_quantity
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+review_agg AS (
+    SELECT i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
-SELECT
-    w_web_page_type,
-    page_count,
-    avg_name_length,
-    median_name_length,
-    (page_count * 100.0) / SUM(page_count) OVER () AS pct_of_total_pages
-FROM type_stats
-ORDER BY page_count DESC
-LIMIT 20
+SELECT s.s_store_name,
+       ss_agg.i_category,
+       ss_agg.total_store_quantity,
+       COALESCE(ws_agg.total_web_quantity, 0) AS total_web_quantity,
+       review_agg.avg_sentiment
+FROM store_sales_agg ss_agg
+JOIN stores s ON ss_agg.ss_store_id = s.s_store_id
+LEFT JOIN web_sales_agg ws_agg ON ss_agg.i_category = ws_agg.i_category
+LEFT JOIN review_agg ON ss_agg.i_category = review_agg.i_category
+ORDER BY ss_agg.total_store_quantity DESC
+LIMIT 10

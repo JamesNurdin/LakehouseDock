@@ -165,9 +165,7 @@ def _wl_relabel(
 # -----------------------
 
 @dataclass
-class WLHashEncoder:
-    """
-    Inductive structural encoder using Weisfeiler–Lehman subtree hashing.
+class WLHashEncoder
 
     Produces a fixed-size vector for ANY plan graph (unseen ops are fine).
     """

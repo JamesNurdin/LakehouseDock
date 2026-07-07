@@ -1,21 +1,16 @@
-/* Top 3 longest web page names per page type */
-WITH ranked_pages AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_length,
-        row_number() OVER (
-            PARTITION BY w_web_page_type
-            ORDER BY length(w_web_page_name) DESC
-        ) AS rn
-    FROM web_pages
+WITH high_price_items AS (
+    SELECT i_item_id, i_category, i_price
+    FROM items
+    WHERE i_price > 100.00
 )
 SELECT
-    w_web_page_type,
-    w_web_page_id,
-    w_web_page_name,
-    name_length
-FROM ranked_pages
-WHERE rn <= 3
-ORDER BY w_web_page_type, name_length DESC
+    hp.i_category,
+    COUNT(pr.pr_review_id) AS review_count,
+    AVG(pr.pr_sentiment) AS avg_sentiment,
+    AVG(hp.i_price) AS avg_price
+FROM product_reviews pr
+JOIN high_price_items hp
+    ON pr.pr_item_id = hp.i_item_id
+GROUP BY hp.i_category
+ORDER BY review_count DESC
+LIMIT 10

@@ -1,19 +1,16 @@
-/* Analytical query: statistics per web page type, including name‑length metrics */
-WITH page_lengths AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
-)
-SELECT
-    w_web_page_type,
-    COUNT(*) AS total_pages,
-    COUNT(DISTINCT w_web_page_id) AS distinct_pages,
-    MAX(name_len) AS max_name_len,
-    MIN(name_len) AS min_name_len,
-    AVG(name_len) AS avg_name_len
-FROM page_lengths
-GROUP BY w_web_page_type
-ORDER BY total_pages DESC
+SELECT s.s_store_name,
+       COUNT(DISTINCT ss.ss_transaction_id) AS total_transactions,
+       SUM(ss.ss_quantity) AS total_quantity_sold,
+       COUNT(DISTINCT i.i_item_id) AS distinct_items_sold,
+       AVG(i.i_price) AS avg_item_price,
+       AVG(pr.pr_sentiment) AS avg_review_sentiment
+FROM store_sales ss
+JOIN stores s
+  ON ss.ss_store_id = s.s_store_id
+JOIN items i
+  ON ss.ss_item_id = i.i_item_id
+LEFT JOIN product_reviews pr
+  ON pr.pr_item_id = i.i_item_id
+GROUP BY s.s_store_name
+ORDER BY total_quantity_sold DESC
+LIMIT 10

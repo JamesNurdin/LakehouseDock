@@ -1,21 +1,14 @@
-WITH parsed_logs AS (
-    SELECT
-        line,
-        regexp_extract(line, '"([A-Z]+)\\s', 1) AS method,
-        regexp_extract(line, '"[A-Z]+\\s([^\\s]+)', 1) AS endpoint,
-        regexp_extract(line, '"\\s+(\\d{3})\\s', 1) AS status_code,
-        regexp_extract(line, '\\s(\\d+)$', 1) AS bytes_sent
-    FROM web_logs
-)
 SELECT
-    method,
-    endpoint,
-    status_code,
-    COUNT(*) AS request_count,
-    SUM(TRY_CAST(bytes_sent AS BIGINT)) AS total_bytes
-FROM parsed_logs
-WHERE method IS NOT NULL
-  AND status_code IS NOT NULL
-GROUP BY method, endpoint, status_code
-ORDER BY request_count DESC
+    s.s_store_id,
+    s.s_store_name,
+    i.i_category,
+    SUM(ss.ss_quantity) AS total_store_quantity,
+    COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers,
+    AVG(pr.pr_sentiment) AS avg_review_sentiment
+FROM store_sales ss
+JOIN stores s ON ss.ss_store_id = s.s_store_id
+JOIN items i ON ss.ss_item_id = i.i_item_id
+LEFT JOIN product_reviews pr ON pr.pr_item_id = i.i_item_id
+GROUP BY s.s_store_id, s.s_store_name, i.i_category
+ORDER BY total_store_quantity DESC
 LIMIT 10

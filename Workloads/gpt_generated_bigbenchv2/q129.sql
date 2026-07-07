@@ -1,28 +1,37 @@
-WITH parsed_logs AS (
-    SELECT
-        line,
-        regexp_extract(line, '"([A-Z]+) ', 1) AS http_method,
-        regexp_extract(line, '"\s+(\d{3})\s+', 1) AS status_code_str,
-        regexp_extract(line, '\\s+(\\d+)$', 1) AS response_size_str,
-        regexp_extract(line, '\\[([^:]+):', 1) AS request_date_str
-    FROM web_logs
-),
-typed_logs AS (
-    SELECT
-        line,
-        http_method,
-        CAST(status_code_str AS integer) AS status_code,
-        CAST(response_size_str AS integer) AS response_size,
-        CAST(date_parse(request_date_str, '%d/%b/%Y') AS date) AS request_date
-    FROM parsed_logs
-)
 SELECT
-    request_date,
-    http_method,
-    status_code,
-    COUNT(*) AS request_count,
-    AVG(response_size) AS avg_response_size,
-    SUM(response_size) AS total_response_size
-FROM typed_logs
-GROUP BY request_date, http_method, status_code
-ORDER BY request_date DESC, request_count DESC
+   i.i_category,
+   i.i_category_id,
+   SUM(COALESCE(offline_sales.offline_qty, 0) + COALESCE(online_sales.online_qty, 0)) AS total_quantity_sold,
+   SUM(COALESCE(offline_sales.offline_customer_cnt, 0) + COALESCE(online_sales.online_customer_cnt, 0)) AS total_customer_count,
+   CASE WHEN SUM(COALESCE(review_stats.review_cnt, 0)) = 0 THEN NULL
+        ELSE SUM(COALESCE(review_stats.avg_sentiment * review_stats.review_cnt, 0)) / SUM(COALESCE(review_stats.review_cnt, 0))
+   END AS avg_review_sentiment,
+   SUM(COALESCE(review_stats.review_cnt, 0)) AS total_review_count
+FROM items i
+LEFT JOIN (
+   SELECT ss_item_id,
+          SUM(ss_quantity) AS offline_qty,
+          COUNT(DISTINCT ss_customer_id) AS offline_customer_cnt
+   FROM store_sales
+   GROUP BY ss_item_id
+) offline_sales
+   ON offline_sales.ss_item_id = i.i_item_id
+LEFT JOIN (
+   SELECT ws_item_id,
+          SUM(ws_quantity) AS online_qty,
+          COUNT(DISTINCT ws_customer_id) AS online_customer_cnt
+   FROM web_sales
+   GROUP BY ws_item_id
+) online_sales
+   ON online_sales.ws_item_id = i.i_item_id
+LEFT JOIN (
+   SELECT pr_item_id,
+          AVG(pr_sentiment) AS avg_sentiment,
+          COUNT(*) AS review_cnt
+   FROM product_reviews
+   GROUP BY pr_item_id
+) review_stats
+   ON review_stats.pr_item_id = i.i_item_id
+GROUP BY i.i_category, i.i_category_id
+ORDER BY total_quantity_sold DESC
+LIMIT 10

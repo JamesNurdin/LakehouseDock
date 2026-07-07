@@ -1,33 +1,33 @@
-WITH item_rating AS (
-    SELECT
-        pr_item_id,
-        AVG(pr_rating) AS avg_rating
-    FROM product_reviews
-    GROUP BY pr_item_id
-),
-store_sales_agg AS (
-    SELECT
-        ss.ss_store_id,
-        SUM(ss.ss_quantity) AS total_quantity,
-        SUM(ss.ss_quantity * i.i_price) AS total_revenue,
-        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers,
-        SUM(ss.ss_quantity * COALESCE(ir.avg_rating, 0)) AS weighted_rating_sum
+WITH store_sales_agg AS (
+    SELECT i.i_category,
+           SUM(ss.ss_quantity) AS store_quantity
     FROM store_sales ss
     JOIN items i ON ss.ss_item_id = i.i_item_id
-    LEFT JOIN item_rating ir ON ss.ss_item_id = ir.pr_item_id
-    GROUP BY ss.ss_store_id
+    GROUP BY i.i_category
+),
+web_sales_agg AS (
+    SELECT i.i_category,
+           SUM(ws.ws_quantity) AS web_quantity
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+review_agg AS (
+    SELECT i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
-SELECT
-    s.s_store_id,
-    s.s_store_name,
-    COALESCE(sa.total_quantity, 0) AS total_quantity,
-    COALESCE(sa.total_revenue, 0) AS total_revenue,
-    COALESCE(sa.distinct_customers, 0) AS distinct_customers,
-    CASE
-        WHEN COALESCE(sa.total_quantity, 0) > 0 THEN sa.weighted_rating_sum / sa.total_quantity
-        ELSE NULL
-    END AS avg_rating_weighted
-FROM stores s
-LEFT JOIN store_sales_agg sa ON s.s_store_id = sa.ss_store_id
-ORDER BY total_revenue DESC
+SELECT COALESCE(ssa.i_category, wsa.i_category, ra.i_category) AS category,
+       COALESCE(ssa.store_quantity, 0) AS store_quantity,
+       COALESCE(wsa.web_quantity, 0) AS web_quantity,
+       COALESCE(ssa.store_quantity, 0) + COALESCE(wsa.web_quantity, 0) AS total_quantity,
+       ra.avg_sentiment,
+       ra.review_count
+FROM store_sales_agg ssa
+FULL OUTER JOIN web_sales_agg wsa ON ssa.i_category = wsa.i_category
+FULL OUTER JOIN review_agg ra ON COALESCE(ssa.i_category, wsa.i_category) = ra.i_category
+ORDER BY total_quantity DESC
 LIMIT 10

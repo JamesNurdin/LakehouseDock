@@ -1,21 +1,16 @@
-WITH page_metrics AS (
-    SELECT
-        w_web_page_type,
-        count(*) AS page_count,
-        avg(length(w_web_page_name)) AS avg_name_len,
-        approx_percentile(length(w_web_page_name), 0.5) AS median_name_len,
-        max(length(w_web_page_name)) AS max_name_len,
-        min(length(w_web_page_name)) AS min_name_len
-    FROM web_pages
-    GROUP BY w_web_page_type
-)
 SELECT
-    w_web_page_type,
-    page_count,
-    avg_name_len,
-    median_name_len,
-    max_name_len,
-    min_name_len,
-    round(page_count * 100.0 / sum(page_count) OVER (), 2) AS pct_of_total_pages
-FROM page_metrics
-ORDER BY page_count DESC
+    a.wl_webpage_name AS from_page,
+    b.wl_webpage_name AS to_page,
+    COUNT(*) AS transition_count,
+    COUNT(DISTINCT a.wl_customer_id) AS unique_customers
+FROM web_logs a
+JOIN web_logs b
+    ON a.wl_customer_id = b.wl_customer_id
+    AND CAST(a.wl_timestamp AS timestamp) < CAST(b.wl_timestamp AS timestamp)
+    AND CAST(b.wl_timestamp AS timestamp) <= CAST(a.wl_timestamp AS timestamp) + INTERVAL '10' MINUTE
+GROUP BY
+    a.wl_webpage_name,
+    b.wl_webpage_name
+ORDER BY
+    transition_count DESC
+LIMIT 10

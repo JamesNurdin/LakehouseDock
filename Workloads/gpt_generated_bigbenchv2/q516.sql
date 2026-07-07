@@ -1,46 +1,32 @@
 WITH store_sales_agg AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        ss.ss_customer_id AS customer_id,
-        ss.ss_quantity AS quantity
-    FROM store_sales ss
-    JOIN items i ON ss.ss_item_id = i.i_item_id
+    SELECT ss_item_id, SUM(ss_quantity) AS store_qty
+    FROM store_sales
+    GROUP BY ss_item_id
 ),
 web_sales_agg AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        ws.ws_customer_id AS customer_id,
-        ws.ws_quantity AS quantity
-    FROM web_sales ws
-    JOIN items i ON ws.ws_item_id = i.i_item_id
-),
-combined_sales AS (
-    SELECT i_category_id, i_category_name, customer_id, quantity FROM store_sales_agg
-    UNION ALL
-    SELECT i_category_id, i_category_name, customer_id, quantity FROM web_sales_agg
+    SELECT ws_item_id, SUM(ws_quantity) AS web_qty
+    FROM web_sales
+    GROUP BY ws_item_id
 ),
 review_agg AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        AVG(pr.pr_rating) AS avg_rating,
-        COUNT(*) AS review_count
-    FROM product_reviews pr
-    JOIN items i ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
+    SELECT pr_item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    cs.i_category_id,
-    cs.i_category_name,
-    SUM(cs.quantity) AS total_quantity,
-    COUNT(DISTINCT cs.customer_id) AS distinct_customer_count,
-    ra.avg_rating,
-    ra.review_count
-FROM combined_sales cs
-LEFT JOIN review_agg ra
-    ON cs.i_category_id = ra.i_category_id
-GROUP BY cs.i_category_id, cs.i_category_name, ra.avg_rating, ra.review_count
+SELECT i.i_category_id,
+       i.i_category,
+       SUM(COALESCE(ss.store_qty, 0) + COALESCE(ws.web_qty, 0)) AS total_quantity,
+       AVG(r.avg_sentiment) AS avg_sentiment,
+       SUM(r.review_count) AS total_reviews
+FROM items i
+LEFT JOIN store_sales_agg ss
+    ON i.i_item_id = ss.ss_item_id
+LEFT JOIN web_sales_agg ws
+    ON i.i_item_id = ws.ws_item_id
+LEFT JOIN review_agg r
+    ON i.i_item_id = r.pr_item_id
+GROUP BY i.i_category_id, i.i_category
 ORDER BY total_quantity DESC
 LIMIT 10

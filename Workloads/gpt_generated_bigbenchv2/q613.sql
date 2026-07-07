@@ -1,34 +1,42 @@
-WITH store_category_sales AS (
+WITH store_agg AS (
     SELECT
-        s.s_store_id,
-        s.s_store_name,
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ss.ss_quantity * i.i_price) AS category_revenue,
-        SUM(ss.ss_quantity) AS category_quantity,
-        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers
+        ss.ss_store_id,
+        i.i_category,
+        SUM(ss.ss_quantity) AS store_quantity
     FROM store_sales ss
-    JOIN stores s ON ss.ss_store_id = s.s_store_id
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    GROUP BY s.s_store_id, s.s_store_name, i.i_category_id, i.i_category_name
+    JOIN items i
+        ON ss.ss_item_id = i.i_item_id
+    GROUP BY ss.ss_store_id, i.i_category
 ),
-ranked AS (
+web_agg AS (
     SELECT
-        scs.s_store_name,
-        scs.i_category_name,
-        scs.category_revenue,
-        scs.category_quantity,
-        scs.distinct_customers,
-        RANK() OVER (PARTITION BY scs.s_store_name ORDER BY scs.category_revenue DESC) AS revenue_rank
-    FROM store_category_sales scs
+        i.i_category,
+        SUM(ws.ws_quantity) AS web_quantity
+    FROM web_sales ws
+    JOIN items i
+        ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+review_agg AS (
+    SELECT
+        i.i_category,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i
+        ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
 SELECT
-    r.s_store_name,
-    r.i_category_name,
-    r.category_revenue,
-    r.category_quantity,
-    r.distinct_customers,
-    r.revenue_rank
-FROM ranked r
-WHERE r.revenue_rank <= 3
-ORDER BY r.s_store_name, r.revenue_rank
+    s.s_store_name,
+    sa.i_category,
+    sa.store_quantity,
+    COALESCE(wa.web_quantity, 0) AS web_quantity,
+    ra.avg_sentiment
+FROM store_agg sa
+JOIN stores s
+    ON sa.ss_store_id = s.s_store_id
+LEFT JOIN web_agg wa
+    ON sa.i_category = wa.i_category
+LEFT JOIN review_agg ra
+    ON sa.i_category = ra.i_category
+ORDER BY s.s_store_name, sa.i_category

@@ -1,24 +1,18 @@
-/*
-  For each web page type, list the top‑3 longest page names together with
-  the total number of pages of that type and the average page‑name length.
-*/
-WITH ranked_pages AS (
+WITH page_counts AS (
     SELECT
         w_web_page_type,
-        w_web_page_name,
-        length(w_web_page_name) AS name_length,
-        count(*) OVER (PARTITION BY w_web_page_type) AS pages_per_type,
-        avg(length(w_web_page_name)) OVER (PARTITION BY w_web_page_type) AS avg_name_len_per_type,
-        row_number() OVER (PARTITION BY w_web_page_type ORDER BY length(w_web_page_name) DESC) AS name_rank
+        COUNT(*) AS page_count,
+        COUNT(DISTINCT w_web_page_name) AS distinct_name_count,
+        MAX(LENGTH(w_web_page_name)) AS max_name_length
     FROM web_pages
+    WHERE w_web_page_type IS NOT NULL
+    GROUP BY w_web_page_type
+    HAVING COUNT(*) > 10
 )
 SELECT
     w_web_page_type,
-    w_web_page_name,
-    name_length,
-    pages_per_type,
-    avg_name_len_per_type,
-    name_rank
-FROM ranked_pages
-WHERE name_rank <= 3
-ORDER BY w_web_page_type, name_rank
+    page_count,
+    distinct_name_count,
+    max_name_length
+FROM page_counts
+ORDER BY page_count DESC

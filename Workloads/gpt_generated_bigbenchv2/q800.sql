@@ -1,23 +1,41 @@
-WITH page_stats AS (
-    SELECT
-        w_web_page_type,
-        COUNT(*) AS page_count,
-        COUNT(DISTINCT w_web_page_name) AS distinct_name_count,
-        AVG(LENGTH(w_web_page_name)) AS avg_name_length,
-        MAX(LENGTH(w_web_page_name)) AS max_name_length,
-        MIN(LENGTH(w_web_page_name)) AS min_name_length
-    FROM web_pages
-    GROUP BY w_web_page_type
-    HAVING COUNT(*) > 10
+WITH sales AS (
+    SELECT ss_item_id AS item_id,
+           ss_quantity AS quantity
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id,
+           ws_quantity AS quantity
+    FROM web_sales
+),
+item_sales AS (
+    SELECT s.item_id,
+           SUM(s.quantity) AS total_quantity
+    FROM sales s
+    GROUP BY s.item_id
+),
+item_sentiment AS (
+    SELECT i.i_item_id AS item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
+    FROM items i
+    LEFT JOIN product_reviews pr
+        ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id
 )
 SELECT
-    w_web_page_type,
-    page_count,
-    distinct_name_count,
-    avg_name_length,
-    max_name_length,
-    min_name_length,
-    (distinct_name_count * 1.0 / page_count) AS name_uniqueness_ratio,
-    RANK() OVER (ORDER BY page_count DESC) AS page_type_rank
-FROM page_stats
-ORDER BY page_count DESC
+    i.i_category AS category,
+    i.i_category_id AS category_id,
+    COUNT(DISTINCT i.i_item_id) AS distinct_items,
+    SUM(COALESCE(isales.total_quantity, 0)) AS total_quantity_sold,
+    AVG(COALESCE(isent.avg_sentiment, 0)) AS avg_sentiment,
+    AVG(i.i_price) AS avg_price,
+    SUM(COALESCE(isales.total_quantity, 0) * i.i_price) AS total_revenue
+FROM items i
+LEFT JOIN item_sales isales
+    ON isales.item_id = i.i_item_id
+LEFT JOIN item_sentiment isent
+    ON isent.item_id = i.i_item_id
+GROUP BY i.i_category, i.i_category_id
+HAVING SUM(COALESCE(isales.total_quantity, 0)) > 0
+ORDER BY total_quantity_sold DESC
+LIMIT 10

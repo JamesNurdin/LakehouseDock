@@ -1,60 +1,26 @@
-WITH sales_union AS (
+WITH sales_reviews AS (
     SELECT
-        ss.ss_customer_id AS customer_id,
-        c.c_name AS customer_name,
-        i.i_category_id AS category_id,
-        i.i_category_name AS category_name,
-        ss.ss_quantity AS quantity,
-        ss.ss_quantity * i.i_price AS revenue,
-        'store' AS channel
+        s.s_store_name AS s_store_name,
+        i.i_category AS i_category,
+        SUM(ss.ss_quantity) AS total_quantity,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers,
+        COUNT(pr.pr_review_id) AS review_count
     FROM store_sales ss
-    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    UNION ALL
-    SELECT
-        ws.ws_customer_id AS customer_id,
-        c.c_name AS customer_name,
-        i.i_category_id AS category_id,
-        i.i_category_name AS category_name,
-        ws.ws_quantity AS quantity,
-        ws.ws_quantity * i.i_price AS revenue,
-        'web' AS channel
-    FROM web_sales ws
-    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
-    JOIN items i ON ws.ws_item_id = i.i_item_id
-),
-category_sales AS (
-    SELECT
-        customer_id,
-        customer_name,
-        category_name,
-        SUM(quantity) AS total_quantity,
-        SUM(revenue) AS total_revenue,
-        COUNT(DISTINCT channel) AS channel_count
-    FROM sales_union
-    GROUP BY
-        customer_id,
-        customer_name,
-        category_name
-),
-ranked_categories AS (
-    SELECT
-        customer_id,
-        customer_name,
-        category_name,
-        total_quantity,
-        total_revenue,
-        channel_count,
-        ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY total_revenue DESC) AS category_rank
-    FROM category_sales
+    JOIN items i
+        ON ss.ss_item_id = i.i_item_id
+    JOIN stores s
+        ON ss.ss_store_id = s.s_store_id
+    LEFT JOIN product_reviews pr
+        ON pr.pr_item_id = i.i_item_id
+    GROUP BY s.s_store_name, i.i_category
 )
 SELECT
-    customer_id,
-    customer_name,
-    category_name,
+    s_store_name,
+    i_category,
     total_quantity,
-    total_revenue,
-    channel_count
-FROM ranked_categories
-WHERE category_rank <= 3
-ORDER BY total_revenue DESC
+    avg_sentiment,
+    distinct_customers,
+    review_count
+FROM sales_reviews
+ORDER BY s_store_name, i_category

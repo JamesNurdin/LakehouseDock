@@ -1,40 +1,33 @@
-WITH sales_union AS (
-    SELECT ss_customer_id AS customer_id,
-           ss_item_id    AS item_id,
-           ss_quantity   AS quantity
-    FROM store_sales
+WITH sales_agg AS (
+  SELECT i.i_category_id,
+         i.i_category,
+         SUM(s.quantity) AS total_quantity_sold
+  FROM (
+    SELECT ss.ss_item_id AS item_id, ss.ss_quantity AS quantity
+    FROM store_sales ss
     UNION ALL
-    SELECT ws_customer_id AS customer_id,
-           ws_item_id    AS item_id,
-           ws_quantity   AS quantity
-    FROM web_sales
+    SELECT ws.ws_item_id AS item_id, ws.ws_quantity AS quantity
+    FROM web_sales ws
+  ) s
+  JOIN items i ON s.item_id = i.i_item_id
+  GROUP BY i.i_category_id, i.i_category
 ),
-item_sales AS (
-    SELECT s.item_id,
-           SUM(s.quantity) AS total_quantity,
-           SUM(s.quantity * i.i_price) AS total_revenue,
-           COUNT(DISTINCT s.customer_id) AS distinct_customers
-    FROM sales_union s
-    JOIN items i
-      ON s.item_id = i.i_item_id
-    GROUP BY s.item_id
-),
-item_rating AS (
-    SELECT pr.pr_item_id AS item_id,
-           AVG(pr.pr_rating) AS avg_rating
-    FROM product_reviews pr
-    GROUP BY pr.pr_item_id
+review_agg AS (
+  SELECT i.i_category_id,
+         i.i_category,
+         COUNT(pr.pr_review_id) AS review_count,
+         AVG(pr.pr_sentiment) AS avg_sentiment
+  FROM product_reviews pr
+  JOIN items i ON pr.pr_item_id = i.i_item_id
+  GROUP BY i.i_category_id, i.i_category
 )
-SELECT i.i_category_id,
-       i.i_category_name,
-       SUM(isales.total_quantity) AS category_quantity,
-       SUM(isales.total_revenue) AS category_revenue,
-       AVG(ir.avg_rating) AS category_avg_rating,
-       SUM(isales.distinct_customers) AS category_distinct_customers
-FROM item_sales isales
-JOIN items i
-  ON isales.item_id = i.i_item_id
-LEFT JOIN item_rating ir
-  ON isales.item_id = ir.item_id
-GROUP BY i.i_category_id, i.i_category_name
-ORDER BY category_revenue DESC
+SELECT
+  s.i_category_id,
+  s.i_category,
+  s.total_quantity_sold,
+  COALESCE(r.review_count, 0) AS review_count,
+  r.avg_sentiment
+FROM sales_agg s
+LEFT JOIN review_agg r
+  ON s.i_category_id = r.i_category_id
+ORDER BY s.total_quantity_sold DESC

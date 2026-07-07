@@ -1,27 +1,28 @@
-WITH page_lengths AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
+WITH sales_agg AS (
+    SELECT ws.ws_customer_id,
+           ws.ws_item_id,
+           SUM(ws.ws_quantity) AS total_quantity
+    FROM web_sales ws
+    GROUP BY ws.ws_customer_id, ws.ws_item_id
 ),
-ranked_pages AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        name_len,
-        ROW_NUMBER() OVER (PARTITION BY w_web_page_type ORDER BY name_len DESC) AS rn
-    FROM page_lengths
+item_sentiment AS (
+    SELECT pr.pr_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
 )
-SELECT
-    w_web_page_type,
-    COUNT(*) AS total_pages,
-    AVG(name_len) AS avg_name_len,
-    MAX(name_len) AS max_name_len,
-    MIN(name_len) AS min_name_len,
-    COUNT(CASE WHEN rn = 1 THEN 1 END) AS top_name_per_type_count
-FROM ranked_pages
-GROUP BY w_web_page_type
-ORDER BY total_pages DESC
+SELECT c.c_name AS customer_name,
+       i.i_category AS category,
+       SUM(s.total_quantity) AS total_quantity,
+       SUM(s.total_quantity * i.i_price) AS total_spent,
+       AVG(isent.avg_sentiment) AS avg_sentiment
+FROM sales_agg s
+JOIN customers c
+  ON s.ws_customer_id = c.c_customer_id
+JOIN items i
+  ON s.ws_item_id = i.i_item_id
+LEFT JOIN item_sentiment isent
+  ON i.i_item_id = isent.pr_item_id
+GROUP BY c.c_name, i.i_category
+ORDER BY total_spent DESC
+LIMIT 100

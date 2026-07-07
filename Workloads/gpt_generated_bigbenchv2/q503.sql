@@ -1,19 +1,23 @@
-WITH page_name_stats AS (
+WITH store_agg AS (
     SELECT
-        w_web_page_id,
-        w_web_page_type,
-        LENGTH(w_web_page_name) AS name_len
-    FROM web_pages
-    WHERE w_web_page_type IS NOT NULL
+        s.s_store_id,
+        s.s_store_name,
+        sum(ss.ss_quantity) AS total_quantity,
+        count(*) AS total_transactions,
+        count(distinct ss.ss_item_id) AS distinct_items,
+        avg(ss.ss_quantity) AS avg_quantity_per_tx
+    FROM store_sales ss
+    JOIN stores s
+        ON ss.ss_store_id = s.s_store_id
+    GROUP BY s.s_store_id, s.s_store_name
 )
 SELECT
-    w_web_page_type,
-    COUNT(*) AS total_pages,
-    COUNT(DISTINCT w_web_page_id) AS unique_pages,
-    MAX(name_len) AS max_name_length,
-    MIN(name_len) AS min_name_length,
-    AVG(name_len) AS avg_name_length,
-    APPROX_PERCENTILE(name_len, 0.5) AS median_name_length
-FROM page_name_stats
-GROUP BY w_web_page_type
-ORDER BY total_pages DESC
+    s_store_id,
+    s_store_name,
+    total_quantity,
+    total_transactions,
+    distinct_items,
+    avg_quantity_per_tx
+FROM store_agg
+ORDER BY total_quantity DESC
+LIMIT 10

@@ -1,35 +1,32 @@
-WITH store_item_sales AS (
-    SELECT
-        ss.ss_store_id,
-        i.i_item_id,
-        SUM(ss.ss_quantity) AS store_quantity,
-        SUM(ss.ss_quantity * i.i_price) AS store_revenue
-    FROM store_sales ss
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    GROUP BY ss.ss_store_id, i.i_item_id
+WITH store_agg AS (
+    SELECT ss_item_id, SUM(ss_quantity) AS store_qty
+    FROM store_sales
+    GROUP BY ss_item_id
 ),
-item_reviews AS (
-    SELECT
-        pr.pr_item_id,
-        COUNT(pr.pr_review_id) AS review_count,
-        SUM(pr.pr_rating) AS sum_rating
-    FROM product_reviews pr
-    GROUP BY pr.pr_item_id
+web_agg AS (
+    SELECT ws_item_id, SUM(ws_quantity) AS web_qty
+    FROM web_sales
+    GROUP BY ws_item_id
+),
+review_agg AS (
+    SELECT pr_item_id, AVG(pr_sentiment) AS avg_sentiment, COUNT(*) AS review_cnt
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
 SELECT
-    s.s_store_id,
-    s.s_store_name,
-    SUM(si.store_quantity) AS total_quantity,
-    SUM(si.store_revenue) AS total_revenue,
-    COUNT(DISTINCT si.i_item_id) AS distinct_items_sold,
-    SUM(COALESCE(ir.review_count, 0)) AS total_review_count,
-    CASE
-        WHEN SUM(COALESCE(ir.review_count, 0)) = 0 THEN NULL
-        ELSE SUM(COALESCE(ir.sum_rating, 0)) / SUM(COALESCE(ir.review_count, 0))
-    END AS avg_rating
-FROM store_item_sales si
-JOIN stores s ON si.ss_store_id = s.s_store_id
-LEFT JOIN item_reviews ir ON si.i_item_id = ir.pr_item_id
-GROUP BY s.s_store_id, s.s_store_name
-ORDER BY total_revenue DESC
+    i.i_category_id,
+    i.i_category,
+    COALESCE(SUM(sa.store_qty), 0) AS total_store_quantity,
+    COALESCE(SUM(wa.web_qty), 0) AS total_web_quantity,
+    CASE WHEN SUM(ra.review_cnt) > 0
+        THEN SUM(ra.avg_sentiment * ra.review_cnt) / SUM(ra.review_cnt)
+        ELSE NULL
+    END AS avg_category_sentiment,
+    SUM(ra.review_cnt) AS total_reviews
+FROM items i
+LEFT JOIN store_agg sa ON sa.ss_item_id = i.i_item_id
+LEFT JOIN web_agg wa ON wa.ws_item_id = i.i_item_id
+LEFT JOIN review_agg ra ON ra.pr_item_id = i.i_item_id
+GROUP BY i.i_category_id, i.i_category
+ORDER BY (COALESCE(SUM(sa.store_qty), 0) + COALESCE(SUM(wa.web_qty), 0)) DESC
 LIMIT 10

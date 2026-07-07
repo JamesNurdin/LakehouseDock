@@ -1,39 +1,33 @@
-WITH parsed_logs AS (
-    SELECT
-        line,
-        regexp_extract(line, '^([^ ]+)', 1) AS ip_address,
-        regexp_extract(line, '\\[([^]]+)\\]', 1) AS log_timestamp,
-        regexp_extract(line, '\\"([^ ]+) ([^ ]+) ([^\\"]+)\\"', 1) AS http_method,
-        regexp_extract(line, '\\"([^ ]+) ([^ ]+) ([^\\"]+)\\"', 2) AS request_path,
-        regexp_extract(line, '\\"([^ ]+) ([^ ]+) ([^\\"]+)\\"', 3) AS http_version,
-        regexp_extract(line, '\\"\\s+(\\d{3})\\s+', 1) AS status_code,
-        try_cast(regexp_extract(line, '\\"\\s+\\d{3}\\s+(\\d+)', 1) AS bigint) AS response_bytes,
-        length(line) AS line_len
-    FROM web_logs
+WITH sales AS (
+  SELECT ss.ss_item_id AS item_id,
+         ss.ss_quantity AS quantity,
+         i.i_price AS price,
+         i.i_category AS category
+  FROM store_sales ss
+  JOIN items i ON ss.ss_item_id = i.i_item_id
+  UNION ALL
+  SELECT ws.ws_item_id AS item_id,
+         ws.ws_quantity AS quantity,
+         i.i_price AS price,
+         i.i_category AS category
+  FROM web_sales ws
+  JOIN items i ON ws.ws_item_id = i.i_item_id
 ),
-agg_stats AS (
-    SELECT
-        http_method,
-        status_code,
-        COUNT(*) AS request_cnt,
-        SUM(COALESCE(response_bytes, 0)) AS total_bytes,
-        AVG(line_len) AS avg_line_len,
-        MIN(log_timestamp) AS earliest_log,
-        MAX(log_timestamp) AS latest_log
-    FROM parsed_logs
-    WHERE http_method IS NOT NULL
-      AND status_code IS NOT NULL
-    GROUP BY http_method, status_code
+review_stats AS (
+  SELECT i.i_category AS category,
+         AVG(pr.pr_sentiment) AS avg_sentiment,
+         COUNT(*) AS review_count
+  FROM product_reviews pr
+  JOIN items i ON pr.pr_item_id = i.i_item_id
+  GROUP BY i.i_category
 )
-SELECT
-    http_method,
-    status_code,
-    request_cnt,
-    total_bytes,
-    avg_line_len,
-    earliest_log,
-    latest_log,
-    RANK() OVER (ORDER BY request_cnt DESC) AS request_rank
-FROM agg_stats
-ORDER BY request_cnt DESC
-LIMIT 50
+SELECT s.category,
+       SUM(s.quantity) AS total_quantity_sold,
+       SUM(s.quantity * s.price) AS total_revenue,
+       rs.avg_sentiment,
+       rs.review_count
+FROM sales s
+LEFT JOIN review_stats rs ON s.category = rs.category
+GROUP BY s.category, rs.avg_sentiment, rs.review_count
+ORDER BY total_revenue DESC
+LIMIT 10

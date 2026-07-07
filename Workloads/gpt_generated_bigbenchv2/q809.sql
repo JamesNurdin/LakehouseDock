@@ -1,17 +1,30 @@
+WITH item_sentiment AS (
+    SELECT
+        pr.pr_item_id AS item_id,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(*) AS review_count
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
+),
+store_item_sales AS (
+    SELECT
+        ss.ss_store_id AS store_id,
+        i.i_category AS category,
+        SUM(ss.ss_quantity) AS total_quantity,
+        AVG(i.i_price) AS avg_price,
+        AVG(COALESCE(isent.avg_sentiment, 0)) AS avg_sentiment
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    LEFT JOIN item_sentiment isent ON i.i_item_id = isent.item_id
+    GROUP BY ss.ss_store_id, i.i_category
+)
 SELECT
     s.s_store_name,
-    i.i_category_name,
-    SUM(ss.ss_quantity) AS total_quantity,
-    COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers,
-    AVG(i.i_price) AS avg_price,
-    AVG(pr.pr_rating) AS avg_rating,
-    COUNT(pr.pr_review_id) AS review_count
-FROM store_sales ss
-JOIN items i
-  ON ss.ss_item_id = i.i_item_id
-JOIN stores s
-  ON ss.ss_store_id = s.s_store_id
-LEFT JOIN product_reviews pr
-  ON pr.pr_item_id = i.i_item_id
-GROUP BY s.s_store_name, i.i_category_name
-ORDER BY s.s_store_name, total_quantity DESC
+    sis.category,
+    sis.total_quantity,
+    sis.avg_price,
+    sis.avg_sentiment
+FROM store_item_sales sis
+JOIN stores s ON sis.store_id = s.s_store_id
+ORDER BY sis.total_quantity DESC
+LIMIT 100

@@ -1,26 +1,40 @@
 WITH store_agg AS (
-    SELECT
-        stores.s_store_id,
-        stores.s_store_name,
-        SUM(store_sales.ss_quantity) AS total_quantity,
-        COUNT(DISTINCT store_sales.ss_customer_id) AS distinct_customers,
-        AVG(store_sales.ss_quantity) AS avg_quantity,
-        MAX(store_sales.ss_quantity) AS max_quantity,
-        COUNT(*) AS transaction_count
-    FROM store_sales
-    JOIN stores
-        ON store_sales.ss_store_id = stores.s_store_id
-    GROUP BY stores.s_store_id, stores.s_store_name
+    SELECT ss.ss_item_id AS i_item_id,
+           SUM(ss.ss_quantity) AS total_store_qty,
+           SUM(ss.ss_quantity * i.i_price) AS total_store_revenue
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY ss.ss_item_id
+),
+web_agg AS (
+    SELECT ws.ws_item_id AS i_item_id,
+           SUM(ws.ws_quantity) AS total_web_qty,
+           SUM(ws.ws_quantity * i.i_price) AS total_web_revenue
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY ws.ws_item_id
+),
+review_agg AS (
+    SELECT pr.pr_item_id AS i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
 )
-SELECT
-    s_store_id,
-    s_store_name,
-    total_quantity,
-    distinct_customers,
-    avg_quantity,
-    max_quantity,
-    transaction_count,
-    RANK() OVER (ORDER BY total_quantity DESC) AS quantity_rank
-FROM store_agg
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category,
+       i.i_price,
+       COALESCE(s.total_store_qty, 0) AS total_store_qty,
+       COALESCE(s.total_store_revenue, 0) AS total_store_revenue,
+       COALESCE(w.total_web_qty, 0) AS total_web_qty,
+       COALESCE(w.total_web_revenue, 0) AS total_web_revenue,
+       COALESCE(r.avg_sentiment, 0) AS avg_sentiment,
+       COALESCE(r.review_count, 0) AS review_count,
+       (COALESCE(s.total_store_qty, 0) + COALESCE(w.total_web_qty, 0)) AS total_quantity
+FROM items i
+LEFT JOIN store_agg s ON i.i_item_id = s.i_item_id
+LEFT JOIN web_agg w ON i.i_item_id = w.i_item_id
+LEFT JOIN review_agg r ON i.i_item_id = r.i_item_id
 ORDER BY total_quantity DESC
-LIMIT 10
+LIMIT 100

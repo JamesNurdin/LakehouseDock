@@ -1,61 +1,36 @@
-WITH combined_sales AS (
-    -- Store channel sales
-    SELECT
-        s.s_store_name AS channel_or_store,
-        i.i_category_id,
-        i.i_category_name,
-        ss.ss_quantity AS quantity,
-        ss.ss_quantity * i.i_price AS revenue,
-        ss.ss_customer_id AS customer_id
+WITH store_sales_agg AS (
+    SELECT i.i_category_id AS category_id,
+           i.i_category AS category_name,
+           SUM(ss.ss_quantity) AS store_quantity
     FROM store_sales ss
-    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
     JOIN items i ON ss.ss_item_id = i.i_item_id
-    JOIN stores s ON ss.ss_store_id = s.s_store_id
-
-    UNION ALL
-
-    -- Web channel sales
-    SELECT
-        'Web' AS channel_or_store,
-        i.i_category_id,
-        i.i_category_name,
-        ws.ws_quantity AS quantity,
-        ws.ws_quantity * i.i_price AS revenue,
-        ws.ws_customer_id AS customer_id
+    GROUP BY i.i_category_id, i.i_category
+),
+web_sales_agg AS (
+    SELECT i.i_category_id AS category_id,
+           i.i_category AS category_name,
+           SUM(ws.ws_quantity) AS web_quantity
     FROM web_sales ws
-    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
     JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 ),
-aggregated AS (
-    SELECT
-        channel_or_store,
-        i_category_name,
-        SUM(quantity) AS total_quantity,
-        SUM(revenue) AS total_revenue,
-        ROUND(SUM(revenue) / NULLIF(SUM(quantity), 0), 2) AS avg_price,
-        COUNT(DISTINCT customer_id) AS distinct_customers
-    FROM combined_sales
-    GROUP BY channel_or_store, i_category_name
-),
-final AS (
-    SELECT
-        channel_or_store,
-        i_category_name,
-        total_quantity,
-        total_revenue,
-        avg_price,
-        distinct_customers,
-        ROUND(total_revenue / SUM(total_revenue) OVER () * 100, 2) AS revenue_pct
-    FROM aggregated
+reviews_agg AS (
+    SELECT i.i_category_id AS category_id,
+           i.i_category AS category_name,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
-SELECT
-    channel_or_store,
-    i_category_name,
-    total_quantity,
-    total_revenue,
-    avg_price,
-    distinct_customers,
-    revenue_pct
-FROM final
-ORDER BY total_revenue DESC
-LIMIT 20
+SELECT COALESCE(ss.category_id, ws.category_id, r.category_id) AS category_id,
+       COALESCE(ss.category_name, ws.category_name, r.category_name) AS category_name,
+       COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0) AS total_quantity_sold,
+       r.avg_sentiment,
+       r.review_count
+FROM store_sales_agg ss
+FULL OUTER JOIN web_sales_agg ws
+    ON ss.category_id = ws.category_id
+FULL OUTER JOIN reviews_agg r
+    ON COALESCE(ss.category_id, ws.category_id) = r.category_id
+ORDER BY total_quantity_sold DESC

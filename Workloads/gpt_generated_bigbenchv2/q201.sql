@@ -1,20 +1,30 @@
-WITH page_lengths AS (
+WITH sales_agg AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_length
-    FROM web_pages
-    WHERE w_web_page_type IS NOT NULL
+        ws.ws_item_id AS item_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_quantity * i.i_price) AS total_revenue
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY ws.ws_item_id
+),
+reviews_agg AS (
+    SELECT
+        pr.pr_item_id AS item_id,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(*) AS review_count
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
 )
 SELECT
-    w_web_page_type,
-    COUNT(*) AS page_count,
-    MIN(name_length) AS min_name_length,
-    MAX(name_length) AS max_name_length,
-    AVG(name_length) AS avg_name_length,
-    STDDEV_POP(name_length) AS name_length_stddev
-FROM page_lengths
-GROUP BY w_web_page_type
-HAVING COUNT(*) > 5
-ORDER BY page_count DESC
+    i.i_category,
+    i.i_category_id,
+    SUM(COALESCE(s.total_quantity, 0)) AS category_total_quantity,
+    SUM(COALESCE(s.total_revenue, 0)) AS category_total_revenue,
+    AVG(r.avg_sentiment) AS category_avg_sentiment,
+    SUM(COALESCE(r.review_count, 0)) AS category_review_count
+FROM items i
+LEFT JOIN sales_agg s ON s.item_id = i.i_item_id
+LEFT JOIN reviews_agg r ON r.item_id = i.i_item_id
+GROUP BY i.i_category, i.i_category_id
+ORDER BY category_total_revenue DESC
+LIMIT 10

@@ -1,54 +1,42 @@
-WITH store_sales_agg AS (
-    SELECT
-        s.s_store_id,
-        s.s_store_name,
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ss.ss_quantity) AS total_store_quantity,
-        SUM(ss.ss_quantity * i.i_price) AS total_store_revenue,
-        COUNT(DISTINCT ss.ss_customer_id) AS distinct_store_customers
-    FROM store_sales ss
-    JOIN stores s ON ss.ss_store_id = s.s_store_id
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    GROUP BY s.s_store_id, s.s_store_name, i.i_category_id, i.i_category_name
-),
-web_sales_agg AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ws.ws_quantity) AS total_web_quantity,
-        SUM(ws.ws_quantity * i.i_price) AS total_web_revenue,
-        COUNT(DISTINCT ws.ws_customer_id) AS distinct_web_customers
-    FROM web_sales ws
-    JOIN items i ON ws.ws_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
-),
-product_ratings AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        AVG(pr.pr_rating) AS avg_rating,
-        COUNT(pr.pr_review_id) AS review_count
+WITH item_reviews AS (
+    SELECT i.i_item_id,
+           i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment
     FROM product_reviews pr
     JOIN items i ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
+    GROUP BY i.i_item_id, i.i_category
+),
+store_sales_agg AS (
+    SELECT ss.ss_item_id,
+           SUM(ss.ss_quantity) AS store_qty
+    FROM store_sales ss
+    GROUP BY ss.ss_item_id
+),
+web_sales_agg AS (
+    SELECT ws.ws_item_id,
+           SUM(ws.ws_quantity) AS web_qty
+    FROM web_sales ws
+    GROUP BY ws.ws_item_id
+),
+item_customers AS (
+    SELECT ss.ss_item_id AS item_id,
+           ss.ss_customer_id AS customer_id
+    FROM store_sales ss
+    UNION
+    SELECT ws.ws_item_id AS item_id,
+           ws.ws_customer_id AS customer_id
+    FROM web_sales ws
 )
-SELECT
-    ss.s_store_name,
-    ss.i_category_name,
-    ss.total_store_quantity,
-    ss.total_store_revenue,
-    ws.total_web_quantity,
-    ws.total_web_revenue,
-    pr.avg_rating,
-    pr.review_count,
-    ss.distinct_store_customers,
-    ws.distinct_web_customers
-FROM store_sales_agg ss
-LEFT JOIN web_sales_agg ws
-    ON ss.i_category_id = ws.i_category_id
-LEFT JOIN product_ratings pr
-    ON ss.i_category_id = pr.i_category_id
-WHERE pr.avg_rating >= 4.0
-ORDER BY ss.total_store_revenue DESC
-LIMIT 100
+SELECT i_reviews.i_category,
+       COUNT(DISTINCT i_reviews.i_item_id) AS num_items,
+       AVG(i_reviews.avg_sentiment) AS avg_sentiment_per_category,
+       COALESCE(SUM(s.store_qty), 0) AS total_store_quantity,
+       COALESCE(SUM(w.web_qty), 0) AS total_web_quantity,
+       COUNT(DISTINCT ic.customer_id) AS total_distinct_customers
+FROM item_reviews i_reviews
+LEFT JOIN store_sales_agg s ON i_reviews.i_item_id = s.ss_item_id
+LEFT JOIN web_sales_agg w ON i_reviews.i_item_id = w.ws_item_id
+LEFT JOIN item_customers ic ON i_reviews.i_item_id = ic.item_id
+GROUP BY i_reviews.i_category
+ORDER BY total_store_quantity DESC
+LIMIT 10

@@ -1,16 +1,35 @@
-/* Analytical query on web_pages: count of pages per type, average page‑name length, and share of total pages */
-WITH type_agg AS (
-    SELECT
-        w_web_page_type,
-        COUNT(*) AS page_count,
-        AVG(LENGTH(w_web_page_name)) AS avg_name_length
-    FROM web_pages
-    GROUP BY w_web_page_type
+WITH combined_sales AS (
+    SELECT ss.ss_item_id AS item_id,
+           ss.ss_quantity AS quantity
+    FROM store_sales ss
+    UNION ALL
+    SELECT ws.ws_item_id AS item_id,
+           ws.ws_quantity AS quantity
+    FROM web_sales ws
+),
+category_sales AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           SUM(cs.quantity) AS total_quantity
+    FROM combined_sales cs
+    JOIN items i ON cs.item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+category_reviews AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
-SELECT
-    w_web_page_type,
-    page_count,
-    page_count * 1.0 / SUM(page_count) OVER () AS page_fraction,
-    avg_name_length
-FROM type_agg
-ORDER BY page_count DESC
+SELECT cs.i_category_id,
+       cs.i_category,
+       cs.total_quantity,
+       cr.avg_sentiment,
+       cr.review_count
+FROM category_sales cs
+JOIN category_reviews cr ON cs.i_category_id = cr.i_category_id
+ORDER BY cs.total_quantity DESC
+LIMIT 10

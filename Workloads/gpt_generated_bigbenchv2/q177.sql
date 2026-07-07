@@ -1,36 +1,41 @@
-WITH parsed_logs AS (
+WITH store_agg AS (
     SELECT
-        regexp_extract(line, '"([A-Z]+)\\s', 1)        AS method,
-        regexp_extract(line, '"[A-Z]+\\s([^\\s]+)', 1) AS path,
-        regexp_extract(line, '"\\s(\\d{3})\\s', 1)   AS status,
-        length(line)                                    AS line_length
-    FROM web_logs
-    WHERE line IS NOT NULL
+        ss.ss_item_id AS item_id,
+        SUM(ss.ss_quantity) AS store_quantity,
+        SUM(ss.ss_quantity * i.i_price) AS store_revenue
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    JOIN stores s ON ss.ss_store_id = s.s_store_id
+    GROUP BY ss.ss_item_id
+),
+web_agg AS (
+    SELECT
+        ws.ws_item_id AS item_id,
+        SUM(ws.ws_quantity) AS web_quantity,
+        SUM(ws.ws_quantity * i.i_price) AS web_revenue
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY ws.ws_item_id
+),
+review_agg AS (
+    SELECT
+        pr.pr_item_id AS item_id,
+        COUNT(*) AS review_count,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
 )
 SELECT
-    method,
-    status,
-    request_count,
-    avg_line_length,
-    median_line_length,
-    avg_path_length,
-    min_line_length,
-    max_line_length,
-    RANK() OVER (PARTITION BY method ORDER BY request_count DESC) AS status_rank_by_method
-FROM (
-    SELECT
-        method,
-        status,
-        COUNT(*)                                 AS request_count,
-        AVG(line_length)                         AS avg_line_length,
-        approx_percentile(line_length, 0.5)      AS median_line_length,
-        AVG(length(path))                        AS avg_path_length,
-        MIN(line_length)                         AS min_line_length,
-        MAX(line_length)                         AS max_line_length
-    FROM parsed_logs
-    WHERE method IS NOT NULL
-      AND status IS NOT NULL
-    GROUP BY method, status
-) agg
-ORDER BY request_count DESC
+    i.i_item_id,
+    i.i_name,
+    i.i_category,
+    COALESCE(sa.store_quantity, 0) + COALESCE(wa.web_quantity, 0) AS total_quantity,
+    COALESCE(sa.store_revenue, 0) + COALESCE(wa.web_revenue, 0) AS total_revenue,
+    COALESCE(ra.review_count, 0) AS review_count,
+    ra.avg_sentiment
+FROM items i
+LEFT JOIN store_agg sa ON i.i_item_id = sa.item_id
+LEFT JOIN web_agg wa ON i.i_item_id = wa.item_id
+LEFT JOIN review_agg ra ON i.i_item_id = ra.item_id
+ORDER BY total_quantity DESC
 LIMIT 10

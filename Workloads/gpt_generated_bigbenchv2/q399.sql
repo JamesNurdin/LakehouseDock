@@ -1,22 +1,25 @@
-WITH page_metrics AS (
+WITH review_stats AS (
     SELECT
-        w_web_page_type,
-        count(*) AS page_count,
-        count(DISTINCT w_web_page_name) AS distinct_name_count,
-        avg(length(w_web_page_name)) AS avg_name_length,
-        max(length(w_web_page_name)) AS max_name_length,
-        min(length(w_web_page_name)) AS min_name_length
-    FROM web_pages
-    GROUP BY w_web_page_type
+        i.i_category_id,
+        i.i_category,
+        CAST(i.i_price / 10 AS integer) * 10 AS price_bucket,
+        COUNT(pr.pr_review_id) AS review_count,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        MIN(i.i_price) AS min_price,
+        MAX(i.i_price) AS max_price
+    FROM items i
+    JOIN product_reviews pr
+        ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category, CAST(i.i_price / 10 AS integer) * 10
 )
 SELECT
-    w_web_page_type,
-    page_count,
-    distinct_name_count,
-    avg_name_length,
-    max_name_length,
-    min_name_length,
-    (distinct_name_count * 100.0 / page_count) AS distinct_name_percentage,
-    rank() OVER (ORDER BY page_count DESC) AS type_rank
-FROM page_metrics
-ORDER BY page_count DESC
+    i_category_id,
+    i_category,
+    price_bucket,
+    review_count,
+    avg_sentiment,
+    min_price,
+    max_price
+FROM review_stats
+ORDER BY review_count DESC
+LIMIT 20

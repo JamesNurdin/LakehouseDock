@@ -1,39 +1,34 @@
-WITH sales_enriched AS (
+WITH unified_sales AS (
     SELECT
-        ss.ss_store_id,
-        s.s_store_name,
-        ss.ss_customer_id,
-        ss.ss_item_id,
-        ss.ss_quantity,
-        i.i_category_id,
-        i.i_category_name,
-        i.i_price,
-        i.i_comp_price,
-        i.i_class_id,
-        (ss.ss_quantity * i.i_price) AS revenue,
-        (ss.ss_quantity * (i.i_price - i.i_comp_price)) AS price_diff
+        ss.ss_item_id AS item_id,
+        ss.ss_quantity AS quantity,
+        i.i_price AS price,
+        i.i_category_id AS category_id,
+        i.i_category AS category_name,
+        'store' AS channel
     FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    JOIN stores s
-        ON ss.ss_store_id = s.s_store_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    UNION ALL
+    SELECT
+        ws.ws_item_id AS item_id,
+        ws.ws_quantity AS quantity,
+        i.i_price AS price,
+        i.i_category_id AS category_id,
+        i.i_category AS category_name,
+        'web' AS channel
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
 )
 SELECT
-    se.ss_store_id,
-    se.s_store_name,
-    se.i_category_id,
-    se.i_category_name,
-    SUM(se.revenue) AS total_revenue,
-    SUM(se.ss_quantity) AS total_quantity,
-    ROUND(SUM(se.price_diff) / NULLIF(SUM(se.ss_quantity), 0), 2) AS avg_price_diff,
-    COUNT(DISTINCT se.ss_customer_id) AS distinct_customers,
-    RANK() OVER (PARTITION BY se.ss_store_id ORDER BY SUM(se.revenue) DESC) AS revenue_rank
-FROM sales_enriched se
-GROUP BY
-    se.ss_store_id,
-    se.s_store_name,
-    se.i_category_id,
-    se.i_category_name
-ORDER BY
-    se.ss_store_id,
-    revenue_rank
+    us.category_id,
+    us.category_name,
+    SUM(us.quantity) AS total_quantity,
+    SUM(us.quantity * us.price) AS total_revenue,
+    SUM(CASE WHEN us.channel = 'store' THEN us.quantity ELSE 0 END) AS store_quantity,
+    SUM(CASE WHEN us.channel = 'store' THEN us.quantity * us.price ELSE 0 END) AS store_revenue,
+    SUM(CASE WHEN us.channel = 'web' THEN us.quantity ELSE 0 END) AS web_quantity,
+    SUM(CASE WHEN us.channel = 'web' THEN us.quantity * us.price ELSE 0 END) AS web_revenue
+FROM unified_sales us
+GROUP BY us.category_id, us.category_name
+ORDER BY total_revenue DESC
+LIMIT 10

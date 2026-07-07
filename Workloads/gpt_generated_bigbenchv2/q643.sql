@@ -1,28 +1,27 @@
-WITH parsed_logs AS (
+WITH sales AS (
     SELECT
-        line,
-        regexp_extract(line, '^([^ ]+)', 1) AS ip,
-        CAST(regexp_extract(line, '"[A-Z]+ [^ ]+ HTTP/[^\"]+" ([0-9]{3})', 1) AS integer) AS status_code,
-        CAST(regexp_extract(line, '"[A-Z]+ [^ ]+ HTTP/[^\"]+" [0-9]{3} ([0-9]+)', 1) AS integer) AS bytes_sent
-    FROM web_logs
-    WHERE line IS NOT NULL
-),
-agg_ip AS (
-    SELECT
-        ip,
-        COUNT(*) AS total_requests,
-        SUM(bytes_sent) AS total_bytes,
-        AVG(bytes_sent) AS avg_bytes
-    FROM parsed_logs
-    WHERE ip IS NOT NULL
-    GROUP BY ip
+        ws.ws_transaction_id,
+        ws.ws_customer_id,
+        ws.ws_item_id,
+        ws.ws_quantity,
+        i.i_item_id,
+        i.i_category_id,
+        i.i_category,
+        i.i_price
+    FROM web_sales ws
+    INNER JOIN customers c ON ws.ws_customer_id = c.c_customer_id
+    INNER JOIN items i ON ws.ws_item_id = i.i_item_id
 )
 SELECT
-    ip,
-    total_requests,
-    total_bytes,
-    avg_bytes,
-    RANK() OVER (ORDER BY total_requests DESC) AS request_rank
-FROM agg_ip
-ORDER BY total_requests DESC
-LIMIT 20
+    s.i_category_id,
+    s.i_category,
+    SUM(s.ws_quantity) AS total_quantity_sold,
+    SUM(s.ws_quantity * s.i_price) AS total_revenue,
+    COUNT(DISTINCT s.ws_customer_id) AS distinct_customers,
+    AVG(pr.pr_sentiment) AS avg_review_sentiment,
+    COUNT(pr.pr_review_id) AS review_count
+FROM sales s
+LEFT JOIN product_reviews pr ON pr.pr_item_id = s.i_item_id
+GROUP BY s.i_category_id, s.i_category
+ORDER BY total_revenue DESC
+LIMIT 10

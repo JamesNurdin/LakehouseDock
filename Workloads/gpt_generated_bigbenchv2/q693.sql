@@ -1,20 +1,29 @@
-WITH page_type_stats AS (
+WITH customer_pageviews AS (
     SELECT
-        w_web_page_type,
-        COUNT(*) AS page_count,
-        COUNT(DISTINCT w_web_page_name) AS distinct_name_count,
-        COUNT(DISTINCT w_web_page_name) * 1.0 / COUNT(*) AS distinct_ratio,
-        AVG(LENGTH(w_web_page_name)) AS avg_name_length
-    FROM web_pages
-    GROUP BY w_web_page_type
-    HAVING COUNT(*) > 5
+        wl_customer_id,
+        COUNT(*) AS total_page_views,
+        COUNT(DISTINCT wl_item_id) AS distinct_items_viewed
+    FROM web_logs
+    WHERE CAST(wl_timestamp AS timestamp) >= TIMESTAMP '2023-01-01'
+      AND CAST(wl_timestamp AS timestamp) < TIMESTAMP '2023-02-01'
+    GROUP BY wl_customer_id
+),
+customer_last_view AS (
+    SELECT
+        wl_customer_id,
+        MAX(CAST(wl_timestamp AS timestamp)) AS last_view_timestamp
+    FROM web_logs
+    WHERE CAST(wl_timestamp AS timestamp) >= TIMESTAMP '2023-01-01'
+      AND CAST(wl_timestamp AS timestamp) < TIMESTAMP '2023-02-01'
+    GROUP BY wl_customer_id
 )
 SELECT
-    w_web_page_type,
-    page_count,
-    distinct_name_count,
-    distinct_ratio,
-    avg_name_length,
-    RANK() OVER (ORDER BY page_count DESC) AS type_rank
-FROM page_type_stats
-ORDER BY type_rank
+    cp.wl_customer_id,
+    cp.total_page_views,
+    cp.distinct_items_viewed,
+    clv.last_view_timestamp
+FROM customer_pageviews cp
+JOIN customer_last_view clv
+    ON cp.wl_customer_id = clv.wl_customer_id
+ORDER BY cp.total_page_views DESC
+LIMIT 10

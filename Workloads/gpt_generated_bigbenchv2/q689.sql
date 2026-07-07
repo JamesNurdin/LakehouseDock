@@ -1,77 +1,45 @@
--- Customer purchase summary across store and web channels with item‑rating insights
-WITH item_rating AS (
-    SELECT
-        pr.pr_item_id,
-        AVG(pr.pr_rating) AS avg_rating
-    FROM product_reviews pr
-    GROUP BY pr.pr_item_id
-),
-store_sales_agg AS (
-    SELECT
-        ss.ss_customer_id   AS customer_id,
-        ss.ss_store_id      AS store_id,
-        ss.ss_item_id       AS item_id,
-        ss.ss_quantity      AS quantity,
-        i.i_price           AS price,
-        COALESCE(ir.avg_rating, 0) AS rating
-    FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    LEFT JOIN item_rating ir
-        ON i.i_item_id = ir.pr_item_id
+WITH store_sales_agg AS (
+    SELECT ss_item_id AS item_id,
+           SUM(ss_quantity) AS qty
+    FROM store_sales
+    GROUP BY ss_item_id
 ),
 web_sales_agg AS (
-    SELECT
-        ws.ws_customer_id   AS customer_id,
-        NULL                AS store_id,
-        ws.ws_item_id       AS item_id,
-        ws.ws_quantity      AS quantity,
-        i.i_price           AS price,
-        COALESCE(ir.avg_rating, 0) AS rating
-    FROM web_sales ws
-    JOIN items i
-        ON ws.ws_item_id = i.i_item_id
-    LEFT JOIN item_rating ir
-        ON i.i_item_id = ir.pr_item_id
+    SELECT ws_item_id AS item_id,
+           SUM(ws_quantity) AS qty
+    FROM web_sales
+    GROUP BY ws_item_id
 ),
 combined_sales AS (
-    SELECT
-        customer_id,
-        store_id,
-        item_id,
-        quantity,
-        price,
-        rating
+    SELECT item_id,
+           qty
     FROM store_sales_agg
     UNION ALL
-    SELECT
-        customer_id,
-        store_id,
-        item_id,
-        quantity,
-        price,
-        rating
+    SELECT item_id,
+           qty
     FROM web_sales_agg
+),
+item_sales AS (
+    SELECT item_id,
+           SUM(qty) AS total_qty
+    FROM combined_sales
+    GROUP BY item_id
+),
+item_reviews AS (
+    SELECT pr_item_id AS item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    c.c_customer_id,
-    c.c_name,
-    SUM(cs.quantity)                                               AS total_quantity,
-    SUM(CASE WHEN cs.store_id IS NOT NULL THEN cs.quantity ELSE 0 END) AS total_quantity_store,
-    SUM(CASE WHEN cs.store_id IS NULL THEN cs.quantity ELSE 0 END)      AS total_quantity_web,
-    COUNT(DISTINCT CASE WHEN cs.store_id IS NOT NULL THEN cs.store_id END) AS distinct_stores,
-    COUNT(DISTINCT cs.item_id)                                      AS distinct_items,
-    AVG(cs.price)                                                   AS avg_item_price,
-    CASE
-        WHEN SUM(cs.quantity) > 0 THEN SUM(cs.rating * cs.quantity) / SUM(cs.quantity)
-        ELSE NULL
-    END                                                            AS weighted_avg_rating
-FROM combined_sales cs
-JOIN customers c
-    ON cs.customer_id = c.c_customer_id
-GROUP BY
-    c.c_customer_id,
-    c.c_name
-ORDER BY
-    total_quantity DESC
-LIMIT 20
+SELECT i.i_category,
+       i.i_category_id,
+       SUM(s.total_qty) AS category_total_qty,
+       AVG(r.avg_sentiment) AS category_avg_sentiment,
+       COUNT(DISTINCT i.i_item_id) AS distinct_items_sold
+FROM item_sales s
+JOIN items i ON s.item_id = i.i_item_id
+LEFT JOIN item_reviews r ON r.item_id = i.i_item_id
+GROUP BY i.i_category, i.i_category_id
+ORDER BY category_total_qty DESC
+LIMIT 10

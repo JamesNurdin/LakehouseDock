@@ -1,19 +1,16 @@
-WITH page_metrics AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len,
-        substring(w_web_page_name, 1, 1) AS first_char
-    FROM web_pages
+WITH ws_agg AS (
+    SELECT ws_customer_id,
+           COUNT(*) AS transaction_cnt,
+           SUM(ws_quantity) AS total_quantity
+    FROM web_sales
+    GROUP BY ws_customer_id
 )
-SELECT
-    w_web_page_type,
-    first_char,
-    COUNT(*) AS page_cnt,
-    AVG(name_len) AS avg_name_len,
-    MAX(name_len) AS longest_name_len,
-    MIN(name_len) AS shortest_name_len
-FROM page_metrics
-GROUP BY w_web_page_type, first_char
-ORDER BY page_cnt DESC, w_web_page_type, first_char
+SELECT c.c_customer_id,
+       c.c_name,
+       ws_agg.transaction_cnt,
+       ws_agg.total_quantity
+FROM ws_agg
+JOIN customers c
+  ON ws_agg.ws_customer_id = c.c_customer_id
+ORDER BY ws_agg.total_quantity DESC
+LIMIT 10

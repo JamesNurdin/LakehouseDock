@@ -1,30 +1,31 @@
-WITH parsed AS (
+WITH sales_by_store_item AS (
     SELECT
-        line,
-        regexp_extract(line, '\\[(\\d{2}/[A-Za-z]{3}/\\d{4}):(\\d{2}):\\d{2}:\\d{2}', 1) AS date_str,
-        regexp_extract(line, '\\[(\\d{2}/[A-Za-z]{3}/\\d{4}):(\\d{2}):\\d{2}:\\d{2}', 2) AS hour,
-        regexp_extract(line, '\\s(\\d{3})\\s', 1) AS status_code
-    FROM web_logs
-    WHERE line IS NOT NULL
+        ss.ss_store_id,
+        ss.ss_item_id,
+        SUM(ss.ss_quantity) AS item_quantity,
+        SUM(ss.ss_quantity * i.i_price) AS item_revenue
+    FROM store_sales ss
+    JOIN items i
+        ON ss.ss_item_id = i.i_item_id
+    GROUP BY ss.ss_store_id, ss.ss_item_id
 ),
-aggregated AS (
+item_sentiment AS (
     SELECT
-        date_str,
-        hour,
-        status_code,
-        COUNT(*) AS request_count
-    FROM parsed
-    WHERE date_str IS NOT NULL
-      AND hour IS NOT NULL
-      AND status_code IS NOT NULL
-    GROUP BY date_str, hour, status_code
+        pr.pr_item_id,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
 )
 SELECT
-    date_str,
-    hour,
-    status_code,
-    request_count,
-    ROUND(100.0 * request_count / SUM(request_count) OVER (PARTITION BY date_str), 2) AS pct_of_day
-FROM aggregated
-ORDER BY date_str, hour, request_count DESC
-LIMIT 50
+    s.s_store_name,
+    SUM(sbi.item_quantity) AS total_quantity,
+    SUM(sbi.item_revenue) AS total_revenue,
+    SUM(sbi.item_quantity * COALESCE(isent.avg_sentiment, 0)) / NULLIF(SUM(sbi.item_quantity), 0) AS weighted_avg_sentiment
+FROM sales_by_store_item sbi
+LEFT JOIN item_sentiment isent
+    ON sbi.ss_item_id = isent.pr_item_id
+JOIN stores s
+    ON sbi.ss_store_id = s.s_store_id
+GROUP BY s.s_store_name
+ORDER BY total_revenue DESC
+LIMIT 10

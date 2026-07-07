@@ -1,28 +1,22 @@
-WITH sales_month AS (
-    SELECT
-        ss_transaction_id,
-        ss_customer_id,
-        ss_store_id,
-        ss_item_id,
-        ss_quantity,
-        CAST(ss_ts AS timestamp) AS ts,
-        date_trunc('month', CAST(ss_ts AS timestamp)) AS month_start
-    FROM store_sales
-    WHERE ss_quantity > 0
+WITH unified_sales AS (
+    SELECT ss.ss_item_id AS item_id,
+           ss.ss_store_id AS store_id,
+           ss.ss_quantity AS quantity,
+           'store' AS channel
+    FROM store_sales ss
+    UNION ALL
+    SELECT ws.ws_item_id AS item_id,
+           NULL AS store_id,
+           ws.ws_quantity AS quantity,
+           'web' AS channel
+    FROM web_sales ws
 )
-SELECT
-    s.s_store_name,
-    sm.month_start,
-    SUM(sm.ss_quantity) AS total_quantity,
-    COUNT(*) AS total_transactions,
-    COUNT(DISTINCT sm.ss_customer_id) AS distinct_customers,
-    AVG(sm.ss_quantity) AS avg_quantity_per_transaction
-FROM sales_month sm
-JOIN stores s
-    ON sm.ss_store_id = s.s_store_id
-GROUP BY
-    s.s_store_name,
-    sm.month_start
-ORDER BY
-    sm.month_start,
-    total_quantity DESC
+SELECT COALESCE(st.s_store_name, 'Web') AS sales_location,
+       i.i_category AS category,
+       SUM(us.quantity) AS total_quantity,
+       SUM(us.quantity * i.i_price) AS total_revenue
+FROM unified_sales us
+JOIN items i ON us.item_id = i.i_item_id
+LEFT JOIN stores st ON us.store_id = st.s_store_id
+GROUP BY COALESCE(st.s_store_name, 'Web'), i.i_category
+ORDER BY i.i_category, sales_location

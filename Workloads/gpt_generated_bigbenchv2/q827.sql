@@ -1,18 +1,31 @@
-WITH page_name_lengths AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        LENGTH(w_web_page_name) AS name_len
-    FROM web_pages
-    WHERE w_web_page_type IS NOT NULL
-)
-SELECT
-    w_web_page_type,
-    COUNT(*) AS page_count,
-    MIN(name_len) AS min_name_len,
-    MAX(name_len) AS max_name_len,
-    AVG(name_len) AS avg_name_len
-FROM page_name_lengths
-GROUP BY w_web_page_type
-ORDER BY page_count DESC
+SELECT s.category,
+       s.total_quantity,
+       COALESCE(r.avg_sentiment, 0) AS avg_sentiment,
+       COALESCE(r.review_count, 0) AS review_count
+FROM (
+    SELECT category,
+           SUM(quantity) AS total_quantity
+    FROM (
+        SELECT i.i_category AS category,
+               ss.ss_quantity AS quantity
+        FROM store_sales ss
+        JOIN items i ON ss.ss_item_id = i.i_item_id
+        UNION ALL
+        SELECT i.i_category AS category,
+               ws.ws_quantity AS quantity
+        FROM web_sales ws
+        JOIN items i ON ws.ws_item_id = i.i_item_id
+    ) sc
+    GROUP BY category
+) s
+LEFT JOIN (
+    SELECT i.i_category AS category,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
+) r
+ON s.category = r.category
+ORDER BY s.total_quantity DESC
+LIMIT 5

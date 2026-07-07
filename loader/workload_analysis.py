@@ -23,6 +23,7 @@ STANDARD_COMPARISON_COLUMNS = [
     # Schema balance
     "table_usage_entropy",
     "column_usage_entropy",
+    "join_edge_usage_entropy",
     "unique_table_set_ratio",
 
     # Plan diversity

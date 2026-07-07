@@ -1,19 +1,48 @@
-WITH page_stats AS (
+WITH store_sales_agg AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len,
-        substr(w_web_page_name, 1, 1) AS first_char
-    FROM web_pages
+        i.i_category_id,
+        i.i_category,
+        SUM(ss.ss_quantity) AS total_store_quantity,
+        COUNT(DISTINCT ss.ss_customer_id) AS distinct_store_customers
+    FROM store_sales ss
+    JOIN items i
+        ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+web_sales_agg AS (
+    SELECT
+        i.i_category_id,
+        i.i_category,
+        SUM(ws.ws_quantity) AS total_web_quantity,
+        COUNT(DISTINCT ws.ws_customer_id) AS distinct_web_customers
+    FROM web_sales ws
+    JOIN items i
+        ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+review_agg AS (
+    SELECT
+        i.i_category_id,
+        i.i_category,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i
+        ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
 SELECT
-    w_web_page_type,
-    first_char,
-    COUNT(*) AS page_count,
-    AVG(name_len) AS avg_name_len,
-    MAX(name_len) AS max_name_len
-FROM page_stats
-GROUP BY w_web_page_type, first_char
-ORDER BY page_count DESC
-LIMIT 20
+    COALESCE(ss.i_category_id, ws.i_category_id, rv.i_category_id) AS category_id,
+    COALESCE(ss.i_category, ws.i_category, rv.i_category) AS category_name,
+    COALESCE(ss.total_store_quantity, 0) AS total_store_quantity,
+    COALESCE(ws.total_web_quantity, 0) AS total_web_quantity,
+    COALESCE(rv.avg_sentiment, 0) AS avg_sentiment,
+    COALESCE(rv.review_count, 0) AS review_count,
+    COALESCE(ss.distinct_store_customers, 0) AS distinct_store_customers,
+    COALESCE(ws.distinct_web_customers, 0) AS distinct_web_customers
+FROM store_sales_agg ss
+FULL OUTER JOIN web_sales_agg ws
+    ON ss.i_category_id = ws.i_category_id
+FULL OUTER JOIN review_agg rv
+    ON COALESCE(ss.i_category_id, ws.i_category_id) = rv.i_category_id
+ORDER BY category_id

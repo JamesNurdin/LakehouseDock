@@ -1,47 +1,36 @@
-WITH store_sales_agg AS (
-    SELECT
-        s.s_store_id,
-        s.s_store_name,
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ss.ss_quantity) AS store_quantity
-    FROM store_sales ss
-    JOIN stores s ON ss.ss_store_id = s.s_store_id
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    GROUP BY s.s_store_id, s.s_store_name, i.i_category_id, i.i_category_name
+WITH sales AS (
+    SELECT ss_item_id AS item_id,
+           ss_quantity AS quantity,
+           ss_customer_id AS customer_id
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id,
+           ws_quantity AS quantity,
+           ws_customer_id AS customer_id
+    FROM web_sales
 ),
-web_sales_agg AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ws.ws_quantity) AS web_quantity
-    FROM web_sales ws
-    JOIN items i ON ws.ws_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
+sales_agg_by_category AS (
+    SELECT i.i_category AS category,
+           SUM(s.quantity) AS total_quantity_sold,
+           COUNT(DISTINCT s.customer_id) AS unique_customers
+    FROM sales s
+    JOIN items i ON s.item_id = i.i_item_id
+    GROUP BY i.i_category
 ),
-rating_agg AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        AVG(pr.pr_rating) AS avg_rating
+review_agg_by_category AS (
+    SELECT i.i_category AS category,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
     FROM product_reviews pr
     JOIN items i ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
+    GROUP BY i.i_category
 )
-SELECT
-    ss.s_store_id,
-    ss.s_store_name,
-    ss.i_category_id,
-    ss.i_category_name,
-    ss.store_quantity,
-    COALESCE(ws.web_quantity, 0) AS web_quantity,
-    ss.store_quantity + COALESCE(ws.web_quantity, 0) AS total_quantity,
-    COALESCE(r.avg_rating, 0) AS avg_rating
-FROM store_sales_agg ss
-LEFT JOIN web_sales_agg ws
-    ON ss.i_category_id = ws.i_category_id
-    AND ss.i_category_name = ws.i_category_name
-LEFT JOIN rating_agg r
-    ON ss.i_category_id = r.i_category_id
-    AND ss.i_category_name = r.i_category_name
-ORDER BY ss.s_store_id, ss.i_category_id
+SELECT s.category,
+       s.total_quantity_sold,
+       s.unique_customers,
+       r.avg_sentiment,
+       r.review_count
+FROM sales_agg_by_category s
+LEFT JOIN review_agg_by_category r ON s.category = r.category
+ORDER BY s.total_quantity_sold DESC
+LIMIT 5

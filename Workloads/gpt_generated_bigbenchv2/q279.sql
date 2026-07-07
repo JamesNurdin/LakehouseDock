@@ -1,71 +1,36 @@
-WITH item_avg_rating AS (
-    SELECT
-        i.i_item_id,
-        AVG(pr.pr_rating) AS avg_rating
-    FROM product_reviews pr
-    JOIN items i
-        ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_item_id
-),
-store_item_sales AS (
-    SELECT
-        s.s_store_id,
-        s.s_store_name,
-        ss.ss_item_id,
-        i.i_name,
-        i.i_category_name,
-        ss.ss_quantity,
-        ss.ss_quantity * i.i_price AS revenue,
-        ar.avg_rating,
-        ss.ss_customer_id
+WITH store_agg AS (
+    SELECT ss.ss_item_id AS item_id,
+           SUM(ss.ss_quantity) AS total_store_qty
     FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    JOIN stores s
-        ON ss.ss_store_id = s.s_store_id
-    JOIN customers c
-        ON ss.ss_customer_id = c.c_customer_id
-    LEFT JOIN item_avg_rating ar
-        ON i.i_item_id = ar.i_item_id
+    GROUP BY ss.ss_item_id
 ),
-store_summary AS (
-    SELECT
-        s_store_id,
-        s_store_name,
-        SUM(revenue) AS total_revenue,
-        SUM(ss_quantity) AS total_quantity,
-        SUM(ss_quantity * COALESCE(avg_rating, 0)) / SUM(ss_quantity) AS avg_weighted_rating,
-        COUNT(DISTINCT ss_customer_id) AS distinct_customer_count
-    FROM store_item_sales
-    GROUP BY s_store_id, s_store_name
+web_agg AS (
+    SELECT ws.ws_item_id AS item_id,
+           SUM(ws.ws_quantity) AS total_web_qty
+    FROM web_sales ws
+    GROUP BY ws.ws_item_id
 ),
-top_items AS (
-    SELECT
-        s_store_id,
-        s_store_name,
-        ss_item_id,
-        i_name,
-        i_category_name,
-        revenue,
-        ss_quantity,
-        ROW_NUMBER() OVER (PARTITION BY s_store_id ORDER BY revenue DESC) AS item_rank
-    FROM store_item_sales
+review_agg AS (
+    SELECT pr.pr_item_id AS item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_cnt
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
 )
 SELECT
-    ss.s_store_id,
-    ss.s_store_name,
-    ss.total_revenue,
-    ss.total_quantity,
-    ss.avg_weighted_rating,
-    ss.distinct_customer_count,
-    ti.item_rank,
-    ti.ss_item_id AS item_id,
-    ti.i_name AS item_name,
-    ti.i_category_name AS item_category,
-    ti.revenue AS item_revenue,
-    ti.ss_quantity AS item_quantity
-FROM store_summary ss
-JOIN top_items ti
-    ON ss.s_store_id = ti.s_store_id
-WHERE ti.item_rank <= 3
-ORDER BY ss.s_store_id, ti.item_rank
+    i.i_category AS category,
+    SUM(COALESCE(sa.total_store_qty, 0) + COALESCE(wa.total_web_qty, 0)) AS total_quantity_sold,
+    SUM(COALESCE(sa.total_store_qty, 0)) AS total_store_quantity,
+    SUM(COALESCE(wa.total_web_qty, 0)) AS total_web_quantity,
+    CASE WHEN SUM(ra.review_cnt) > 0
+         THEN SUM(ra.avg_sentiment * ra.review_cnt) / SUM(ra.review_cnt)
+         ELSE NULL
+    END AS weighted_average_sentiment,
+    COUNT(DISTINCT i.i_item_id) AS distinct_items
+FROM items i
+LEFT JOIN store_agg sa ON sa.item_id = i.i_item_id
+LEFT JOIN web_agg wa ON wa.item_id = i.i_item_id
+LEFT JOIN review_agg ra ON ra.item_id = i.i_item_id
+GROUP BY i.i_category
+ORDER BY total_quantity_sold DESC
+LIMIT 10

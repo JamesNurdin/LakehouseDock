@@ -1,21 +1,44 @@
-WITH parsed_logs AS (
-    SELECT
-        regexp_extract(line, '^\\S+', 0) AS ip_address,
-        regexp_extract(line, '\\[(.*?)\\]', 1) AS timestamp,
-        regexp_extract(line, '"(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH)\\s+([^\"]+)\\s+HTTP/\\d\\.\\d"', 1) AS method,
-        regexp_extract(line, '"(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH)\\s+([^\"]+)\\s+HTTP/\\d\\.\\d"', 2) AS request_path,
-        regexp_extract(line, '\\s+(\\d{3})\\s+', 1) AS status_code,
-        length(line) AS line_length
-    FROM web_logs
+WITH store_stats AS (
+    SELECT i.i_category AS category,
+           'store' AS channel,
+           SUM(ss.ss_quantity * i.i_price) AS revenue,
+           SUM(ss.ss_quantity) AS total_quantity,
+           COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+web_stats AS (
+    SELECT i.i_category AS category,
+           'web' AS channel,
+           SUM(ws.ws_quantity * i.i_price) AS revenue,
+           SUM(ws.ws_quantity) AS total_quantity,
+           COUNT(DISTINCT ws.ws_customer_id) AS distinct_customers
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+combined AS (
+    SELECT category,
+           channel,
+           revenue,
+           total_quantity,
+           distinct_customers
+    FROM store_stats
+    UNION ALL
+    SELECT category,
+           channel,
+           revenue,
+           total_quantity,
+           distinct_customers
+    FROM web_stats
 )
-SELECT
-    method,
-    status_code,
-    COUNT(*) AS request_count,
-    AVG(line_length) AS avg_line_length
-FROM parsed_logs
-WHERE method IS NOT NULL
-  AND status_code IS NOT NULL
-GROUP BY method, status_code
-ORDER BY request_count DESC
+SELECT category,
+       channel,
+       revenue,
+       total_quantity,
+       distinct_customers,
+       revenue / distinct_customers AS avg_revenue_per_customer
+FROM combined
+ORDER BY revenue DESC
 LIMIT 10

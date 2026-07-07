@@ -1,34 +1,53 @@
-/*
-  Analytical query on the web_logs table.
-  It parses each log line to extract the HTTP method and request path,
-  aggregates request counts and average line length per method‑path pair,
-  and then ranks the most frequent paths within each HTTP method.
-*/
-WITH parsed_logs AS (
+WITH store_sales_joined AS (
     SELECT
-        line,
-        regexp_extract(line, '"([^ ]+)', 1) AS http_method,
-        regexp_extract(line, '"[^ ]+ ([^ ]+)', 1) AS request_path,
-        length(line) AS line_length
-    FROM web_logs
-    WHERE line IS NOT NULL
+        i.i_category AS category,
+        i.i_category_id AS category_id,
+        ss.ss_quantity AS quantity,
+        i.i_price AS price
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
 ),
-method_path_counts AS (
+web_sales_joined AS (
     SELECT
-        http_method,
-        request_path,
-        COUNT(*) AS request_count,
-        AVG(line_length) AS avg_line_length
-    FROM parsed_logs
-    GROUP BY http_method, request_path
+        i.i_category AS category,
+        i.i_category_id AS category_id,
+        ws.ws_quantity AS quantity,
+        i.i_price AS price
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+),
+all_sales AS (
+    SELECT category, category_id, quantity, price FROM store_sales_joined
+    UNION ALL
+    SELECT category, category_id, quantity, price FROM web_sales_joined
+),
+sales_agg AS (
+    SELECT
+        category,
+        category_id,
+        SUM(quantity) AS total_quantity,
+        SUM(quantity * price) AS total_revenue
+    FROM all_sales
+    GROUP BY category, category_id
+),
+reviews_agg AS (
+    SELECT
+        i.i_category AS category,
+        i.i_category_id AS category_id,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category, i.i_category_id
 )
 SELECT
-    http_method,
-    request_path,
-    request_count,
-    avg_line_length,
-    ROW_NUMBER() OVER (PARTITION BY http_method ORDER BY request_count DESC) AS rank_by_method
-FROM method_path_counts
-WHERE request_count > 10
-ORDER BY http_method, rank_by_method
-LIMIT 50
+    s.category,
+    s.category_id,
+    s.total_quantity,
+    s.total_revenue,
+    r.avg_sentiment
+FROM sales_agg s
+LEFT JOIN reviews_agg r
+    ON s.category = r.category
+    AND s.category_id = r.category_id
+ORDER BY s.total_revenue DESC
+LIMIT 10

@@ -1,22 +1,17 @@
-WITH page_stats AS (
-    SELECT
-        w_web_page_type,
-        substring(w_web_page_name, 1, 1) AS first_letter,
-        COUNT(*) AS page_count,
-        AVG(length(w_web_page_name)) AS avg_name_len,
-        MIN(w_web_page_id) AS min_id,
-        MAX(w_web_page_id) AS max_id
+WITH page_lengths AS (
+    SELECT w_web_page_id,
+           w_web_page_name,
+           w_web_page_type,
+           LENGTH(w_web_page_name) AS name_len
     FROM web_pages
-    GROUP BY w_web_page_type, substring(w_web_page_name, 1, 1)
 )
-SELECT
-    w_web_page_type,
-    first_letter,
-    page_count,
-    avg_name_len,
-    min_id,
-    max_id,
-    ROW_NUMBER() OVER (PARTITION BY w_web_page_type ORDER BY page_count DESC) AS rank_within_type
-FROM page_stats
-ORDER BY w_web_page_type, rank_within_type
-LIMIT 50
+SELECT w_web_page_type,
+       COUNT(*) AS page_count,
+       MAX(name_len) AS max_name_len,
+       MIN(name_len) AS min_name_len,
+       AVG(name_len) AS avg_name_len
+FROM page_lengths
+WHERE name_len > 5
+GROUP BY w_web_page_type
+HAVING COUNT(*) > 2
+ORDER BY page_count DESC

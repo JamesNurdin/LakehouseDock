@@ -1,22 +1,19 @@
-WITH parsed_logs AS (
+WITH item_sentiment AS (
     SELECT
-        line,
-        regexp_extract(line, '^([^ ]+)', 1) AS ip,
-        regexp_extract(line, '"([A-Z]+) ', 1) AS request_method,
-        regexp_extract(line, '"[A-Z]+ ([^ ]+)', 1) AS request_path,
-        regexp_extract(line, '" (\d{3}) ', 1) AS status_code,
-        length(line) AS line_length
-    FROM web_logs
+        pr.pr_item_id AS i_item_id,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY pr.pr_item_id
 )
 SELECT
-    status_code,
-    request_method,
-    COUNT(*) AS request_count,
-    AVG(line_length) AS avg_line_length,
-    MIN(line_length) AS min_line_length,
-    MAX(line_length) AS max_line_length
-FROM parsed_logs
-WHERE status_code IS NOT NULL
-GROUP BY status_code, request_method
-ORDER BY request_count DESC
-LIMIT 100
+    s.s_store_name,
+    SUM(ss.ss_quantity) AS total_quantity_sold,
+    AVG(isent.avg_sentiment) AS avg_item_sentiment
+FROM store_sales ss
+JOIN stores s ON ss.ss_store_id = s.s_store_id
+JOIN items i ON ss.ss_item_id = i.i_item_id
+LEFT JOIN item_sentiment isent ON i.i_item_id = isent.i_item_id
+GROUP BY s.s_store_name
+ORDER BY total_quantity_sold DESC
+LIMIT 10

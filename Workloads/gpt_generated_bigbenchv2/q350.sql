@@ -1,52 +1,33 @@
-WITH combined_sales AS (
-    SELECT ss_item_id AS item_id, ss_quantity AS quantity
-    FROM store_sales
-    UNION ALL
-    SELECT ws_item_id AS item_id, ws_quantity AS quantity
-    FROM web_sales
+WITH sales_per_item AS (
+  SELECT
+    ss.ss_store_id,
+    ss.ss_item_id,
+    SUM(ss.ss_quantity) AS total_quantity,
+    COUNT(DISTINCT ss.ss_transaction_id) AS transaction_count
+  FROM store_sales ss
+  GROUP BY ss.ss_store_id, ss.ss_item_id
 ),
-sales_agg AS (
-    SELECT
-        cs.item_id,
-        SUM(cs.quantity) AS total_quantity,
-        SUM(cs.quantity * i.i_price) AS total_revenue
-    FROM combined_sales cs
-    JOIN items i ON cs.item_id = i.i_item_id
-    GROUP BY cs.item_id
-),
-rating_agg AS (
-    SELECT
-        pr_item_id AS item_id,
-        AVG(pr_rating) AS avg_rating,
-        COUNT(*) AS review_count
-    FROM product_reviews
-    GROUP BY pr_item_id
-),
-customer_agg AS (
-    SELECT
-        ic.item_id,
-        COUNT(DISTINCT ic.customer_id) AS distinct_customer_count
-    FROM (
-        SELECT ss_item_id AS item_id, ss_customer_id AS customer_id
-        FROM store_sales
-        UNION
-        SELECT ws_item_id AS item_id, ws_customer_id AS customer_id
-        FROM web_sales
-    ) ic
-    GROUP BY ic.item_id
+review_stats AS (
+  SELECT
+    pr.pr_item_id,
+    AVG(pr.pr_sentiment) AS avg_sentiment,
+    COUNT(*) AS review_count
+  FROM product_reviews pr
+  GROUP BY pr.pr_item_id
 )
 SELECT
-    i.i_item_id,
-    i.i_name,
-    i.i_category_name,
-    sa.total_quantity,
-    sa.total_revenue,
-    COALESCE(ra.avg_rating, 0) AS avg_rating,
-    COALESCE(ra.review_count, 0) AS review_count,
-    COALESCE(ca.distinct_customer_count, 0) AS distinct_customer_count
-FROM items i
-LEFT JOIN sales_agg sa ON i.i_item_id = sa.item_id
-LEFT JOIN rating_agg ra ON i.i_item_id = ra.item_id
-LEFT JOIN customer_agg ca ON i.i_item_id = ca.item_id
-ORDER BY sa.total_revenue DESC
-LIMIT 10
+  s.s_store_name,
+  i.i_category,
+  SUM(spi.total_quantity) AS total_quantity,
+  SUM(spi.transaction_count) AS total_transactions,
+  AVG(rs.avg_sentiment) AS avg_sentiment,
+  SUM(rs.review_count) AS total_reviews
+FROM sales_per_item spi
+JOIN items i
+  ON spi.ss_item_id = i.i_item_id
+JOIN stores s
+  ON spi.ss_store_id = s.s_store_id
+LEFT JOIN review_stats rs
+  ON i.i_item_id = rs.pr_item_id
+GROUP BY s.s_store_name, i.i_category
+ORDER BY s.s_store_name, i.i_category
