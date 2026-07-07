@@ -32,9 +32,10 @@ from .embedding import(
     RunEmbeddingBundle,
 )
 
-from . import heads_v1, heads_v2
+from . import heads_v1, heads_v2, heads_baselines
 from .heads_v1 import *
 from .heads_v2 import *
+from .heads_baselines import *
 
 
 import torch
@@ -83,4 +84,4 @@ __all__ = [
 
     # Model 
     "durations_from_runs",
-] + heads_v1.__all__ + heads_v2.__all__
+] + heads_v1.__all__ + heads_v2.__all__ + heads_baselines.__all__
