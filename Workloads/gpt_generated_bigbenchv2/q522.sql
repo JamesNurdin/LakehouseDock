@@ -1,57 +1,38 @@
-WITH aggregated_items AS (
-    SELECT
-        ss.ss_store_id,
-        ss.ss_item_id,
-        SUM(ss.ss_quantity) AS item_quantity
+WITH sales AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           ss.ss_quantity AS quantity
     FROM store_sales ss
-    GROUP BY ss.ss_store_id, ss.ss_item_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    UNION ALL
+    SELECT i.i_category_id,
+           i.i_category,
+           ws.ws_quantity AS quantity
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
 ),
-ranked_items AS (
-    SELECT
-        ai.ss_store_id,
-        ai.ss_item_id,
-        ai.item_quantity,
-        ROW_NUMBER() OVER (PARTITION BY ai.ss_store_id ORDER BY ai.item_quantity DESC) AS rn
-    FROM aggregated_items ai
+sales_agg AS (
+    SELECT i_category_id,
+           i_category,
+           SUM(quantity) AS total_quantity_sold
+    FROM sales
+    GROUP BY i_category_id, i_category
 ),
-store_summary AS (
-    SELECT
-        ss.ss_store_id,
-        COUNT(DISTINCT ss.ss_transaction_id) AS transaction_count,
-        SUM(ss.ss_quantity) AS total_quantity,
-        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers
-    FROM store_sales ss
-    GROUP BY ss.ss_store_id
-),
-customer_spending AS (
-    SELECT
-        ss.ss_store_id,
-        ss.ss_customer_id,
-        SUM(ss.ss_quantity) AS customer_quantity
-    FROM store_sales ss
-    GROUP BY ss.ss_store_id, ss.ss_customer_id
-),
-ranked_customers AS (
-    SELECT
-        cs.ss_store_id,
-        cs.ss_customer_id,
-        cs.customer_quantity,
-        ROW_NUMBER() OVER (PARTITION BY cs.ss_store_id ORDER BY cs.customer_quantity DESC) AS rn
-    FROM customer_spending cs
+reviews_agg AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
-SELECT
-    s.s_store_name,
-    ss.transaction_count,
-    ss.total_quantity,
-    ss.distinct_customers,
-    ri.ss_item_id AS top_item_id,
-    ri.item_quantity AS top_item_quantity,
-    c.c_name AS top_customer_name,
-    rc.customer_quantity AS top_customer_quantity
-FROM store_summary ss
-JOIN stores s ON ss.ss_store_id = s.s_store_id
-JOIN ranked_items ri ON ss.ss_store_id = ri.ss_store_id AND ri.rn = 1
-JOIN ranked_customers rc ON ss.ss_store_id = rc.ss_store_id AND rc.rn = 1
-JOIN customers c ON rc.ss_customer_id = c.c_customer_id
-ORDER BY ss.total_quantity DESC
+SELECT s.i_category_id AS category_id,
+       s.i_category AS category_name,
+       s.total_quantity_sold,
+       COALESCE(r.avg_sentiment, 0) AS average_review_sentiment,
+       COALESCE(r.review_count, 0) AS review_count
+FROM sales_agg s
+LEFT JOIN reviews_agg r ON s.i_category_id = r.i_category_id
+ORDER BY s.total_quantity_sold DESC
 LIMIT 10

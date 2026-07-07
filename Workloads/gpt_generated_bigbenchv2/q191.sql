@@ -1,36 +1,42 @@
-WITH combined_sales AS (
-    SELECT
-        ss.ss_customer_id AS customer_id,
-        ss.ss_quantity * i.i_price AS sales_amount
+WITH store_sales_agg AS (
+    SELECT i.i_category,
+           SUM(ss.ss_quantity) AS store_qty
     FROM store_sales ss
     JOIN items i ON ss.ss_item_id = i.i_item_id
-    UNION ALL
-    SELECT
-        ws.ws_customer_id AS customer_id,
-        ws.ws_quantity * i.i_price AS sales_amount
+    GROUP BY i.i_category
+),
+web_sales_agg AS (
+    SELECT i.i_category,
+           SUM(ws.ws_quantity) AS web_qty
     FROM web_sales ws
     JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
 ),
-customer_sales AS (
-    SELECT
-        cs.customer_id,
-        SUM(cs.sales_amount) AS total_sales_amount
-    FROM combined_sales cs
-    GROUP BY cs.customer_id
+review_agg AS (
+    SELECT i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
 ),
-ranked_customers AS (
-    SELECT
-        cs.customer_id,
-        cs.total_sales_amount,
-        ROW_NUMBER() OVER (ORDER BY cs.total_sales_amount DESC) AS sales_rank
-    FROM customer_sales cs
+item_price_agg AS (
+    SELECT i.i_category,
+           AVG(i.i_price) AS avg_price
+    FROM items i
+    GROUP BY i.i_category
 )
 SELECT
-    rc.sales_rank,
-    c.c_customer_id,
-    c.c_name,
-    rc.total_sales_amount
-FROM ranked_customers rc
-JOIN customers c ON c.c_customer_id = rc.customer_id
-WHERE rc.sales_rank <= 10
-ORDER BY rc.sales_rank
+    COALESCE(s.i_category, w.i_category, r.i_category, p.i_category) AS category,
+    COALESCE(s.store_qty, 0) AS store_quantity,
+    COALESCE(w.web_qty, 0) AS web_quantity,
+    COALESCE(s.store_qty, 0) + COALESCE(w.web_qty, 0) AS total_quantity,
+    p.avg_price,
+    r.avg_sentiment,
+    r.review_count
+FROM store_sales_agg s
+FULL OUTER JOIN web_sales_agg w ON s.i_category = w.i_category
+FULL OUTER JOIN review_agg r ON COALESCE(s.i_category, w.i_category) = r.i_category
+FULL OUTER JOIN item_price_agg p ON COALESCE(s.i_category, w.i_category, r.i_category) = p.i_category
+ORDER BY total_quantity DESC
+LIMIT 10

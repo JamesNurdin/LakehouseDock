@@ -1,64 +1,51 @@
-WITH
-    store_sales_enriched AS (
-        SELECT
-            ss.ss_store_id AS store_id,
-            s.s_store_name AS store_name,
-            i.i_category_id AS category_id,
-            i.i_category_name AS category_name,
-            ss.ss_quantity AS quantity,
-            ss.ss_quantity * i.i_price AS revenue
-        FROM store_sales ss
-        JOIN stores s ON ss.ss_store_id = s.s_store_id
-        JOIN items i ON ss.ss_item_id = i.i_item_id
-    ),
-    web_sales_enriched AS (
-        SELECT
-            NULL AS store_id,
-            'Online' AS store_name,
-            i.i_category_id AS category_id,
-            i.i_category_name AS category_name,
-            ws.ws_quantity AS quantity,
-            ws.ws_quantity * i.i_price AS revenue
-        FROM web_sales ws
-        JOIN items i ON ws.ws_item_id = i.i_item_id
-    ),
-    combined_sales AS (
-        SELECT * FROM store_sales_enriched
-        UNION ALL
-        SELECT * FROM web_sales_enriched
-    ),
-    store_category_agg AS (
-        SELECT
-            store_id,
-            store_name,
-            category_id,
-            category_name,
-            SUM(quantity) AS total_quantity,
-            SUM(revenue) AS total_revenue
-        FROM combined_sales
-        GROUP BY
-            store_id,
-            store_name,
-            category_id,
-            category_name
-    ),
-    ranked AS (
-        SELECT
-            store_id,
-            store_name,
-            category_id,
-            category_name,
-            total_quantity,
-            total_revenue,
-            ROW_NUMBER() OVER (PARTITION BY store_id ORDER BY total_revenue DESC) AS category_rank
-        FROM store_category_agg
-    )
+WITH sales AS (
+    SELECT
+        i.i_category_id,
+        i.i_category,
+        ss.ss_quantity AS quantity,
+        'store' AS channel
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    UNION ALL
+    SELECT
+        i.i_category_id,
+        i.i_category,
+        ws.ws_quantity AS quantity,
+        'web' AS channel
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+),
+sales_agg AS (
+    SELECT
+        i_category_id,
+        i_category,
+        SUM(quantity) AS total_quantity,
+        SUM(CASE WHEN channel = 'store' THEN quantity ELSE 0 END) AS store_quantity,
+        SUM(CASE WHEN channel = 'web' THEN quantity ELSE 0 END) AS web_quantity
+    FROM sales
+    GROUP BY i_category_id, i_category
+),
+reviews_agg AS (
+    SELECT
+        i.i_category_id,
+        i.i_category,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+)
 SELECT
-    store_name,
-    category_name,
-    total_quantity,
-    total_revenue,
-    category_rank
-FROM ranked
-WHERE category_rank <= 3
-ORDER BY store_name, category_rank
+    s.i_category_id,
+    s.i_category,
+    s.total_quantity,
+    s.store_quantity,
+    s.web_quantity,
+    r.avg_sentiment,
+    r.review_count
+FROM sales_agg s
+LEFT JOIN reviews_agg r
+    ON s.i_category_id = r.i_category_id
+    AND s.i_category = r.i_category
+ORDER BY s.total_quantity DESC
+LIMIT 10

@@ -1,16 +1,18 @@
-WITH parsed_logs AS (
-    SELECT
-        regexp_extract(line, '\\"(\\w+)\\s[^\\\"]+\\"\\s(\\d{3})', 1) AS method,
-        regexp_extract(line, '\\"(\\w+)\\s[^\\\"]+\\"\\s(\\d{3})', 2) AS status_code
-    FROM web_logs
-    WHERE regexp_extract(line, '\\"(\\w+)\\s[^\\\"]+\\"\\s(\\d{3})', 1) IS NOT NULL
-)
 SELECT
-    method,
-    status_code,
-    COUNT(*) AS request_count,
-    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct_of_total_requests
-FROM parsed_logs
-GROUP BY method, status_code
-ORDER BY request_count DESC
-LIMIT 10
+    s.s_store_id,
+    s.s_store_name,
+    c.c_customer_id,
+    c.c_name,
+    COUNT(DISTINCT ss.ss_transaction_id) AS transaction_count,
+    SUM(ss.ss_quantity) AS total_quantity,
+    COUNT(DISTINCT ss.ss_item_id) AS distinct_items
+FROM store_sales ss
+JOIN customers c ON ss.ss_customer_id = c.c_customer_id
+JOIN stores s ON ss.ss_store_id = s.s_store_id
+GROUP BY
+    s.s_store_id,
+    s.s_store_name,
+    c.c_customer_id,
+    c.c_name
+ORDER BY total_quantity DESC
+LIMIT 100

@@ -1,24 +1,33 @@
-WITH customer_category_sales AS (
-    SELECT
-        c.c_customer_id,
-        c.c_name,
-        i.i_category_name,
-        SUM(ss.ss_quantity * i.i_price) AS total_spend,
-        SUM(ss.ss_quantity) AS total_quantity
+WITH review_agg AS (
+    SELECT pr.pr_item_id AS i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
+),
+store_sales_agg AS (
+    SELECT ss.ss_item_id AS i_item_id,
+           SUM(ss.ss_quantity) AS store_quantity
     FROM store_sales ss
-    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    WHERE ss.ss_ts >= '2023-01-01' AND ss.ss_ts < '2024-01-01'
-    GROUP BY c.c_customer_id, c.c_name, i.i_category_name
-    HAVING SUM(ss.ss_quantity * i.i_price) > 500
+    GROUP BY ss.ss_item_id
+),
+web_sales_agg AS (
+    SELECT ws.ws_item_id AS i_item_id,
+           SUM(ws.ws_quantity) AS web_quantity
+    FROM web_sales ws
+    GROUP BY ws.ws_item_id
 )
-SELECT
-    c_customer_id,
-    c_name,
-    i_category_name,
-    total_spend,
-    total_quantity,
-    RANK() OVER (PARTITION BY c_customer_id ORDER BY total_spend DESC) AS category_rank
-FROM customer_category_sales
-ORDER BY total_spend DESC
-LIMIT 20
+SELECT i.i_category,
+       i.i_item_id,
+       i.i_name,
+       COALESCE(r.avg_sentiment, 0) AS avg_sentiment,
+       COALESCE(r.review_count, 0) AS review_count,
+       COALESCE(ss.store_quantity, 0) AS store_quantity,
+       COALESCE(ws.web_quantity, 0) AS web_quantity,
+       COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0) AS total_quantity
+FROM items i
+LEFT JOIN review_agg r ON r.i_item_id = i.i_item_id
+LEFT JOIN store_sales_agg ss ON ss.i_item_id = i.i_item_id
+LEFT JOIN web_sales_agg ws ON ws.i_item_id = i.i_item_id
+ORDER BY avg_sentiment DESC
+LIMIT 100

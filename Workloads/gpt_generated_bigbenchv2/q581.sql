@@ -1,22 +1,41 @@
-WITH parsed_logs AS (
+WITH store_sales_agg AS (
     SELECT
-        regexp_extract(line, '^([^\\s]+)', 1) AS ip,
-        regexp_extract(line, '"([A-Z]+)\\s', 1) AS method,
-        regexp_extract(line, '"\\s(\\d{3})\\s', 1) AS status_code,
-        TRY_CAST(regexp_extract(line, '"\\s\\d{3}\\s(\\d+)', 1) AS BIGINT) AS response_size
-    FROM web_logs
+        ss_item_id,
+        SUM(ss_quantity) AS store_quantity,
+        COUNT(DISTINCT ss_store_id) AS distinct_store_count
+    FROM store_sales
+    GROUP BY ss_item_id
+),
+web_sales_agg AS (
+    SELECT
+        ws_item_id,
+        SUM(ws_quantity) AS web_quantity
+    FROM web_sales
+    GROUP BY ws_item_id
+),
+reviews_agg AS (
+    SELECT
+        pr_item_id,
+        AVG(pr_sentiment) AS avg_sentiment,
+        COUNT(*) AS review_count
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
 SELECT
-    method,
-    status_code,
-    COUNT(*) AS request_count,
-    COUNT(DISTINCT ip) AS unique_ip_count,
-    AVG(response_size) AS avg_response_size,
-    approx_percentile(response_size, 0.5) AS median_response_size
-FROM parsed_logs
-WHERE method IS NOT NULL
-  AND status_code IS NOT NULL
-  AND response_size IS NOT NULL
-GROUP BY method, status_code
-ORDER BY request_count DESC
-LIMIT 20
+    i.i_item_id,
+    i.i_name,
+    i.i_category,
+    i.i_price,
+    COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0) AS total_quantity_sold,
+    (COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0)) * i.i_price AS total_revenue,
+    r.avg_sentiment,
+    ss.distinct_store_count
+FROM items i
+LEFT JOIN store_sales_agg ss
+    ON ss.ss_item_id = i.i_item_id
+LEFT JOIN web_sales_agg ws
+    ON ws.ws_item_id = i.i_item_id
+LEFT JOIN reviews_agg r
+    ON r.pr_item_id = i.i_item_id
+ORDER BY total_revenue DESC
+LIMIT 10

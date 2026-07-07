@@ -1,24 +1,32 @@
-WITH parsed_logs AS (
-    SELECT
-        regexp_extract(line, '^([^ ]+)', 1) AS ip_address,
-        regexp_extract(line, '\\[([^\\]]+)]', 1) AS log_timestamp,
-        regexp_extract(line, '\\"([A-Z]+) ', 1) AS http_method,
-        regexp_extract(line, '\\"[A-Z]+ ([^ ]+) ', 1) AS request_path,
-        regexp_extract(line, '\\"\\s+([0-9]{3})\\s+([0-9]+)', 1) AS status_code,
-        regexp_extract(line, '\\"\\s+([0-9]{3})\\s+([0-9]+)', 2) AS response_bytes
-    FROM web_logs
+WITH sales AS (
+    SELECT ss_item_id AS item_id, ss_quantity AS quantity
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id, ws_quantity AS quantity
+    FROM web_sales
+),
+sales_agg AS (
+    SELECT s.item_id,
+           SUM(s.quantity) AS total_quantity
+    FROM sales s
+    GROUP BY s.item_id
+),
+review_agg AS (
+    SELECT pr_item_id AS item_id,
+           COUNT(*) AS review_count,
+           AVG(pr_sentiment) AS avg_sentiment
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    http_method,
-    request_path,
-    status_code,
-    COUNT(*) AS request_count,
-    SUM(CAST(response_bytes AS BIGINT)) AS total_bytes,
-    AVG(CAST(response_bytes AS DOUBLE)) AS avg_bytes
-FROM parsed_logs
-WHERE http_method IS NOT NULL
-  AND request_path IS NOT NULL
-  AND status_code IS NOT NULL
-GROUP BY http_method, request_path, status_code
-ORDER BY request_count DESC
+SELECT i.i_category,
+       i.i_category_id,
+       SUM(sa.total_quantity) AS total_quantity_sold,
+       SUM(sa.total_quantity * i.i_price) AS total_sales_amount,
+       AVG(ra.avg_sentiment) AS avg_sentiment_per_category,
+       SUM(ra.review_count) AS total_reviews
+FROM sales_agg sa
+JOIN items i ON i.i_item_id = sa.item_id
+LEFT JOIN review_agg ra ON i.i_item_id = ra.item_id
+GROUP BY i.i_category, i.i_category_id
+ORDER BY total_sales_amount DESC
 LIMIT 10

@@ -1,22 +1,16 @@
-WITH page_stats AS (
-    SELECT
-        w_web_page_type,
-        COUNT(*) AS page_count,
-        AVG(length(w_web_page_name)) AS avg_name_len,
-        MAX(length(w_web_page_name)) AS max_name_len,
-        MIN(length(w_web_page_name)) AS min_name_len
-    FROM web_pages
-    GROUP BY w_web_page_type
+WITH avg_sentiment AS (
+    SELECT i.i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id
 )
-SELECT
-    ps.w_web_page_type,
-    ps.page_count,
-    ps.avg_name_len,
-    ps.max_name_len,
-    ps.min_name_len,
-    ps.page_count * 1.0 / total.total_pages AS pct_of_total_pages
-FROM page_stats ps
-CROSS JOIN (
-    SELECT COUNT(*) AS total_pages FROM web_pages
-) total
-ORDER BY ps.page_count DESC
+SELECT s.s_store_name,
+       SUM(ss.ss_quantity) AS total_quantity
+FROM store_sales ss
+JOIN avg_sentiment avgs ON ss.ss_item_id = avgs.i_item_id
+JOIN stores s ON ss.ss_store_id = s.s_store_id
+WHERE avgs.avg_sentiment > 0
+GROUP BY s.s_store_name
+ORDER BY total_quantity DESC
+LIMIT 10

@@ -1,31 +1,34 @@
-WITH sales_with_price AS (
-    SELECT
-        ss.ss_store_id,
-        ss.ss_item_id,
-        ss.ss_quantity,
-        i.i_category_id,
-        i.i_category_name,
-        i.i_price,
-        ss.ss_transaction_id,
-        ss.ss_customer_id,
-        ss.ss_quantity * i.i_price AS revenue
-    FROM store_sales AS ss
-    JOIN items AS i
-        ON ss.ss_item_id = i.i_item_id
+WITH avg_sentiment AS (
+    SELECT pr_item_id AS i_item_id,
+           AVG(pr_sentiment) AS avg_sentiment
+    FROM product_reviews
+    GROUP BY pr_item_id
+),
+sales AS (
+    SELECT i_item_id,
+           SUM(quantity) AS total_quantity
+    FROM (
+        SELECT ss_item_id AS i_item_id,
+               ss_quantity AS quantity
+        FROM store_sales
+        UNION ALL
+        SELECT ws_item_id AS i_item_id,
+               ws_quantity AS quantity
+        FROM web_sales
+    ) AS combined
+    GROUP BY i_item_id
 )
-SELECT
-    s.i_category_id,
-    s.i_category_name,
-    s.ss_store_id,
-    SUM(s.revenue) AS total_revenue,
-    SUM(s.ss_quantity) AS total_quantity,
-    COUNT(DISTINCT s.ss_transaction_id) AS distinct_transactions,
-    COUNT(DISTINCT s.ss_customer_id) AS distinct_customers,
-    AVG(s.i_price) AS average_item_price
-FROM sales_with_price AS s
-GROUP BY
-    s.i_category_id,
-    s.i_category_name,
-    s.ss_store_id
-ORDER BY total_revenue DESC
-LIMIT 100
+SELECT items.i_item_id,
+       items.i_name,
+       items.i_category,
+       avg_sentiment.avg_sentiment,
+       sales.total_quantity,
+       items.i_price * sales.total_quantity AS revenue
+FROM items
+JOIN avg_sentiment
+  ON items.i_item_id = avg_sentiment.i_item_id
+JOIN sales
+  ON items.i_item_id = sales.i_item_id
+WHERE avg_sentiment.avg_sentiment >= 3
+ORDER BY revenue DESC
+LIMIT 5

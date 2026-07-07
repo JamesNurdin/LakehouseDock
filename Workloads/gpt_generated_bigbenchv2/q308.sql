@@ -1,27 +1,61 @@
-WITH page_lengths AS (
+WITH store_sales_agg AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
+        s.s_store_name,
+        i.i_category,
+        i.i_item_id,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_quantity * i.i_price) AS total_revenue
+    FROM store_sales ss
+    JOIN stores s ON ss.ss_store_id = s.s_store_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY s.s_store_name, i.i_category, i.i_item_id
 ),
-ranked_pages AS (
+web_sales_agg AS (
     SELECT
-        w_web_page_type,
-        w_web_page_id,
-        w_web_page_name,
-        name_len,
-        row_number() OVER (PARTITION BY w_web_page_type ORDER BY name_len DESC) AS rn
-    FROM page_lengths
+        'Online' AS s_store_name,
+        i.i_category,
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_quantity * i.i_price) AS total_revenue
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category, i.i_item_id
+),
+combined_sales AS (
+    SELECT
+        s_store_name,
+        i_category,
+        i_item_id,
+        total_quantity,
+        total_revenue
+    FROM store_sales_agg
+    UNION ALL
+    SELECT
+        s_store_name,
+        i_category,
+        i_item_id,
+        total_quantity,
+        total_revenue
+    FROM web_sales_agg
+),
+item_sentiment AS (
+    SELECT
+        i.i_item_id,
+        AVG(CAST(pr.pr_sentiment AS double)) AS avg_sentiment,
+        COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id
 )
 SELECT
-    w_web_page_type,
-    COUNT(*) AS total_pages,
-    AVG(name_len) AS avg_name_len,
-    MAX(name_len) AS max_name_len,
-    MIN(name_len) AS min_name_len,
-    ARRAY_AGG(w_web_page_name) FILTER (WHERE rn <= 3) AS top_3_longest_names
-FROM ranked_pages
-GROUP BY w_web_page_type
-ORDER BY total_pages DESC
+    cs.s_store_name,
+    cs.i_category,
+    cs.i_item_id,
+    cs.total_quantity,
+    cs.total_revenue,
+    COALESCE(isent.avg_sentiment, NULL) AS avg_sentiment,
+    COALESCE(isent.review_count, 0) AS review_count
+FROM combined_sales cs
+LEFT JOIN item_sentiment isent ON cs.i_item_id = isent.i_item_id
+ORDER BY cs.total_revenue DESC
+LIMIT 100

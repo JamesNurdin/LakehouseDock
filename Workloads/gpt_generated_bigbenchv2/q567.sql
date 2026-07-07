@@ -1,52 +1,39 @@
-WITH combined_sales AS (
-    SELECT
-        ss_item_id AS item_id,
-        ss_store_id AS store_id,
-        ss_quantity AS quantity
+WITH store_qty AS (
+    SELECT ss_item_id AS item_id,
+           SUM(ss_quantity) AS store_quantity
     FROM store_sales
-    UNION ALL
-    SELECT
-        ws_item_id AS item_id,
-        NULL AS store_id,
-        ws_quantity AS quantity
+    GROUP BY ss_item_id
+),
+web_qty AS (
+    SELECT ws_item_id AS item_id,
+           SUM(ws_quantity) AS web_quantity
     FROM web_sales
+    GROUP BY ws_item_id
 ),
-
-sales_agg AS (
-    SELECT
-        item_id,
-        store_id,
-        SUM(quantity) AS total_quantity
-    FROM combined_sales
-    GROUP BY
-        item_id,
-        store_id
+total_qty AS (
+    SELECT COALESCE(s.item_id, w.item_id) AS item_id,
+           COALESCE(s.store_quantity, 0) + COALESCE(w.web_quantity, 0) AS total_quantity
+    FROM store_qty s
+    FULL OUTER JOIN web_qty w
+      ON s.item_id = w.item_id
 ),
-
-product_reviews_agg AS (
-    SELECT
-        pr_item_id AS item_id,
-        COUNT(*) AS review_count,
-        AVG(pr_rating) AS avg_rating
+review_agg AS (
+    SELECT pr_item_id AS item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
     FROM product_reviews
-    GROUP BY
-        pr_item_id
+    GROUP BY pr_item_id
 )
-SELECT
-    i.i_category_name,
-    COALESCE(s.s_store_name, 'Online') AS store_name,
-    i.i_name AS item_name,
-    i.i_price,
-    COALESCE(sa.total_quantity, 0) AS total_quantity,
-    COALESCE(sa.total_quantity, 0) * i.i_price AS total_revenue,
-    COALESCE(pr.review_count, 0) AS review_count,
-    pr.avg_rating
-FROM sales_agg sa
-LEFT JOIN items i
-    ON sa.item_id = i.i_item_id
-LEFT JOIN stores s
-    ON sa.store_id = s.s_store_id
-LEFT JOIN product_reviews_agg pr
-    ON i.i_item_id = pr.item_id
-ORDER BY total_revenue DESC
-LIMIT 100
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category,
+       ra.avg_sentiment,
+       ra.review_count,
+       tq.total_quantity
+FROM items i
+JOIN review_agg ra
+  ON i.i_item_id = ra.item_id
+LEFT JOIN total_qty tq
+  ON i.i_item_id = tq.item_id
+ORDER BY ra.avg_sentiment DESC, tq.total_quantity DESC
+LIMIT 5

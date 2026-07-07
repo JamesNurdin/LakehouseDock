@@ -1,12 +1,10 @@
 instanceName: lakehouse-b
-
 namespace: pgr24james
-
 trino:
   profiler: 
-    enabled: false
+    enabled: true
     when: ['before']
-  logger: false
+  logger: true
   pod:
     image: 2570809n/trino-node-exporter:latest
   worker:
@@ -16,14 +14,14 @@ trino:
     replicasPerNode: 1
     count: 4
     nodes:
-      - "idagpu-18"
-      - "os-gpu-03"
-      - "os-gpu-05"
-      - "trnode14"
+    - idagpu-18
+    - idagpu-18
+    - trnode14
+    - trnode14
   coord:
     resources:
       cpu: "4"
-      memory: "64Gi"
+      memory: "16Gi"
     nodeName: "idagpu-19"  # or "" for random
 
 test:

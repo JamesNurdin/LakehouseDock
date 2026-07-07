@@ -1,23 +1,28 @@
-WITH parsed_logs AS (
-    SELECT
-        line,
-        regexp_extract(line, '\\[(\\d{2}/[A-Za-z]{3}/\\d{4})', 1) AS log_date,
-        regexp_extract(line, '"([A-Z]+)\\s', 1) AS http_method,
-        regexp_extract(line, '"\\s(\\d{3})\\s', 1) AS status_code,
-        length(line) AS line_length
-    FROM web_logs
-    WHERE line IS NOT NULL
+WITH category_sentiment AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+store_category_sales AS (
+    SELECT s.s_store_id,
+           s.s_store_name,
+           i.i_category_id,
+           i.i_category,
+           SUM(ss.ss_quantity) AS total_quantity
+    FROM store_sales ss
+    JOIN stores s ON ss.ss_store_id = s.s_store_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY s.s_store_id, s.s_store_name, i.i_category_id, i.i_category
 )
-SELECT
-    log_date,
-    http_method,
-    status_code,
-    COUNT(*) AS request_count,
-    AVG(line_length) AS avg_line_length
-FROM parsed_logs
-WHERE log_date IS NOT NULL
-  AND http_method IS NOT NULL
-  AND status_code IS NOT NULL
-GROUP BY log_date, http_method, status_code
-ORDER BY request_count DESC
-LIMIT 20
+SELECT scs.s_store_name,
+       scs.i_category,
+       scs.total_quantity,
+       cs.avg_sentiment
+FROM store_category_sales scs
+LEFT JOIN category_sentiment cs
+    ON scs.i_category_id = cs.i_category_id
+ORDER BY scs.total_quantity DESC
+LIMIT 100

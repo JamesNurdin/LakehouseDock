@@ -1,22 +1,42 @@
-WITH page_stats AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len,
-        row_number() OVER (PARTITION BY w_web_page_type ORDER BY length(w_web_page_name) DESC) AS rn,
-        count(*) OVER (PARTITION BY w_web_page_type) AS total_pages,
-        avg(length(w_web_page_name)) OVER (PARTITION BY w_web_page_type) AS avg_name_len
-    FROM web_pages
+WITH review_stats AS (
+    SELECT i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+store_sales_agg AS (
+    SELECT i.i_category,
+           'store' AS sales_channel,
+           SUM(ss.ss_quantity) AS total_quantity
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+web_sales_agg AS (
+    SELECT i.i_category,
+           'web' AS sales_channel,
+           SUM(ws.ws_quantity) AS total_quantity
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+combined_sales AS (
+    SELECT i_category,
+           sales_channel,
+           total_quantity
+    FROM store_sales_agg
+    UNION ALL
+    SELECT i_category,
+           sales_channel,
+           total_quantity
+    FROM web_sales_agg
 )
-SELECT
-    w_web_page_id,
-    w_web_page_name,
-    w_web_page_type,
-    name_len,
-    total_pages,
-    avg_name_len,
-    rn
-FROM page_stats
-WHERE rn <= 5
-ORDER BY w_web_page_type, rn
+SELECT cs.i_category,
+       cs.sales_channel,
+       cs.total_quantity,
+       rs.avg_sentiment
+FROM combined_sales cs
+LEFT JOIN review_stats rs
+  ON cs.i_category = rs.i_category
+ORDER BY cs.i_category, cs.sales_channel

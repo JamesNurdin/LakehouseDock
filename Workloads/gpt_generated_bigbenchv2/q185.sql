@@ -1,19 +1,21 @@
-WITH type_stats AS (
-    SELECT
-        w_web_page_type,
-        COUNT(*) AS cnt,
-        COUNT(DISTINCT w_web_page_id) AS distinct_ids,
-        AVG(LENGTH(w_web_page_name)) AS avg_name_len
-    FROM web_pages
-    GROUP BY w_web_page_type
+WITH combined_sales AS (
+    SELECT ss_item_id AS item_id, ss_quantity AS quantity
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id, ws_quantity AS quantity
+    FROM web_sales
 )
 SELECT
-    w_web_page_type,
-    cnt,
-    distinct_ids,
-    avg_name_len,
-    ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rank_by_cnt,
-    ROUND(cnt * 100.0 / SUM(cnt) OVER (), 2) AS pct_of_total
-FROM type_stats
-WHERE cnt > 5
-ORDER BY cnt DESC
+    i.i_category,
+    COUNT(DISTINCT i.i_item_id) AS distinct_items_sold,
+    SUM(cs.quantity) AS total_quantity_sold,
+    AVG(i.i_price) AS avg_item_price,
+    AVG(pr.pr_sentiment) AS avg_review_sentiment
+FROM combined_sales cs
+JOIN items i
+    ON cs.item_id = i.i_item_id
+LEFT JOIN product_reviews pr
+    ON i.i_item_id = pr.pr_item_id
+GROUP BY i.i_category
+ORDER BY total_quantity_sold DESC
+LIMIT 10

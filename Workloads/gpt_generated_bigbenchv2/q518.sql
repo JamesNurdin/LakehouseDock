@@ -1,50 +1,28 @@
-WITH store_sales_enriched AS (
-    SELECT
-        i.i_category_name,
-        i.i_price,
-        ss.ss_quantity AS quantity,
-        ss.ss_customer_id AS customer_id,
-        'store' AS sales_channel
-    FROM store_sales ss
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
-    WHERE i.i_category_name = 'Electronics' AND i.i_price > 20
+WITH store_sales_agg AS (
+    SELECT ss_store_id,
+           SUM(ss_quantity) AS total_store_quantity,
+           COUNT(DISTINCT ss_customer_id) AS distinct_customer_count
+    FROM store_sales
+    GROUP BY ss_store_id
 ),
-web_sales_enriched AS (
-    SELECT
-        i.i_category_name,
-        i.i_price,
-        ws.ws_quantity AS quantity,
-        ws.ws_customer_id AS customer_id,
-        'web' AS sales_channel
-    FROM web_sales ws
-    JOIN items i ON ws.ws_item_id = i.i_item_id
-    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
-    WHERE i.i_category_name = 'Electronics' AND i.i_price > 20
+store_customers AS (
+    SELECT DISTINCT ss_store_id, ss_customer_id
+    FROM store_sales
 ),
-all_sales AS (
-    SELECT
-        i_category_name,
-        i_price,
-        quantity,
-        customer_id,
-        sales_channel
-    FROM store_sales_enriched
-    UNION ALL
-    SELECT
-        i_category_name,
-        i_price,
-        quantity,
-        customer_id,
-        sales_channel
-    FROM web_sales_enriched
+web_agg AS (
+    SELECT ws_customer_id,
+           SUM(ws_quantity) AS total_web_quantity
+    FROM web_sales
+    GROUP BY ws_customer_id
 )
-SELECT
-    i_category_name,
-    sales_channel,
-    SUM(quantity) AS total_quantity,
-    SUM(i_price * quantity) AS total_revenue,
-    COUNT(DISTINCT customer_id) AS distinct_customers
-FROM all_sales
-GROUP BY i_category_name, sales_channel
-ORDER BY total_revenue DESC
+SELECT s.s_store_name,
+       sa.total_store_quantity,
+       sa.distinct_customer_count,
+       COALESCE(SUM(wa.total_web_quantity), 0) AS total_web_quantity_for_store_customers
+FROM stores s
+JOIN store_sales_agg sa ON s.s_store_id = sa.ss_store_id
+JOIN store_customers sc ON s.s_store_id = sc.ss_store_id
+JOIN customers c ON sc.ss_customer_id = c.c_customer_id
+LEFT JOIN web_agg wa ON c.c_customer_id = wa.ws_customer_id
+GROUP BY s.s_store_name, sa.total_store_quantity, sa.distinct_customer_count
+ORDER BY s.s_store_name

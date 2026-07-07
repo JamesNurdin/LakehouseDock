@@ -1,17 +1,11 @@
-WITH page_lengths AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_length
-    FROM web_pages
-)
-SELECT
-    pl.w_web_page_type,
-    COUNT(*) AS page_count,
-    AVG(pl.name_length) AS avg_name_length,
-    MIN(pl.w_web_page_id) AS min_page_id,
-    MAX(pl.w_web_page_id) AS max_page_id
-FROM page_lengths AS pl
-GROUP BY pl.w_web_page_type
-ORDER BY page_count DESC
+SELECT i.i_category,
+       sum(ss.ss_quantity) AS total_quantity,
+       sum(ss.ss_quantity * i.i_price) AS total_revenue,
+       avg(i.i_price) AS avg_price
+FROM store_sales ss
+JOIN items i
+  ON ss.ss_item_id = i.i_item_id
+WHERE i.i_price > 20.00
+GROUP BY i.i_category
+HAVING sum(ss.ss_quantity) > 100
+ORDER BY total_revenue DESC

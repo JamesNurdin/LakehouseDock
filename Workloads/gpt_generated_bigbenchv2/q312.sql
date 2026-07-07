@@ -1,28 +1,18 @@
-WITH parsed_logs AS (
+WITH sales_with_price AS (
     SELECT
-        line,
-        regexp_extract(line, '"([^ ]+)', 1) AS method,
-        regexp_extract(line, '"[^ ]+ ([^ ]+)', 1) AS url,
-        TRY_CAST(regexp_extract(line, '"\s([0-9]{3})\s', 1) AS INTEGER) AS status_code
-    FROM web_logs
-    WHERE line IS NOT NULL
-),
-method_stats AS (
-    SELECT
-        method,
-        COUNT(*) AS request_count,
-        approx_distinct(url) AS unique_url_count,
-        SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS server_error_count
-    FROM parsed_logs
-    WHERE method IS NOT NULL
-    GROUP BY method
+        ss.ss_item_id,
+        ss.ss_quantity,
+        i.i_price,
+        i.i_category
+    FROM store_sales ss
+    JOIN items i
+        ON ss.ss_item_id = i.i_item_id
 )
 SELECT
-    method,
-    request_count,
-    unique_url_count,
-    server_error_count,
-    RANK() OVER (ORDER BY request_count DESC) AS method_rank
-FROM method_stats
-ORDER BY request_count DESC
+    i_category,
+    SUM(ss_quantity) AS total_quantity,
+    SUM(ss_quantity * i_price) AS total_revenue
+FROM sales_with_price
+GROUP BY i_category
+ORDER BY total_revenue DESC
 LIMIT 10

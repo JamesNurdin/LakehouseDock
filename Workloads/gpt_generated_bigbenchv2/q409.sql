@@ -1,24 +1,37 @@
-/*
-  Analyze the web log lines (Apache‑style) by extracting the HTTP method,
-  the response status code, and the hour of the request. The query then
-  aggregates the number of requests for each combination of method, hour,
-  and status code, ordering the result by the highest request count.
-*/
-WITH parsed_logs AS (
-    SELECT
-        regexp_extract(line, '^([A-Z]+)', 1)               AS method,
-        regexp_extract(line, '\\s(\\d{3})\\s', 1)      AS status_code,
-        regexp_extract(line, '\\[(?:\\d{2})/(?:\\w{3})/(?:\\d{4}):([0-9]{2}):', 1) AS hour
-    FROM web_logs
-    WHERE line IS NOT NULL
+WITH sales AS (
+    SELECT ss_item_id AS item_id, ss_quantity AS quantity
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id, ws_quantity AS quantity
+    FROM web_sales
+),
+sales_agg AS (
+    SELECT i.i_item_id,
+           i.i_name,
+           i.i_category,
+           SUM(s.quantity) AS total_quantity
+    FROM sales s
+    JOIN items i
+      ON s.item_id = i.i_item_id
+    GROUP BY i.i_item_id, i.i_name, i.i_category
+),
+review_agg AS (
+    SELECT i.i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i
+      ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id
 )
-SELECT
-    method,
-    hour,
-    status_code,
-    COUNT(*) AS request_count
-FROM parsed_logs
-WHERE method IS NOT NULL
-GROUP BY method, hour, status_code
-ORDER BY request_count DESC
-LIMIT 100
+SELECT s.i_item_id,
+       s.i_name,
+       s.i_category,
+       s.total_quantity,
+       r.avg_sentiment,
+       r.review_count
+FROM sales_agg s
+LEFT JOIN review_agg r
+  ON s.i_item_id = r.i_item_id
+ORDER BY s.total_quantity DESC,
+         r.avg_sentiment DESC NULLS LAST

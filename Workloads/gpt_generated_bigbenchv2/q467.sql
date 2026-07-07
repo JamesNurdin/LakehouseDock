@@ -1,38 +1,37 @@
--- Revenue and quantity per item per store, ranking items within each store by total revenue
-WITH sales_items AS (
-    SELECT
-        ss.ss_store_id,
-        ss.ss_item_id,
-        ss.ss_quantity,
-        i.i_name,
-        i.i_category_name,
-        i.i_price,
-        ss.ss_quantity * i.i_price AS revenue
+WITH store_sales_agg AS (
+    SELECT i.i_category AS i_category,
+           SUM(ss.ss_quantity) AS total_store_quantity,
+           COUNT(DISTINCT ss.ss_store_id) AS store_count
     FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category
 ),
-store_item_agg AS (
-    SELECT
-        si.ss_store_id,
-        si.i_category_name,
-        si.i_name,
-        SUM(si.revenue) AS total_revenue,
-        SUM(si.ss_quantity) AS total_quantity
-    FROM sales_items si
-    GROUP BY
-        si.ss_store_id,
-        si.i_category_name,
-        si.i_name
-    HAVING SUM(si.revenue) > 1000
+web_sales_agg AS (
+    SELECT i.i_category AS i_category,
+           SUM(ws.ws_quantity) AS total_web_quantity,
+           COUNT(DISTINCT ws.ws_transaction_id) AS web_transaction_count
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+product_reviews_agg AS (
+    SELECT i.i_category AS i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
-SELECT
-    agg.ss_store_id,
-    agg.i_category_name,
-    agg.i_name,
-    agg.total_revenue,
-    agg.total_quantity,
-    ROW_NUMBER() OVER (PARTITION BY agg.ss_store_id ORDER BY agg.total_revenue DESC) AS rank_per_store
-FROM store_item_agg agg
-ORDER BY agg.ss_store_id, rank_per_store
-LIMIT 50
+SELECT s.i_category,
+       s.total_store_quantity,
+       s.store_count,
+       w.total_web_quantity,
+       w.web_transaction_count,
+       p.avg_sentiment,
+       p.review_count
+FROM store_sales_agg s
+LEFT JOIN web_sales_agg w
+    ON s.i_category = w.i_category
+LEFT JOIN product_reviews_agg p
+    ON s.i_category = p.i_category
+ORDER BY s.total_store_quantity DESC

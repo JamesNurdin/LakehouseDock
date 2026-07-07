@@ -1,50 +1,39 @@
-WITH item_stats AS (
+WITH store_sales_agg AS (
     SELECT
-        pr_item_id,
-        COUNT(*) AS review_cnt,
-        AVG(pr_rating) AS avg_rating,
-        MIN(pr_rating) AS min_rating,
-        MAX(pr_rating) AS max_rating
-    FROM product_reviews
-    GROUP BY pr_item_id
+        s.s_store_id,
+        s.s_store_name,
+        i.i_category AS category,
+        SUM(ss.ss_quantity) AS total_store_quantity
+    FROM store_sales ss
+    JOIN stores s ON ss.ss_store_id = s.s_store_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY s.s_store_id, s.s_store_name, i.i_category
 ),
-item_with_category AS (
+web_sales_agg AS (
     SELECT
-        i.i_item_id,
-        i.i_name,
-        i.i_category_id,
-        i.i_category_name,
-        i.i_price,
-        i.i_comp_price,
-        i.i_class_id,
-        s.review_cnt,
-        s.avg_rating,
-        s.min_rating,
-        s.max_rating
-    FROM items i
-    JOIN item_stats s ON s.pr_item_id = i.i_item_id
+        i.i_category AS category,
+        SUM(ws.ws_quantity) AS total_web_quantity
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
 ),
-ranked_items AS (
+review_sentiment_agg AS (
     SELECT
-        iwc.*, 
-        ROW_NUMBER() OVER (
-            PARTITION BY iwc.i_category_id 
-            ORDER BY iwc.avg_rating DESC, iwc.review_cnt DESC
-        ) AS rank_in_category
-    FROM item_with_category iwc
+        i.i_category AS category,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
 SELECT
-    ri.i_category_id,
-    ri.i_category_name,
-    ri.i_item_id,
-    ri.i_name,
-    ri.i_price,
-    ri.i_comp_price,
-    ri.review_cnt,
-    ri.avg_rating,
-    ri.min_rating,
-    ri.max_rating,
-    (ri.i_price - ri.i_comp_price) AS price_diff
-FROM ranked_items ri
-WHERE ri.rank_in_category <= 3
-ORDER BY ri.i_category_id, ri.rank_in_category
+    ss.s_store_name,
+    ss.category,
+    ss.total_store_quantity,
+    COALESCE(ws.total_web_quantity, 0) AS total_web_quantity,
+    rs.avg_sentiment
+FROM store_sales_agg ss
+LEFT JOIN web_sales_agg ws ON ss.category = ws.category
+LEFT JOIN review_sentiment_agg rs ON ss.category = rs.category
+ORDER BY ss.s_store_name,
+    (ss.total_store_quantity + COALESCE(ws.total_web_quantity, 0)) DESC
+LIMIT 100

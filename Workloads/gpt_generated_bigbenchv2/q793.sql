@@ -1,24 +1,31 @@
-WITH page_lengths AS (
+WITH store_agg AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
+        ss_customer_id,
+        SUM(ss_quantity) AS store_quantity,
+        COUNT(DISTINCT ss_transaction_id) AS store_transactions
+    FROM store_sales
+    GROUP BY ss_customer_id
 ),
-ranked_pages AS (
+web_agg AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        name_len,
-        row_number() OVER (PARTITION BY w_web_page_type ORDER BY name_len DESC) AS rn
-    FROM page_lengths
+        ws_customer_id,
+        SUM(ws_quantity) AS web_quantity,
+        COUNT(DISTINCT ws_transaction_id) AS web_transactions
+    FROM web_sales
+    GROUP BY ws_customer_id
 )
 SELECT
-    w_web_page_type,
-    w_web_page_name,
-    name_len
-FROM ranked_pages
-WHERE rn <= 5
-ORDER BY w_web_page_type, name_len DESC
+    c.c_customer_id,
+    c.c_name,
+    COALESCE(sa.store_quantity, 0) AS store_quantity,
+    COALESCE(wa.web_quantity, 0) AS web_quantity,
+    COALESCE(sa.store_quantity, 0) + COALESCE(wa.web_quantity, 0) AS total_quantity,
+    CASE
+        WHEN (COALESCE(sa.store_quantity, 0) + COALESCE(wa.web_quantity, 0)) = 0 THEN 0
+        ELSE COALESCE(sa.store_quantity, 0) * 1.0 / (COALESCE(sa.store_quantity, 0) + COALESCE(wa.web_quantity, 0))
+    END AS store_share
+FROM customers c
+LEFT JOIN store_agg sa ON sa.ss_customer_id = c.c_customer_id
+LEFT JOIN web_agg wa ON wa.ws_customer_id = c.c_customer_id
+ORDER BY total_quantity DESC
+LIMIT 100

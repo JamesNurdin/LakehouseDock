@@ -1,51 +1,38 @@
-WITH sales_revenue AS (
-    SELECT
-        ss.ss_store_id AS s_store_id,
-        s.s_store_name,
-        ss.ss_quantity,
-        i.i_price,
-        i.i_category_id,
-        i.i_category_name,
-        (ss.ss_quantity * i.i_price) AS revenue,
-        ss.ss_customer_id
+WITH store_purchases AS (
+    SELECT ss.ss_customer_id AS customer_id,
+           ss.ss_item_id AS item_id,
+           ss.ss_quantity AS quantity,
+           i.i_price AS price
     FROM store_sales ss
-    JOIN stores s   ON ss.ss_store_id = s.s_store_id
-    JOIN items i    ON ss.ss_item_id = i.i_item_id
-    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
 ),
-store_category_agg AS (
-    SELECT
-        sr.s_store_id,
-        sr.s_store_name,
-        sr.i_category_id,
-        sr.i_category_name,
-        SUM(sr.revenue)                     AS category_revenue,
-        SUM(sr.ss_quantity)                 AS category_quantity,
-        COUNT(DISTINCT sr.ss_customer_id)   AS category_distinct_customers
-    FROM sales_revenue sr
-    GROUP BY
-        sr.s_store_id,
-        sr.s_store_name,
-        sr.i_category_id,
-        sr.i_category_name
+web_purchases AS (
+    SELECT ws.ws_customer_id AS customer_id,
+           ws.ws_item_id AS item_id,
+           ws.ws_quantity AS quantity,
+           i.i_price AS price
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
 ),
-store_total AS (
-    SELECT
-        sca.s_store_id,
-        SUM(sca.category_revenue) AS store_total_revenue
-    FROM store_category_agg sca
-    GROUP BY sca.s_store_id
+all_purchases AS (
+    SELECT * FROM store_purchases
+    UNION ALL
+    SELECT * FROM web_purchases
+),
+item_review AS (
+    SELECT pr.pr_item_id AS item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
 )
-SELECT
-    sca.s_store_id,
-    sca.s_store_name,
-    sca.i_category_id,
-    sca.i_category_name,
-    sca.category_revenue,
-    sca.category_quantity,
-    sca.category_distinct_customers,
-    (sca.category_revenue / NULLIF(st.store_total_revenue, 0)) * 100 AS revenue_pct_of_store,
-    RANK() OVER (PARTITION BY sca.s_store_id ORDER BY sca.category_revenue DESC) AS category_revenue_rank
-FROM store_category_agg sca
-JOIN store_total st ON sca.s_store_id = st.s_store_id
-ORDER BY sca.s_store_id, category_revenue_rank
+SELECT c.c_customer_id,
+       c.c_name,
+       SUM(p.quantity) AS total_quantity,
+       SUM(p.quantity * p.price) AS total_spend,
+       AVG(ir.avg_sentiment) AS avg_review_sentiment
+FROM customers c
+JOIN all_purchases p ON c.c_customer_id = p.customer_id
+LEFT JOIN item_review ir ON p.item_id = ir.item_id
+GROUP BY c.c_customer_id, c.c_name
+ORDER BY total_spend DESC
+LIMIT 10

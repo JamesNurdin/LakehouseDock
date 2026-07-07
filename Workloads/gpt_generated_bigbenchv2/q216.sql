@@ -1,49 +1,52 @@
-WITH
-    store_agg AS (
-        SELECT ss_item_id AS item_id,
-               SUM(ss_quantity) AS total_store_quantity
-        FROM store_sales
-        GROUP BY ss_item_id
-    ),
-    web_agg AS (
-        SELECT ws_item_id AS item_id,
-               SUM(ws_quantity) AS total_web_quantity
-        FROM web_sales
-        GROUP BY ws_item_id
-    ),
-    cust_agg AS (
-        SELECT item_id,
-               COUNT(DISTINCT customer_id) AS distinct_customers
-        FROM (
-            SELECT ss_item_id AS item_id, ss_customer_id AS customer_id
-            FROM store_sales
-            UNION ALL
-            SELECT ws_item_id AS item_id, ws_customer_id AS customer_id
-            FROM web_sales
-        ) AS combined
-        GROUP BY item_id
-    ),
-    review_agg AS (
-        SELECT pr_item_id AS item_id,
-               AVG(pr_rating) AS avg_rating,
-               COUNT(*) AS review_count
-        FROM product_reviews
-        GROUP BY pr_item_id
-    )
-SELECT
-    i.i_item_id,
-    i.i_name,
-    i.i_category_name,
-    COALESCE(s.total_store_quantity, 0) AS total_store_quantity,
-    COALESCE(w.total_web_quantity, 0) AS total_web_quantity,
-    COALESCE(s.total_store_quantity, 0) + COALESCE(w.total_web_quantity, 0) AS total_quantity,
-    COALESCE(c.distinct_customers, 0) AS distinct_customers,
-    r.avg_rating,
-    r.review_count
-FROM items i
-LEFT JOIN store_agg s ON i.i_item_id = s.item_id
-LEFT JOIN web_agg w ON i.i_item_id = w.item_id
-LEFT JOIN cust_agg c ON i.i_item_id = c.item_id
-LEFT JOIN review_agg r ON i.i_item_id = r.item_id
-ORDER BY total_quantity DESC
-LIMIT 10
+WITH category_sales AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           SUM(ss.ss_quantity) AS total_quantity
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+
+    UNION ALL
+
+    SELECT i.i_category_id,
+           i.i_category,
+           SUM(ws.ws_quantity) AS total_quantity
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+category_sales_agg AS (
+    SELECT i_category_id,
+           i_category,
+           SUM(total_quantity) AS total_quantity
+    FROM category_sales
+    GROUP BY i_category_id, i_category
+),
+category_price AS (
+    SELECT i_category_id,
+           i_category,
+           AVG(i_price) AS avg_price
+    FROM items
+    GROUP BY i_category_id, i_category
+),
+category_sentiment AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+)
+SELECT cs.i_category_id,
+       cs.i_category,
+       cs.total_quantity,
+       cp.avg_price,
+       csent.avg_sentiment
+FROM category_sales_agg cs
+JOIN category_price cp
+  ON cs.i_category_id = cp.i_category_id
+ AND cs.i_category = cp.i_category
+JOIN category_sentiment csent
+  ON cs.i_category_id = csent.i_category_id
+ AND cs.i_category = csent.i_category
+ORDER BY cs.total_quantity DESC

@@ -1,28 +1,38 @@
-WITH item_review_stats AS (
-    SELECT
-        pr.pr_item_id,
-        COUNT(*) AS review_count,
-        AVG(pr.pr_rating) AS avg_rating,
-        MIN(pr.pr_rating) AS min_rating,
-        MAX(pr.pr_rating) AS max_rating
-    FROM product_reviews pr
-    GROUP BY pr.pr_item_id
+WITH combined_sales AS (
+    SELECT ss_item_id AS item_id,
+           ss_quantity AS quantity
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id,
+           ws_quantity AS quantity
+    FROM web_sales
+),
+sales_agg AS (
+    SELECT item_id,
+           SUM(quantity) AS total_quantity
+    FROM combined_sales
+    GROUP BY item_id
+),
+review_agg AS (
+    SELECT pr_item_id AS item_id,
+           COUNT(*) AS review_count,
+           AVG(pr_sentiment) AS avg_sentiment
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
 SELECT
-    i.i_item_id,
-    i.i_name,
-    i.i_category_name,
-    i.i_price,
-    i.i_comp_price,
-    (i.i_price - i.i_comp_price) AS price_difference,
-    irs.review_count,
-    irs.avg_rating,
-    irs.min_rating,
-    irs.max_rating,
-    RANK() OVER (PARTITION BY i.i_category_name ORDER BY irs.avg_rating DESC) AS category_rating_rank
+    i.i_category AS category,
+    i.i_category_id AS category_id,
+    SUM(COALESCE(sa.total_quantity, 0)) AS total_quantity_sold,
+    SUM(COALESCE(ra.review_count, 0)) AS total_review_count,
+    CASE WHEN SUM(COALESCE(ra.review_count, 0)) > 0
+         THEN SUM(COALESCE(ra.avg_sentiment * ra.review_count, 0)) / SUM(COALESCE(ra.review_count, 0))
+         ELSE NULL
+    END AS avg_sentiment_per_category
 FROM items i
-JOIN item_review_stats irs
-    ON i.i_item_id = irs.pr_item_id
-WHERE i.i_price > 0
-ORDER BY i.i_category_name, category_rating_rank
-LIMIT 20
+LEFT JOIN sales_agg sa
+    ON sa.item_id = i.i_item_id
+LEFT JOIN review_agg ra
+    ON ra.item_id = i.i_item_id
+GROUP BY i.i_category, i.i_category_id
+ORDER BY total_quantity_sold DESC

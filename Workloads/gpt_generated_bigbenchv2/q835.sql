@@ -1,30 +1,39 @@
-/*
-  Analytical query on the raw web log lines.
-  - Extracts a log level (e.g., INFO, ERROR) from a leading "[LEVEL]" tag.
-  - Extracts the hour component of a timestamp (YYYY‑MM‑DD HH) if present.
-  - Extracts the first IPv4 address found in the line.
-  - Computes the line length.
-  Then aggregates per log level and hour, returning the count of logs,
-  the average line length, and the number of distinct IP addresses.
-*/
-WITH extracted AS (
-    SELECT
-        line,
-        regexp_extract(line, '^\[([^\]]+)\]', 1) AS log_level,
-        regexp_extract(line, '(\d{4}-\d{2}-\d{2} \d{2}):\d{2}:\d{2}', 1) AS log_hour,
-        regexp_extract(line, '(\d+\.\d+\.\d+\.\d+)', 1) AS ip_address,
-        length(line) AS line_len
-    FROM web_logs
-    WHERE line IS NOT NULL
+WITH store_sales_agg AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           SUM(ss.ss_quantity) AS total_store_qty
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+web_sales_agg AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           SUM(ws.ws_quantity) AS total_web_qty
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+reviews_agg AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
-SELECT
-    log_level,
-    log_hour,
-    count(*) AS log_count,
-    avg(line_len) AS avg_line_length,
-    count(DISTINCT ip_address) AS distinct_ip_count
-FROM extracted
-WHERE log_level IS NOT NULL
-GROUP BY log_level, log_hour
-ORDER BY log_count DESC
-LIMIT 20
+SELECT COALESCE(s.i_category_id, w.i_category_id, r.i_category_id) AS category_id,
+       COALESCE(s.i_category, w.i_category, r.i_category) AS category_name,
+       COALESCE(s.total_store_qty, 0) AS total_store_quantity,
+       COALESCE(w.total_web_qty, 0) AS total_web_quantity,
+       COALESCE(r.avg_sentiment, 0) AS avg_review_sentiment,
+       COALESCE(r.review_count, 0) AS review_count,
+       (COALESCE(s.total_store_qty, 0) + COALESCE(w.total_web_qty, 0)) AS total_quantity
+FROM store_sales_agg s
+FULL OUTER JOIN web_sales_agg w
+    ON s.i_category_id = w.i_category_id
+FULL OUTER JOIN reviews_agg r
+    ON COALESCE(s.i_category_id, w.i_category_id) = r.i_category_id
+ORDER BY total_quantity DESC
+LIMIT 10

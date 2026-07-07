@@ -1,17 +1,27 @@
-WITH page_stats AS (
+WITH category_stats AS (
     SELECT
-        w_web_page_type,
-        w_web_page_name,
-        LENGTH(w_web_page_name) AS name_len
-    FROM web_pages
+        i.i_category_id AS category_id,
+        i.i_category AS category_name,
+        COUNT(pr.pr_review_id) AS review_count,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        AVG(i.i_price) AS avg_price,
+        AVG(i.i_comp_price) AS avg_comp_price,
+        AVG(i.i_price - i.i_comp_price) AS avg_price_diff,
+        SUM(CASE WHEN pr.pr_sentiment > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(pr.pr_review_id) AS pct_positive_sentiment
+    FROM product_reviews pr
+    JOIN items i
+        ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
 SELECT
-    w_web_page_type,
-    COUNT(*) AS page_count,
-    COUNT(DISTINCT w_web_page_name) AS distinct_name_count,
-    AVG(name_len) AS avg_name_length,
-    MAX(name_len) AS max_name_length,
-    MIN(name_len) AS min_name_length
-FROM page_stats
-GROUP BY w_web_page_type
-ORDER BY page_count DESC
+    category_id,
+    category_name,
+    review_count,
+    avg_sentiment,
+    avg_price,
+    avg_comp_price,
+    avg_price_diff,
+    pct_positive_sentiment
+FROM category_stats
+ORDER BY review_count DESC
+LIMIT 10

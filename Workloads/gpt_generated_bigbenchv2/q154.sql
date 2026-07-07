@@ -1,11 +1,16 @@
+WITH page_type_stats AS (
+    SELECT
+        w_web_page_type,
+        COUNT(*) AS total_pages,
+        COUNT(DISTINCT w_web_page_id) AS distinct_page_ids,
+        AVG(LENGTH(w_web_page_name)) AS avg_name_length
+    FROM web_pages
+    GROUP BY w_web_page_type
+)
 SELECT
-    regexp_extract(line, '"(\w+) ', 1) AS request_method,
-    regexp_extract(line, '" (\d{3}) ', 1) AS status_code,
-    count(*) AS request_count
-FROM web_logs
-WHERE line IS NOT NULL
-GROUP BY
-    regexp_extract(line, '"(\w+) ', 1),
-    regexp_extract(line, '" (\d{3}) ', 1)
-ORDER BY request_count DESC
-LIMIT 20
+    w_web_page_type,
+    total_pages,
+    distinct_page_ids,
+    avg_name_length
+FROM page_type_stats
+ORDER BY total_pages DESC

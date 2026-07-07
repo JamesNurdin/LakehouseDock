@@ -1,27 +1,18 @@
-/* Top 5 longest page names per page type */
-WITH page_lengths AS (
+WITH page_type_stats AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
         w_web_page_type,
-        length(w_web_page_name) AS name_len
+        COUNT(*) AS page_count,
+        MIN(w_web_page_id) AS min_page_id,
+        MAX(w_web_page_id) AS max_page_id,
+        MAX(length(w_web_page_name)) AS max_name_length
     FROM web_pages
-    WHERE length(w_web_page_name) >= 10
-),
-ranked_pages AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        name_len,
-        row_number() OVER (PARTITION BY w_web_page_type ORDER BY name_len DESC) AS rn
-    FROM page_lengths
+    GROUP BY w_web_page_type
 )
 SELECT
     w_web_page_type,
-    w_web_page_id,
-    w_web_page_name,
-    name_len
-FROM ranked_pages
-WHERE rn <= 5
-ORDER BY w_web_page_type, rn
+    page_count,
+    min_page_id,
+    max_page_id,
+    max_name_length
+FROM page_type_stats
+ORDER BY page_count DESC

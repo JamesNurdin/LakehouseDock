@@ -1,21 +1,35 @@
-WITH page_lengths AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        LENGTH(w_web_page_name) AS name_length,
-        ROW_NUMBER() OVER (PARTITION BY w_web_page_type ORDER BY LENGTH(w_web_page_name) DESC) AS rn
-    FROM web_pages
-    WHERE w_web_page_type IS NOT NULL
+WITH sales_per_item AS (
+  SELECT ss_item_id AS item_id, ss_quantity AS quantity
+  FROM store_sales
+  UNION ALL
+  SELECT ws_item_id AS item_id, ws_quantity AS quantity
+  FROM web_sales
+),
+item_sales AS (
+  SELECT
+    i.i_item_id,
+    i.i_category,
+    COALESCE(SUM(s.quantity), 0) AS total_quantity
+  FROM items i
+  LEFT JOIN sales_per_item s ON s.item_id = i.i_item_id
+  GROUP BY i.i_item_id, i.i_category
+),
+item_review_sentiment AS (
+  SELECT
+    i.i_item_id,
+    i.i_category,
+    AVG(pr.pr_sentiment) AS avg_sentiment,
+    COALESCE(s.total_quantity, 0) AS total_quantity
+  FROM items i
+  JOIN product_reviews pr ON pr.pr_item_id = i.i_item_id
+  LEFT JOIN item_sales s ON s.i_item_id = i.i_item_id
+  GROUP BY i.i_item_id, i.i_category, s.total_quantity
 )
 SELECT
-    w_web_page_type,
-    COUNT(*) AS page_count,
-    AVG(name_length) AS avg_name_length,
-    MIN(name_length) AS min_name_length,
-    MAX(name_length) AS max_name_length,
-    MAX(CASE WHEN rn = 1 THEN name_length END) AS longest_name_length,
-    MAX(CASE WHEN rn = 1 THEN w_web_page_name END) AS longest_page_name
-FROM page_lengths
-GROUP BY w_web_page_type
-ORDER BY page_count DESC
+  irs.i_category,
+  SUM(irs.avg_sentiment * irs.total_quantity) / NULLIF(SUM(irs.total_quantity), 0) AS avg_weighted_sentiment,
+  SUM(irs.total_quantity) AS total_quantity
+FROM item_review_sentiment irs
+GROUP BY irs.i_category
+ORDER BY avg_weighted_sentiment DESC
+LIMIT 10

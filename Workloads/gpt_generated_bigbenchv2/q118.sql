@@ -1,49 +1,37 @@
-/*
-  Analytical query: For each item, compute total quantity sold across store and web channels,
-  together with average product rating and review count. Results are ordered by total quantity
-  sold (descending) and limited to the top 20 items.
-*/
-WITH store_qty AS (
-    SELECT ss_item_id AS i_item_id,
-           SUM(ss_quantity) AS store_quantity
-    FROM store_sales
-    GROUP BY ss_item_id
-),
-web_qty AS (
-    SELECT ws_item_id AS i_item_id,
-           SUM(ws_quantity) AS web_quantity
-    FROM web_sales
-    GROUP BY ws_item_id
+WITH all_sales AS (
+  SELECT ss_item_id AS item_id, ss_quantity AS quantity
+  FROM store_sales
+  UNION ALL
+  SELECT ws_item_id AS item_id, ws_quantity AS quantity
+  FROM web_sales
 ),
 item_sales AS (
-    SELECT i.i_item_id,
-           i.i_name,
-           i.i_category_name,
-           i.i_price,
-           COALESCE(s.store_quantity, 0) AS store_quantity,
-           COALESCE(w.web_quantity, 0) AS web_quantity,
-           COALESCE(s.store_quantity, 0) + COALESCE(w.web_quantity, 0) AS total_quantity
-    FROM items i
-    LEFT JOIN store_qty s ON i.i_item_id = s.i_item_id
-    LEFT JOIN web_qty w ON i.i_item_id = w.i_item_id
+  SELECT
+    i.i_item_id,
+    i.i_category,
+    i.i_category_id,
+    SUM(COALESCE(s.quantity, 0)) AS total_quantity
+  FROM items i
+  LEFT JOIN all_sales s ON s.item_id = i.i_item_id
+  GROUP BY i.i_item_id, i.i_category, i.i_category_id
 ),
-item_reviews AS (
-    SELECT pr.pr_item_id AS i_item_id,
-           AVG(pr.pr_rating) AS avg_rating,
-           COUNT(*) AS review_count
-    FROM product_reviews pr
-    GROUP BY pr.pr_item_id
+item_sentiment AS (
+  SELECT
+    i.i_item_id,
+    AVG(pr.pr_sentiment) AS avg_sentiment,
+    COUNT(pr.pr_review_id) AS review_count
+  FROM product_reviews pr
+  JOIN items i ON pr.pr_item_id = i.i_item_id
+  GROUP BY i.i_item_id
 )
-SELECT i_sales.i_category_name,
-       i_sales.i_name,
-       i_sales.i_price,
-       i_sales.store_quantity,
-       i_sales.web_quantity,
-       i_sales.total_quantity,
-       COALESCE(i_rev.avg_rating, 0) AS avg_rating,
-       COALESCE(i_rev.review_count, 0) AS review_count
+SELECT
+  i_sales.i_category,
+  i_sales.i_category_id,
+  SUM(i_sales.total_quantity) AS category_total_quantity,
+  AVG(i_sent.avg_sentiment) AS category_avg_sentiment,
+  SUM(i_sent.review_count) AS category_review_count
 FROM item_sales i_sales
-LEFT JOIN item_reviews i_rev ON i_sales.i_item_id = i_rev.i_item_id
-WHERE i_sales.total_quantity > 0
-ORDER BY i_sales.total_quantity DESC
-LIMIT 20
+LEFT JOIN item_sentiment i_sent ON i_sent.i_item_id = i_sales.i_item_id
+GROUP BY i_sales.i_category, i_sales.i_category_id
+ORDER BY category_total_quantity DESC
+LIMIT 10

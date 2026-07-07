@@ -1,13 +1,17 @@
-WITH ip_logs AS (
+WITH recent_logs AS (
     SELECT
-        regexp_extract(line, '^(\\d+\\.\\d+\\.\\d+\\.\\d+)', 1) AS ip_address
+        wl_customer_id,
+        wl_webpage_name,
+        cast(wl_timestamp AS timestamp) AS ts
     FROM web_logs
-    WHERE regexp_extract(line, '^(\\d+\\.\\d+\\.\\d+\\.\\d+)', 1) IS NOT NULL
+    WHERE cast(wl_timestamp AS timestamp) >= current_timestamp - INTERVAL '30' DAY
 )
 SELECT
-    ip_address,
-    COUNT(*) AS request_count
-FROM ip_logs
-GROUP BY ip_address
-ORDER BY request_count DESC
-LIMIT 10
+    wl_webpage_name,
+    DATE(ts) AS visit_date,
+    COUNT(*) AS total_visits,
+    COUNT(DISTINCT wl_customer_id) AS unique_customers
+FROM recent_logs
+GROUP BY wl_webpage_name, DATE(ts)
+ORDER BY total_visits DESC
+LIMIT 100

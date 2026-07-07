@@ -1,45 +1,28 @@
-WITH item_review_stats AS (
-    SELECT
-        pr_item_id,
-        COUNT(*) AS review_count,
-        AVG(pr_rating) AS avg_rating
-    FROM product_reviews
-    GROUP BY pr_item_id
-),
-item_with_stats AS (
-    SELECT
-        i.i_item_id,
-        i.i_name,
-        i.i_category_id,
-        i.i_category_name,
-        i.i_price,
-        i.i_comp_price,
-        i.i_price - i.i_comp_price AS price_diff,
-        COALESCE(irs.review_count, 0) AS review_count,
-        COALESCE(irs.avg_rating, 0) AS avg_rating
-    FROM items i
-    LEFT JOIN item_review_stats irs
-        ON irs.pr_item_id = i.i_item_id
-),
-ranked_items AS (
-    SELECT
-        iws.*,
-        ROW_NUMBER() OVER (
-            PARTITION BY iws.i_category_id
-            ORDER BY iws.avg_rating DESC, iws.review_count DESC
-        ) AS rank_in_category
-    FROM item_with_stats iws
+WITH sales AS (
+    SELECT ss_customer_id AS customer_id,
+           ss_item_id AS item_id,
+           ss_store_id AS store_id,
+           ss_quantity AS quantity,
+           'store' AS channel
+    FROM store_sales
+    UNION ALL
+    SELECT ws_customer_id AS customer_id,
+           ws_item_id AS item_id,
+           NULL AS store_id,
+           ws_quantity AS quantity,
+           'web' AS channel
+    FROM web_sales
 )
-SELECT
-    iws.i_category_id,
-    iws.i_category_name,
-    iws.i_item_id,
-    iws.i_name,
-    iws.i_price,
-    iws.i_comp_price,
-    iws.price_diff,
-    iws.avg_rating,
-    iws.review_count
-FROM ranked_items iws
-WHERE iws.rank_in_category <= 5
-ORDER BY iws.i_category_id, iws.rank_in_category
+SELECT i.i_category,
+       s.channel,
+       SUM(s.quantity) AS total_quantity,
+       COUNT(DISTINCT s.customer_id) AS distinct_customers,
+       AVG(pr.pr_sentiment) AS avg_sentiment,
+       COUNT(DISTINCT pr.pr_review_id) AS review_count
+FROM sales s
+JOIN items i ON s.item_id = i.i_item_id
+LEFT JOIN product_reviews pr ON pr.pr_item_id = i.i_item_id
+WHERE i.i_price > 10
+GROUP BY i.i_category, s.channel
+ORDER BY total_quantity DESC
+LIMIT 10

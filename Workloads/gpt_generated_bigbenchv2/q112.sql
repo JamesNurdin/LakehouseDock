@@ -1,31 +1,26 @@
-WITH store_agg AS (
-    SELECT
-        ss_store_id,
-        COUNT(DISTINCT ss_transaction_id) AS transaction_count,
-        SUM(ss_quantity) AS total_quantity,
-        AVG(ss_quantity) AS avg_quantity_per_transaction
+WITH all_sales AS (
+    SELECT ss_item_id AS item_id,
+           ss_quantity AS quantity,
+           'store' AS channel
     FROM store_sales
-    GROUP BY ss_store_id
-),
-store_rank AS (
-    SELECT
-        s.s_store_id,
-        s.s_store_name,
-        sa.transaction_count,
-        sa.total_quantity,
-        sa.avg_quantity_per_transaction,
-        ROW_NUMBER() OVER (ORDER BY sa.total_quantity DESC) AS store_rank
-    FROM stores s
-    JOIN store_agg sa
-        ON s.s_store_id = sa.ss_store_id
+    UNION ALL
+    SELECT ws_item_id AS item_id,
+           ws_quantity AS quantity,
+           'web' AS channel
+    FROM web_sales
 )
-SELECT
-    s_store_id,
-    s_store_name,
-    transaction_count,
-    total_quantity,
-    avg_quantity_per_transaction,
-    store_rank
-FROM store_rank
-ORDER BY store_rank
-LIMIT 10
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category,
+       i.i_price,
+       COUNT(DISTINCT pr.pr_review_id) AS review_count,
+       AVG(pr.pr_sentiment) AS avg_sentiment,
+       SUM(s.quantity) AS total_quantity_sold,
+       SUM(CASE WHEN s.channel = 'store' THEN s.quantity ELSE 0 END) AS store_quantity,
+       SUM(CASE WHEN s.channel = 'web' THEN s.quantity ELSE 0 END) AS web_quantity
+FROM items i
+LEFT JOIN product_reviews pr ON pr.pr_item_id = i.i_item_id
+JOIN all_sales s ON s.item_id = i.i_item_id
+GROUP BY i.i_item_id, i.i_name, i.i_category, i.i_price
+ORDER BY total_quantity_sold DESC
+LIMIT 100

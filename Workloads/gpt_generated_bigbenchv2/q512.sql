@@ -1,31 +1,40 @@
-WITH review_agg AS (
-    SELECT pr_item_id,
-           COUNT(*) AS review_count,
-           AVG(pr_rating) AS avg_rating
+WITH item_info AS (
+    SELECT i_item_id, i_category_id, i_category, i_price
+    FROM items
+),
+review_stats AS (
+    SELECT pr_item_id AS i_item_id, AVG(pr_sentiment) AS avg_sentiment
     FROM product_reviews
     GROUP BY pr_item_id
 ),
-sales_agg AS (
-    SELECT ws_item_id,
-           SUM(ws_quantity) AS total_quantity,
-           COUNT(*) AS sales_count
+store_sales_stats AS (
+    SELECT ss_item_id AS i_item_id,
+           SUM(ss_quantity) AS store_quantity,
+           SUM(ss_quantity * i_price) AS store_revenue
+    FROM store_sales
+    JOIN items ON store_sales.ss_item_id = items.i_item_id
+    GROUP BY ss_item_id
+),
+web_sales_stats AS (
+    SELECT ws_item_id AS i_item_id,
+           SUM(ws_quantity) AS web_quantity,
+           SUM(ws_quantity * i_price) AS web_revenue
     FROM web_sales
+    JOIN items ON web_sales.ws_item_id = items.i_item_id
     GROUP BY ws_item_id
 )
-SELECT i.i_item_id,
-       i.i_name,
-       i.i_category_name,
-       i.i_price,
-       i.i_comp_price,
-       r.review_count,
-       r.avg_rating,
-       s.total_quantity,
-       s.sales_count,
-       s.total_quantity * i.i_price AS total_revenue
-FROM items i
-JOIN review_agg r ON r.pr_item_id = i.i_item_id
-JOIN sales_agg s ON s.ws_item_id = i.i_item_id
-WHERE r.avg_rating >= 4
-  AND s.total_quantity > 100
+SELECT
+    item_info.i_category_id,
+    item_info.i_category,
+    COALESCE(SUM(store_sales_stats.store_quantity), 0) + COALESCE(SUM(web_sales_stats.web_quantity), 0) AS total_quantity,
+    COALESCE(SUM(store_sales_stats.store_revenue), 0) + COALESCE(SUM(web_sales_stats.web_revenue), 0) AS total_revenue,
+    AVG(review_stats.avg_sentiment) AS avg_review_sentiment
+FROM item_info
+LEFT JOIN review_stats
+    ON item_info.i_item_id = review_stats.i_item_id
+LEFT JOIN store_sales_stats
+    ON item_info.i_item_id = store_sales_stats.i_item_id
+LEFT JOIN web_sales_stats
+    ON item_info.i_item_id = web_sales_stats.i_item_id
+GROUP BY item_info.i_category_id, item_info.i_category
 ORDER BY total_revenue DESC
-LIMIT 20

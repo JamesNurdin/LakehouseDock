@@ -1,22 +1,45 @@
-WITH parsed_logs AS (
+WITH store_item_sales AS (
     SELECT
-        regexp_extract(line, '^([^ ]+)', 1) AS ip_address,
-        regexp_extract(line, '\\[([^\\]]+)\\]', 1) AS timestamp_str,
-        regexp_extract(line, '\\"(\\w+)\\s', 1) AS http_method,
-        regexp_extract(line, '\\"\\w+\\s([^\\s]+)\\s', 1) AS request_path,
-        CAST(regexp_extract(line, '\\"\\s(\\d{3})\\s', 1) AS integer) AS status_code,
-        CAST(regexp_extract(line, '\\"\\s\\d{3}\\s(\\d+)', 1) AS integer) AS response_bytes
-    FROM web_logs
+        ss.ss_store_id,
+        ss.ss_item_id,
+        SUM(ss.ss_quantity) AS total_store_quantity,
+        SUM(ss.ss_quantity * i.i_price) AS total_store_revenue
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY ss.ss_store_id, ss.ss_item_id
+),
+web_item_sales AS (
+    SELECT
+        ws.ws_item_id,
+        SUM(ws.ws_quantity) AS total_web_quantity,
+        SUM(ws.ws_quantity * i.i_price) AS total_web_revenue
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY ws.ws_item_id
+),
+item_sentiment AS (
+    SELECT
+        pr.pr_item_id,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(*) AS review_count
+    FROM product_reviews pr
+    GROUP BY pr.pr_item_id
 )
 SELECT
-    http_method,
-    status_code,
-    COUNT(*) AS request_count,
-    AVG(response_bytes) AS avg_response_bytes,
-    MIN(response_bytes) AS min_response_bytes,
-    MAX(response_bytes) AS max_response_bytes
-FROM parsed_logs
-WHERE http_method IS NOT NULL
-GROUP BY http_method, status_code
-ORDER BY request_count DESC
-LIMIT 20
+    s.s_store_name,
+    i.i_item_id,
+    i.i_name,
+    i.i_category,
+    COALESCE(si.total_store_quantity, 0) AS store_quantity,
+    COALESCE(si.total_store_revenue, 0) AS store_revenue,
+    COALESCE(wi.total_web_quantity, 0) AS web_quantity,
+    COALESCE(wi.total_web_revenue, 0) AS web_revenue,
+    COALESCE(sen.avg_sentiment, 0) AS avg_review_sentiment,
+    COALESCE(sen.review_count, 0) AS review_count
+FROM stores s
+JOIN store_item_sales si ON s.s_store_id = si.ss_store_id
+JOIN items i ON si.ss_item_id = i.i_item_id
+LEFT JOIN web_item_sales wi ON i.i_item_id = wi.ws_item_id
+LEFT JOIN item_sentiment sen ON i.i_item_id = sen.pr_item_id
+ORDER BY (COALESCE(si.total_store_quantity, 0) + COALESCE(wi.total_web_quantity, 0)) DESC
+LIMIT 100

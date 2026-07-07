@@ -1,19 +1,32 @@
-WITH type_stats AS (
-    SELECT
-        w_web_page_type,
-        count(*) AS page_count,
-        count(DISTINCT w_web_page_name) AS distinct_name_count,
-        avg(length(w_web_page_name)) AS avg_name_length
-    FROM web_pages
-    WHERE w_web_page_type IS NOT NULL
-    GROUP BY w_web_page_type
+WITH sales_union AS (
+  SELECT
+    i.i_category_id AS category_id,
+    i.i_category AS category_name,
+    s.s_store_name AS channel,
+    ss.ss_quantity AS quantity,
+    ss.ss_quantity * i.i_price AS sales_amount
+  FROM store_sales ss
+  JOIN items i ON ss.ss_item_id = i.i_item_id
+  JOIN stores s ON ss.ss_store_id = s.s_store_id
+
+  UNION ALL
+
+  SELECT
+    i.i_category_id AS category_id,
+    i.i_category AS category_name,
+    'Online' AS channel,
+    ws.ws_quantity AS quantity,
+    ws.ws_quantity * i.i_price AS sales_amount
+  FROM web_sales ws
+  JOIN items i ON ws.ws_item_id = i.i_item_id
 )
 SELECT
-    w_web_page_type,
-    page_count,
-    distinct_name_count,
-    avg_name_length,
-    rank() OVER (ORDER BY page_count DESC) AS type_rank,
-    sum(page_count) OVER (ORDER BY page_count DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cum_page_count
-FROM type_stats
-ORDER BY page_count DESC
+  category_id,
+  category_name,
+  channel,
+  SUM(quantity) AS total_quantity,
+  SUM(sales_amount) AS total_sales_amount
+FROM sales_union
+GROUP BY category_id, category_name, channel
+ORDER BY total_quantity DESC
+LIMIT 20

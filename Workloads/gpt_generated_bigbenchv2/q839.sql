@@ -1,26 +1,25 @@
-WITH page_lengths AS (
+WITH sales_by_item AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
-),
-page_aggregates AS (
-    SELECT
-        w_web_page_type,
-        COUNT(*) AS page_count,
-        AVG(name_len) AS avg_name_len,
-        MAX(name_len) AS max_name_len,
-        MIN(name_len) AS min_name_len
-    FROM page_lengths
-    GROUP BY w_web_page_type
+        i.i_category_id,
+        i.i_category,
+        i.i_item_id,
+        i.i_name,
+        i.i_price,
+        ws.ws_quantity,
+        ws.ws_quantity * i.i_price AS revenue
+    FROM web_sales ws
+    INNER JOIN items i
+        ON ws.ws_item_id = i.i_item_id
+    WHERE i.i_price > 0
 )
 SELECT
-    w_web_page_type,
-    page_count,
-    avg_name_len,
-    max_name_len,
-    min_name_len
-FROM page_aggregates
-ORDER BY page_count DESC
+    s.i_category_id,
+    s.i_category,
+    COUNT(DISTINCT s.i_item_id) AS distinct_items_sold,
+    SUM(s.ws_quantity) AS total_quantity_sold,
+    SUM(s.revenue) AS total_revenue,
+    AVG(s.i_price) AS avg_item_price
+FROM sales_by_item s
+GROUP BY s.i_category_id, s.i_category
+ORDER BY total_revenue DESC
+LIMIT 10

@@ -1,31 +1,51 @@
-WITH store_customer_sales AS (
-   SELECT
-       ss.ss_store_id AS s_store_id,
-       s.s_store_name,
-       ss.ss_customer_id AS c_customer_id,
-       SUM(ss.ss_quantity) AS total_quantity,
-       COUNT(*) AS transaction_count
-   FROM store_sales ss
-   JOIN stores s ON ss.ss_store_id = s.s_store_id
-   GROUP BY ss.ss_store_id, s.s_store_name, ss.ss_customer_id
+WITH store_sales_joined AS (
+    SELECT ss.ss_item_id AS i_item_id,
+           ss.ss_quantity AS quantity,
+           i.i_category AS category
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
 ),
-ranked_customers AS (
-   SELECT
-       scs.s_store_id,
-       scs.s_store_name,
-       scs.c_customer_id,
-       scs.total_quantity,
-       scs.transaction_count,
-       ROW_NUMBER() OVER (PARTITION BY scs.s_store_id ORDER BY scs.total_quantity DESC) AS rn
-   FROM store_customer_sales scs
+web_sales_joined AS (
+    SELECT ws.ws_item_id AS i_item_id,
+           ws.ws_quantity AS quantity,
+           i.i_category AS category
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+),
+sales_agg AS (
+    SELECT i_item_id,
+           category,
+           SUM(quantity) AS total_quantity
+    FROM (
+        SELECT i_item_id, quantity, category FROM store_sales_joined
+        UNION ALL
+        SELECT i_item_id, quantity, category FROM web_sales_joined
+    ) AS combined_sales
+    GROUP BY i_item_id, category
+),
+reviews_agg AS (
+    SELECT i.i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id
+),
+item_metrics AS (
+    SELECT
+        sa.category,
+        sa.total_quantity,
+        COALESCE(ra.avg_sentiment, 0) AS avg_sentiment,
+        COALESCE(ra.review_count, 0) AS review_count
+    FROM sales_agg sa
+    LEFT JOIN reviews_agg ra ON sa.i_item_id = ra.i_item_id
 )
 SELECT
-   rc.s_store_id,
-   rc.s_store_name,
-   c.c_name AS customer_name,
-   rc.total_quantity,
-   rc.transaction_count
-FROM ranked_customers rc
-JOIN customers c ON rc.c_customer_id = c.c_customer_id
-WHERE rc.rn <= 3
-ORDER BY rc.s_store_id, rc.rn
+    im.category,
+    SUM(im.total_quantity) AS total_quantity_sold,
+    AVG(im.avg_sentiment) AS avg_sentiment,
+    SUM(im.review_count) AS total_reviews
+FROM item_metrics im
+GROUP BY im.category
+ORDER BY total_quantity_sold DESC
+LIMIT 10

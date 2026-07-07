@@ -1,30 +1,27 @@
-/*
-  Revenue share and ranking of item categories per store, including total revenue,
-  total quantity sold and distinct customer count.
-*/
-WITH aggregated_sales AS (
-    SELECT
-        s.s_store_name,
-        i.i_category_name,
-        SUM(ss.ss_quantity * i.i_price) AS category_revenue,
-        SUM(ss.ss_quantity) AS category_quantity,
-        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers
+WITH store_sales_agg AS (
+    SELECT ss.ss_customer_id AS customer_id,
+           SUM(ss.ss_quantity) AS store_quantity,
+           SUM(ss.ss_quantity * i.i_price) AS store_spend
     FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    JOIN stores s
-        ON ss.ss_store_id = s.s_store_id
-    GROUP BY s.s_store_name, i.i_category_name
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
+    GROUP BY ss.ss_customer_id
+),
+web_sales_agg AS (
+    SELECT ws.ws_customer_id AS customer_id,
+           SUM(ws.ws_quantity) AS web_quantity,
+           SUM(ws.ws_quantity * i.i_price) AS web_spend
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
+    GROUP BY ws.ws_customer_id
 )
-SELECT
-    aggregated_sales.s_store_name,
-    aggregated_sales.i_category_name,
-    aggregated_sales.category_revenue,
-    aggregated_sales.category_quantity,
-    aggregated_sales.distinct_customers,
-    aggregated_sales.category_revenue * 1.0
-        / SUM(aggregated_sales.category_revenue) OVER (PARTITION BY aggregated_sales.s_store_name) AS revenue_share,
-    ROW_NUMBER() OVER (PARTITION BY aggregated_sales.s_store_name ORDER BY aggregated_sales.category_revenue DESC) AS category_rank
-FROM aggregated_sales
-ORDER BY aggregated_sales.s_store_name, category_rank
-LIMIT 100
+SELECT c.c_customer_id,
+       c.c_name,
+       COALESCE(ssa.store_quantity, 0) + COALESCE(wsa.web_quantity, 0) AS total_quantity,
+       COALESCE(ssa.store_spend, 0) + COALESCE(wsa.web_spend, 0) AS total_spend
+FROM customers c
+LEFT JOIN store_sales_agg ssa ON c.c_customer_id = ssa.customer_id
+LEFT JOIN web_sales_agg wsa ON c.c_customer_id = wsa.customer_id
+ORDER BY total_spend DESC
+LIMIT 5

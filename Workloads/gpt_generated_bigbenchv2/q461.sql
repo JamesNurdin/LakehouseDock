@@ -1,37 +1,40 @@
-WITH review_stats AS (
+WITH item_sentiment AS (
     SELECT
-        pr_item_id,
-        COUNT(*) AS review_count,
-        AVG(pr_rating) AS avg_rating
-    FROM product_reviews
-    GROUP BY pr_item_id
+        i.i_category AS category,
+        AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
 ),
-sales_stats AS (
+store_sales_agg AS (
     SELECT
-        ws_item_id,
-        SUM(ws_quantity) AS total_quantity,
-        COUNT(DISTINCT ws_transaction_id) AS transaction_count
-    FROM web_sales
-    GROUP BY ws_item_id
+        i.i_category AS category,
+        SUM(ss.ss_quantity) AS store_quantity,
+        SUM(i.i_price * ss.ss_quantity) AS store_revenue
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+web_sales_agg AS (
+    SELECT
+        i.i_category AS category,
+        SUM(ws.ws_quantity) AS web_quantity,
+        SUM(i.i_price * ws.ws_quantity) AS web_revenue
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category
 )
 SELECT
-    i.i_item_id,
-    i.i_name,
-    i.i_category_name,
-    i.i_price,
-    COALESCE(rs.review_count, 0) AS review_count,
-    COALESCE(rs.avg_rating, 0) AS avg_rating,
-    COALESCE(ss.total_quantity, 0) AS total_quantity,
-    COALESCE(ss.transaction_count, 0) AS transaction_count,
-    CASE
-        WHEN COALESCE(ss.total_quantity, 0) = 0 THEN 0
-        ELSE COALESCE(rs.avg_rating, 0) * COALESCE(ss.total_quantity, 0)
-    END AS rating_quantity_score
-FROM items i
-LEFT JOIN review_stats rs
-    ON rs.pr_item_id = i.i_item_id
-LEFT JOIN sales_stats ss
-    ON ss.ws_item_id = i.i_item_id
-WHERE i.i_price > 10
-ORDER BY rating_quantity_score DESC
-LIMIT 20
+    COALESCE(ss.category, ws.category) AS category,
+    COALESCE(ss.store_quantity, 0) AS store_quantity,
+    COALESCE(ws.web_quantity, 0) AS web_quantity,
+    COALESCE(ss.store_revenue, 0) AS store_revenue,
+    COALESCE(ws.web_revenue, 0) AS web_revenue,
+    COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0) AS total_quantity,
+    COALESCE(ss.store_revenue, 0) + COALESCE(ws.web_revenue, 0) AS total_revenue,
+    isent.avg_sentiment
+FROM store_sales_agg ss
+FULL OUTER JOIN web_sales_agg ws ON ss.category = ws.category
+LEFT JOIN item_sentiment isent ON COALESCE(ss.category, ws.category) = isent.category
+ORDER BY total_revenue DESC
+LIMIT 10

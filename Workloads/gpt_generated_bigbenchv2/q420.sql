@@ -1,36 +1,20 @@
-WITH store_agg AS (
-    SELECT
-        c.c_customer_id,
-        c.c_name,
-        SUM(ss.ss_quantity * i.i_price) AS store_spend,
-        SUM(ss.ss_quantity) AS store_qty
-    FROM store_sales ss
-    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    GROUP BY c.c_customer_id, c.c_name
-),
-web_agg AS (
-    SELECT
-        c.c_customer_id,
-        c.c_name,
-        SUM(ws.ws_quantity * i.i_price) AS web_spend,
-        SUM(ws.ws_quantity) AS web_qty
-    FROM web_sales ws
-    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
-    JOIN items i ON ws.ws_item_id = i.i_item_id
-    GROUP BY c.c_customer_id, c.c_name
+WITH combined_sales AS (
+    SELECT ss_item_id AS item_id,
+           ss_quantity AS quantity,
+           'store' AS channel
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id,
+           ws_quantity AS quantity,
+           'web' AS channel
+    FROM web_sales
 )
-SELECT
-    COALESCE(s.c_customer_id, w.c_customer_id) AS customer_id,
-    COALESCE(s.c_name, w.c_name) AS customer_name,
-    COALESCE(s.store_spend, 0) AS total_store_spend,
-    COALESCE(s.store_qty, 0) AS total_store_quantity,
-    COALESCE(w.web_spend, 0) AS total_web_spend,
-    COALESCE(w.web_qty, 0) AS total_web_quantity,
-    COALESCE(s.store_spend, 0) + COALESCE(w.web_spend, 0) AS total_spend,
-    COALESCE(s.store_qty, 0) + COALESCE(w.web_qty, 0) AS total_quantity
-FROM store_agg s
-FULL OUTER JOIN web_agg w
-    ON s.c_customer_id = w.c_customer_id
-ORDER BY total_spend DESC
-LIMIT 10
+SELECT i.i_category,
+       COUNT(DISTINCT cs.item_id) AS distinct_items_sold,
+       SUM(cs.quantity) AS total_quantity_sold,
+       AVG(pr.pr_sentiment) AS avg_review_sentiment
+FROM combined_sales cs
+JOIN items i ON cs.item_id = i.i_item_id
+LEFT JOIN product_reviews pr ON i.i_item_id = pr.pr_item_id
+GROUP BY i.i_category
+ORDER BY total_quantity_sold DESC

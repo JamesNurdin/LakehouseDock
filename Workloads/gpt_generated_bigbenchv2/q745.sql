@@ -1,76 +1,39 @@
--- Revenue and rating summary by item category (store + web sales)
-WITH item_info AS (
-    SELECT
-        i_item_id,
-        i_category_id,
-        i_category_name,
-        i_price
-    FROM items
+WITH store_sales_agg AS (
+    SELECT ss_item_id AS item_id,
+           SUM(ss_quantity) AS store_quantity,
+           COUNT(DISTINCT ss_customer_id) AS store_customer_count
+    FROM store_sales
+    GROUP BY ss_item_id
 ),
-store_agg AS (
-    SELECT
-        i.i_item_id,
-        SUM(ss.ss_quantity) AS store_qty,
-        SUM(ss.ss_quantity * i.i_price) AS store_rev
-    FROM store_sales ss
-    JOIN item_info i
-        ON ss.ss_item_id = i.i_item_id
-    GROUP BY i.i_item_id
+web_sales_agg AS (
+    SELECT ws_item_id AS item_id,
+           SUM(ws_quantity) AS web_quantity,
+           COUNT(DISTINCT ws_customer_id) AS web_customer_count
+    FROM web_sales
+    GROUP BY ws_item_id
 ),
-web_agg AS (
-    SELECT
-        i.i_item_id,
-        SUM(ws.ws_quantity) AS web_qty,
-        SUM(ws.ws_quantity * i.i_price) AS web_rev
-    FROM web_sales ws
-    JOIN item_info i
-        ON ws.ws_item_id = i.i_item_id
-    GROUP BY i.i_item_id
-),
-review_agg AS (
-    SELECT
-        i.i_item_id,
-        SUM(pr.pr_rating) AS rating_sum,
-        COUNT(*) AS review_cnt
-    FROM product_reviews pr
-    JOIN item_info i
-        ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_item_id
-),
-item_metrics AS (
-    SELECT
-        i.i_item_id,
-        i.i_category_id,
-        i.i_category_name,
-        COALESCE(sa.store_qty, 0) AS store_qty,
-        COALESCE(sa.store_rev, 0) AS store_rev,
-        COALESCE(wa.web_qty, 0) AS web_qty,
-        COALESCE(wa.web_rev, 0) AS web_rev,
-        COALESCE(ra.rating_sum, 0) AS rating_sum,
-        COALESCE(ra.review_cnt, 0) AS review_cnt
-    FROM item_info i
-    LEFT JOIN store_agg sa
-        ON i.i_item_id = sa.i_item_id
-    LEFT JOIN web_agg wa
-        ON i.i_item_id = wa.i_item_id
-    LEFT JOIN review_agg ra
-        ON i.i_item_id = ra.i_item_id
+reviews_agg AS (
+    SELECT pr_item_id AS item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    im.i_category_id,
-    im.i_category_name,
-    SUM(im.store_qty) AS total_store_quantity,
-    SUM(im.web_qty) AS total_web_quantity,
-    SUM(im.store_qty) + SUM(im.web_qty) AS total_quantity,
-    SUM(im.store_rev) AS total_store_revenue,
-    SUM(im.web_rev) AS total_web_revenue,
-    SUM(im.store_rev) + SUM(im.web_rev) AS total_revenue,
-    CASE WHEN SUM(im.review_cnt) > 0
-        THEN SUM(im.rating_sum) / SUM(im.review_cnt)
-        ELSE NULL
-    END AS avg_rating,
-    SUM(im.review_cnt) AS total_review_count
-FROM item_metrics im
-GROUP BY im.i_category_id, im.i_category_name
-ORDER BY total_revenue DESC
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category_id,
+       i.i_category,
+       i.i_price,
+       COALESCE(ss.store_quantity, 0) AS store_quantity,
+       COALESCE(ws.web_quantity, 0) AS web_quantity,
+       COALESCE(ss.store_quantity, 0) + COALESCE(ws.web_quantity, 0) AS total_quantity,
+       COALESCE(ss.store_quantity, 0) * i.i_price + COALESCE(ws.web_quantity, 0) * i.i_price AS total_sales_amount,
+       COALESCE(ss.store_customer_count, 0) + COALESCE(ws.web_customer_count, 0) AS total_customer_count,
+       r.avg_sentiment,
+       r.review_count
+FROM items i
+LEFT JOIN store_sales_agg ss ON ss.item_id = i.i_item_id
+LEFT JOIN web_sales_agg ws ON ws.item_id = i.i_item_id
+LEFT JOIN reviews_agg r ON r.item_id = i.i_item_id
+ORDER BY total_sales_amount DESC
 LIMIT 10

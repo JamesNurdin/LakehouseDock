@@ -1,56 +1,34 @@
-WITH unified_sales AS (
-    SELECT ss_item_id AS i_item_id,
-           ss_quantity AS quantity,
-           ss_store_id AS store_id
-    FROM store_sales
-    UNION ALL
-    SELECT ws_item_id AS i_item_id,
-           ws_quantity AS quantity,
-           CAST(NULL AS BIGINT) AS store_id
-    FROM web_sales
+WITH sales_by_category AS (
+    SELECT
+        i.i_category_id,
+        i.i_category,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_quantity * i.i_price) AS total_sales_amount,
+        COUNT(DISTINCT ws.ws_customer_id) AS distinct_customers
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 ),
-item_sales AS (
-    SELECT us.i_item_id,
-           SUM(us.quantity) AS total_quantity,
-           SUM(CASE WHEN us.store_id IS NOT NULL THEN us.quantity ELSE 0 END) AS total_store_quantity,
-           SUM(CASE WHEN us.store_id IS NULL THEN us.quantity ELSE 0 END) AS total_web_quantity
-    FROM unified_sales us
-    GROUP BY us.i_item_id
-),
-item_ratings AS (
-    SELECT pr_item_id AS i_item_id,
-           AVG(pr_rating) AS avg_rating,
-           COUNT(*) AS review_count
-    FROM product_reviews
-    GROUP BY pr_item_id
-),
-store_item_sales AS (
-    SELECT us.i_item_id,
-           us.store_id,
-           SUM(us.quantity) AS store_quantity
-    FROM unified_sales us
-    WHERE us.store_id IS NOT NULL
-    GROUP BY us.i_item_id, us.store_id
-),
-ranked_store_sales AS (
-    SELECT sis.i_item_id,
-           sis.store_id,
-           sis.store_quantity,
-           ROW_NUMBER() OVER (PARTITION BY sis.i_item_id ORDER BY sis.store_quantity DESC) AS store_rank
-    FROM store_item_sales sis
+reviews_by_category AS (
+    SELECT
+        i.i_category_id,
+        i.i_category,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
-SELECT i.i_item_id,
-       i.i_name,
-       i.i_category_name,
-       isales.total_quantity,
-       ir.avg_rating,
-       ir.review_count,
-       s.s_store_name AS top_store_name,
-       rs.store_quantity AS top_store_quantity
-FROM item_sales isales
-JOIN items i ON i.i_item_id = isales.i_item_id
-LEFT JOIN item_ratings ir ON ir.i_item_id = i.i_item_id
-LEFT JOIN ranked_store_sales rs ON rs.i_item_id = i.i_item_id AND rs.store_rank = 1
-LEFT JOIN stores s ON s.s_store_id = rs.store_id
-ORDER BY isales.total_quantity DESC
-LIMIT 10
+SELECT
+    s.i_category_id,
+    s.i_category,
+    s.total_quantity_sold,
+    s.total_sales_amount,
+    s.distinct_customers,
+    CASE WHEN s.distinct_customers > 0 THEN s.total_quantity_sold / s.distinct_customers ELSE NULL END AS avg_quantity_per_customer,
+    r.avg_sentiment,
+    r.review_count
+FROM sales_by_category s
+FULL OUTER JOIN reviews_by_category r ON s.i_category_id = r.i_category_id
+ORDER BY s.total_sales_amount DESC NULLS LAST
+LIMIT 20

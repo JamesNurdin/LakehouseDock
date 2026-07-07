@@ -1,26 +1,17 @@
-/*
-  Analytical query on the raw web log lines.
-  It extracts the HTTP method, request URL, status code and response size,
-  then aggregates request counts and byte statistics per method‑status pair.
-*/
-WITH parsed_logs AS (
-    SELECT
-        line,
-        regexp_extract(line, '"(\\S+) (\\S+) (\\S+)"', 1) AS method,
-        regexp_extract(line, '"(\\S+) (\\S+) (\\S+)"', 2) AS url,
-        CAST(regexp_extract(line, '"\\s+(\\d{3})\\s+(\\d+)', 1) AS INTEGER) AS status_code,
-        CAST(regexp_extract(line, '"\\s+\\d{3}\\s+(\\d+)', 1) AS INTEGER) AS bytes
-    FROM web_logs
+WITH item_sentiment AS (
+    SELECT pr_item_id,
+           AVG(pr_sentiment) AS avg_sentiment
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    method,
-    status_code,
-    COUNT(*) AS request_count,
-    AVG(bytes) AS avg_bytes,
-    SUM(bytes) AS total_bytes
-FROM parsed_logs
-WHERE method IS NOT NULL
-  AND status_code IS NOT NULL
-GROUP BY method, status_code
-ORDER BY request_count DESC
+SELECT i.i_category_id,
+       i.i_category,
+       SUM(ss.ss_quantity) AS total_quantity,
+       SUM(ss.ss_quantity * i.i_price) AS total_revenue,
+       SUM(COALESCE(isent.avg_sentiment, 0) * ss.ss_quantity) / NULLIF(SUM(ss.ss_quantity), 0) AS weighted_avg_sentiment
+FROM store_sales ss
+JOIN items i ON ss.ss_item_id = i.i_item_id
+LEFT JOIN item_sentiment isent ON isent.pr_item_id = i.i_item_id
+GROUP BY i.i_category_id, i.i_category
+ORDER BY total_revenue DESC
 LIMIT 10

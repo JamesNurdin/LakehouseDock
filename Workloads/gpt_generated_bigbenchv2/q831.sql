@@ -1,21 +1,32 @@
-WITH parsed_logs AS (
-    SELECT
-        line,
-        regexp_extract(line, '^([^ ]+)', 1) AS ip,
-        regexp_extract(line, '\\[([^\\]]+)\\]', 1) AS ts_str,
-        date_parse(regexp_extract(line, '\\[([^\\]]+)\\]', 1), '%d/%b/%Y:%H:%i:%s %z') AS ts,
-        hour(date_parse(regexp_extract(line, '\\[([^\\]]+)\\]', 1), '%d/%b/%Y:%H:%i:%s %z')) AS hour_of_day,
-        regexp_extract(line, '"(\\w+) ', 1) AS request_method,
-        regexp_extract(line, '"\\w+ ([^ ]+) ', 1) AS request_path,
-        regexp_extract(line, '"\\s(\\d{3})\\s', 1) AS status_code,
-        regexp_extract(line, '"\\s\\d{3}\\s(\\d+)', 1) AS response_size
-    FROM web_logs
+WITH unified_sales AS (
+    SELECT ss_item_id AS item_id,
+           ss_quantity AS quantity
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id,
+           ws_quantity AS quantity
+    FROM web_sales
+),
+review_agg AS (
+    SELECT i.i_category,
+           COUNT(pr.pr_review_id) AS review_count,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+sales_agg AS (
+    SELECT i.i_category,
+           SUM(us.quantity) AS total_quantity
+    FROM unified_sales us
+    JOIN items i ON us.item_id = i.i_item_id
+    GROUP BY i.i_category
 )
-SELECT
-    hour_of_day,
-    status_code,
-    COUNT(*) AS request_count,
-    SUM(try_cast(response_size AS BIGINT)) AS total_bytes
-FROM parsed_logs
-GROUP BY hour_of_day, status_code
-ORDER BY hour_of_day, status_code
+SELECT r.i_category AS category,
+       r.review_count,
+       r.avg_sentiment,
+       s.total_quantity
+FROM review_agg r
+JOIN sales_agg s ON r.i_category = s.i_category
+ORDER BY r.avg_sentiment DESC, s.total_quantity DESC
+LIMIT 10

@@ -1,39 +1,34 @@
-WITH parsed_logs AS (
-    SELECT
-        regexp_extract(line, '^([^ ]+)', 1) AS ip_address,
-        regexp_extract(line, '\\"(\\w+)\\s', 1) AS http_method,
-        regexp_extract(line, '\\"\\w+\\s([^\\s]+)', 1) AS url_path,
-        regexp_extract(line, '\\"\\s(\\d{3})\\s', 1) AS status_code,
-        regexp_extract(line, '\\"\\s\\d{3}\\s(\\d+)', 1) AS response_bytes
-    FROM web_logs
+WITH store_sales_agg AS (
+    SELECT ss_item_id,
+           SUM(ss_quantity) AS ss_qty,
+           COUNT(DISTINCT ss_customer_id) AS ss_cust_cnt
+    FROM store_sales
+    GROUP BY ss_item_id
 ),
-url_agg AS (
-    SELECT
-        http_method,
-        url_path,
-        status_code,
-        COUNT(*) AS request_cnt,
-        SUM(CAST(response_bytes AS BIGINT)) AS total_bytes
-    FROM parsed_logs
-    WHERE http_method IS NOT NULL
-    GROUP BY http_method, url_path, status_code
+web_sales_agg AS (
+    SELECT ws_item_id,
+           SUM(ws_quantity) AS ws_qty,
+           COUNT(DISTINCT ws_customer_id) AS ws_cust_cnt
+    FROM web_sales
+    GROUP BY ws_item_id
 ),
-ranked_urls AS (
-    SELECT
-        http_method,
-        url_path,
-        status_code,
-        request_cnt,
-        total_bytes,
-        ROW_NUMBER() OVER (PARTITION BY http_method ORDER BY request_cnt DESC) AS rn
-    FROM url_agg
+review_agg AS (
+    SELECT pr_item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_cnt
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    http_method,
-    url_path,
-    status_code,
-    request_cnt,
-    total_bytes
-FROM ranked_urls
-WHERE rn <= 5
-ORDER BY http_method, request_cnt DESC
+SELECT i.i_category,
+       i.i_category_id,
+       COUNT(DISTINCT i.i_item_id) AS distinct_items,
+       SUM(COALESCE(ss.ss_qty, 0) + COALESCE(ws.ws_qty, 0)) AS total_quantity_sold,
+       SUM(COALESCE(r.review_cnt, 0)) AS total_reviews,
+       AVG(r.avg_sentiment) AS avg_sentiment_per_category
+FROM items i
+LEFT JOIN store_sales_agg ss ON i.i_item_id = ss.ss_item_id
+LEFT JOIN web_sales_agg ws ON i.i_item_id = ws.ws_item_id
+LEFT JOIN review_agg r ON i.i_item_id = r.pr_item_id
+GROUP BY i.i_category, i.i_category_id
+ORDER BY total_quantity_sold DESC
+LIMIT 10

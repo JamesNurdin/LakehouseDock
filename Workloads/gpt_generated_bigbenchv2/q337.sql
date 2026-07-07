@@ -1,23 +1,24 @@
-WITH length_counts AS (
+WITH item_sentiment AS (
     SELECT
-        w_web_page_type,
-        length(w_web_page_name) AS name_len,
-        count(*) AS cnt
-    FROM web_pages
-    GROUP BY w_web_page_type, length(w_web_page_name)
-),
-ranked_lengths AS (
-    SELECT
-        w_web_page_type,
-        name_len,
-        cnt,
-        row_number() OVER (PARTITION BY w_web_page_type ORDER BY cnt DESC) AS rn
-    FROM length_counts
+        pr_item_id,
+        AVG(pr_sentiment) AS avg_sentiment
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
 SELECT
-    w_web_page_type,
-    name_len,
-    cnt
-FROM ranked_lengths
-WHERE rn <= 3
-ORDER BY w_web_page_type, rn
+    s.s_store_name,
+    i.i_category,
+    SUM(ss.ss_quantity) AS total_quantity_sold,
+    AVG(isent.avg_sentiment) AS avg_item_sentiment
+FROM store_sales ss
+JOIN customers c
+    ON ss.ss_customer_id = c.c_customer_id
+JOIN stores s
+    ON ss.ss_store_id = s.s_store_id
+JOIN items i
+    ON ss.ss_item_id = i.i_item_id
+LEFT JOIN item_sentiment isent
+    ON ss.ss_item_id = isent.pr_item_id
+GROUP BY s.s_store_name, i.i_category
+ORDER BY total_quantity_sold DESC
+LIMIT 10

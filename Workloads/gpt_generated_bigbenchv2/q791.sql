@@ -1,25 +1,14 @@
-WITH page_lengths AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
-    WHERE w_web_page_type IS NOT NULL
-)
 SELECT
-    w_web_page_type,
-    w_web_page_id,
-    w_web_page_name,
-    name_len
-FROM (
-    SELECT
-        w_web_page_type,
-        w_web_page_id,
-        w_web_page_name,
-        name_len,
-        row_number() OVER (PARTITION BY w_web_page_type ORDER BY name_len DESC) AS rn
-    FROM page_lengths
-) ranked_pages
-WHERE rn <= 5
-ORDER BY w_web_page_type, rn
+  i.i_category,
+  CAST(i.i_price / 10 AS integer) * 10 AS price_range,
+  SUM(ws.ws_quantity) AS total_quantity,
+  SUM(ws.ws_quantity * i.i_price) AS total_revenue,
+  AVG(i.i_price) AS avg_price
+FROM web_sales ws
+JOIN items i
+  ON ws.ws_item_id = i.i_item_id
+GROUP BY
+  i.i_category,
+  CAST(i.i_price / 10 AS integer) * 10
+ORDER BY total_revenue DESC
+LIMIT 20

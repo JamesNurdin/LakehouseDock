@@ -1,37 +1,36 @@
-WITH store_agg AS (
-    SELECT
-        i.i_category_name AS i_category_name,
-        s.s_store_name AS s_store_name,
-        SUM(ss.ss_quantity) AS store_quantity,
-        COUNT(DISTINCT ss.ss_customer_id) AS store_customer_cnt,
-        AVG(i.i_price) AS avg_price
-    FROM store_sales ss
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
-    JOIN stores s ON ss.ss_store_id = s.s_store_id
-    GROUP BY i.i_category_name, s.s_store_name
+WITH store_item_sales AS (
+  SELECT
+    s.s_store_id,
+    s.s_store_name AS store_name,
+    i.i_category AS category,
+    SUM(ss.ss_quantity) AS total_quantity,
+    COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers
+  FROM store_sales ss
+  JOIN stores s
+    ON ss.ss_store_id = s.s_store_id
+  JOIN items i
+    ON ss.ss_item_id = i.i_item_id
+  GROUP BY s.s_store_id, s.s_store_name, i.i_category
 ),
-web_agg AS (
-    SELECT
-        i.i_category_name AS i_category_name,
-        'Web' AS store_name,
-        SUM(ws.ws_quantity) AS web_quantity,
-        COUNT(DISTINCT ws.ws_customer_id) AS web_customer_cnt,
-        AVG(i.i_price) AS avg_price
-    FROM web_sales ws
-    JOIN items i ON ws.ws_item_id = i.i_item_id
-    JOIN customers c ON ws.ws_customer_id = c.c_customer_id
-    GROUP BY i.i_category_name
+category_reviews AS (
+  SELECT
+    i.i_category AS category,
+    AVG(pr.pr_sentiment) AS avg_sentiment,
+    COUNT(pr.pr_review_id) AS review_count
+  FROM product_reviews pr
+  JOIN items i
+    ON pr.pr_item_id = i.i_item_id
+  GROUP BY i.i_category
 )
 SELECT
-    COALESCE(sa.i_category_name, wa.i_category_name) AS category,
-    COALESCE(sa.s_store_name, wa.store_name) AS store_or_channel,
-    COALESCE(sa.store_quantity, 0) AS store_quantity,
-    COALESCE(wa.web_quantity, 0) AS web_quantity,
-    COALESCE(sa.store_customer_cnt, 0) AS store_customer_cnt,
-    COALESCE(wa.web_customer_cnt, 0) AS web_customer_cnt,
-    COALESCE(sa.avg_price, wa.avg_price) AS avg_price
-FROM store_agg sa
-FULL OUTER JOIN web_agg wa
-    ON sa.i_category_name = wa.i_category_name
-ORDER BY category, store_or_channel
+  sis.store_name,
+  sis.category,
+  sis.total_quantity,
+  sis.distinct_customers,
+  cr.avg_sentiment,
+  cr.review_count
+FROM store_item_sales sis
+JOIN category_reviews cr
+  ON sis.category = cr.category
+ORDER BY sis.total_quantity DESC
+LIMIT 100

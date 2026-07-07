@@ -1,39 +1,40 @@
-WITH page_lengths AS (
-    SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        LENGTH(w_web_page_name) AS name_len
-    FROM web_pages
+WITH store_agg AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           SUM(ss.ss_quantity) AS store_quantity,
+           SUM(ss.ss_quantity * i.i_price) AS store_revenue
+    FROM store_sales ss
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 ),
-page_agg AS (
-    SELECT
-        pl.w_web_page_type,
-        COUNT(*) AS total_pages,
-        COUNT(DISTINCT pl.w_web_page_name) AS distinct_names,
-        AVG(pl.name_len) AS avg_name_len,
-        MAX(pl.name_len) AS max_name_len,
-        MIN(pl.name_len) AS min_name_len,
-        MAX(CASE WHEN pl.row_number = 1 THEN pl.w_web_page_name END) AS longest_page_name
-    FROM (
-        SELECT
-            pl2.w_web_page_type,
-            pl2.w_web_page_id,
-            pl2.w_web_page_name,
-            pl2.name_len,
-            ROW_NUMBER() OVER (PARTITION BY pl2.w_web_page_type ORDER BY pl2.name_len DESC) AS row_number
-        FROM page_lengths pl2
-    ) pl
-    GROUP BY pl.w_web_page_type
+web_agg AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           SUM(ws.ws_quantity) AS web_quantity,
+           SUM(ws.ws_quantity * i.i_price) AS web_revenue
+    FROM web_sales ws
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
+),
+review_agg AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
-SELECT
-    page_agg.w_web_page_type,
-    page_agg.total_pages,
-    page_agg.distinct_names,
-    page_agg.avg_name_len,
-    page_agg.max_name_len,
-    page_agg.min_name_len,
-    page_agg.longest_page_name,
-    RANK() OVER (ORDER BY page_agg.total_pages DESC) AS type_rank
-FROM page_agg
-ORDER BY page_agg.total_pages DESC
+SELECT COALESCE(s.i_category_id, w.i_category_id, r.i_category_id) AS category_id,
+       COALESCE(s.i_category, w.i_category, r.i_category) AS category_name,
+       COALESCE(s.store_quantity, 0) AS total_store_quantity,
+       COALESCE(s.store_revenue, 0) AS total_store_revenue,
+       COALESCE(w.web_quantity, 0) AS total_web_quantity,
+       COALESCE(w.web_revenue, 0) AS total_web_revenue,
+       COALESCE(r.avg_sentiment, 0) AS avg_review_sentiment,
+       COALESCE(r.review_count, 0) AS review_count
+FROM store_agg s
+FULL OUTER JOIN web_agg w ON s.i_category_id = w.i_category_id
+FULL OUTER JOIN review_agg r ON COALESCE(s.i_category_id, w.i_category_id) = r.i_category_id
+ORDER BY (COALESCE(s.store_quantity, 0) + COALESCE(w.web_quantity, 0)) DESC
+LIMIT 10

@@ -1,19 +1,37 @@
-WITH parsed_logs AS (
-    SELECT
-        regexp_extract(line, '^([^ ]+)', 1) AS ip_address,
-        regexp_extract(line, '\\[([^\\]]+)\\]', 1) AS timestamp,
-        regexp_extract(line, '"([^"]*)"', 1) AS request,
-        regexp_extract(line, '\\s(\\d{3})\\s', 1) AS status_code,
-        regexp_extract(line, '\\s(\\d+)$', 1) AS response_size
-    FROM web_logs
+WITH sales_by_store_item AS (
+  SELECT
+    ss.ss_store_id AS store_id,
+    ss.ss_item_id AS item_id,
+    SUM(ss.ss_quantity) AS total_quantity
+  FROM store_sales ss
+  GROUP BY ss.ss_store_id, ss.ss_item_id
+),
+review_stats AS (
+  SELECT
+    pr.pr_item_id AS item_id,
+    AVG(pr.pr_sentiment) AS avg_sentiment,
+    COUNT(*) AS review_count
+  FROM product_reviews pr
+  GROUP BY pr.pr_item_id
+),
+ranked_sales AS (
+  SELECT
+    sbs.store_id,
+    sbs.item_id,
+    sbs.total_quantity,
+    ROW_NUMBER() OVER (PARTITION BY sbs.store_id ORDER BY sbs.total_quantity DESC) AS rn
+  FROM sales_by_store_item sbs
 )
 SELECT
-    status_code,
-    COUNT(*) AS request_count,
-    COUNT(DISTINCT ip_address) AS unique_ips,
-    SUM(CAST(response_size AS BIGINT)) AS total_bytes
-FROM parsed_logs
-WHERE status_code IS NOT NULL
-GROUP BY status_code
-ORDER BY request_count DESC
-LIMIT 10
+  st.s_store_name,
+  i.i_name,
+  i.i_category,
+  rs.total_quantity,
+  rv.avg_sentiment,
+  i.i_price
+FROM ranked_sales rs
+JOIN stores st ON st.s_store_id = rs.store_id
+JOIN items i ON i.i_item_id = rs.item_id
+LEFT JOIN review_stats rv ON rv.item_id = i.i_item_id
+WHERE rs.rn = 1
+ORDER BY st.s_store_name

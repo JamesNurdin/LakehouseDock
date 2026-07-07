@@ -1,42 +1,35 @@
-WITH
-    customer_sales AS (
-        SELECT
-            ss.ss_store_id,
-            ss.ss_customer_id,
-            c.c_name,
-            SUM(ss.ss_quantity) AS total_quantity,
-            COUNT(*) AS transaction_count
-        FROM store_sales ss
-        JOIN customers c ON ss.ss_customer_id = c.c_customer_id
-        GROUP BY ss.ss_store_id, ss.ss_customer_id, c.c_name
-    ),
-    store_agg AS (
-        SELECT
-            ss_store_id,
-            SUM(total_quantity) AS store_total_quantity,
-            COUNT(DISTINCT ss_customer_id) AS distinct_customer_count,
-            AVG(total_quantity) AS avg_quantity_per_customer
-        FROM customer_sales
-        GROUP BY ss_store_id
-    ),
-    ranked_customers AS (
-        SELECT
-            cs.ss_store_id,
-            cs.ss_customer_id,
-            cs.c_name,
-            cs.total_quantity,
-            ROW_NUMBER() OVER (PARTITION BY cs.ss_store_id ORDER BY cs.total_quantity DESC) AS customer_rank
-        FROM customer_sales cs
-    )
-SELECT
-    s.ss_store_id,
-    s.store_total_quantity,
-    s.distinct_customer_count,
-    s.avg_quantity_per_customer,
-    rc.c_name AS top_customer_name,
-    rc.total_quantity AS top_customer_quantity
-FROM store_agg s
-JOIN ranked_customers rc
-    ON s.ss_store_id = rc.ss_store_id
-WHERE rc.customer_rank = 1
-ORDER BY s.store_total_quantity DESC
+WITH unified_sales AS (
+    SELECT ss.ss_item_id AS i_item_id,
+           ss.ss_quantity AS quantity
+    FROM store_sales ss
+    UNION ALL
+    SELECT ws.ws_item_id AS i_item_id,
+           ws.ws_quantity AS quantity
+    FROM web_sales ws
+),
+
+total_sales AS (
+    SELECT i_item_id,
+           SUM(quantity) AS total_quantity
+    FROM unified_sales
+    GROUP BY i_item_id
+),
+
+review_agg AS (
+    SELECT i.i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           i.i_category,
+           i.i_category_id
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_item_id, i.i_category, i.i_category_id
+)
+SELECT r.i_category,
+       r.i_category_id,
+       SUM(r.avg_sentiment * ts.total_quantity) / NULLIF(SUM(ts.total_quantity), 0) AS weighted_avg_sentiment,
+       SUM(ts.total_quantity) AS total_quantity_sold
+FROM review_agg r
+JOIN total_sales ts ON r.i_item_id = ts.i_item_id
+GROUP BY r.i_category, r.i_category_id
+ORDER BY weighted_avg_sentiment DESC
+LIMIT 5

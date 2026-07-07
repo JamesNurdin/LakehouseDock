@@ -1,32 +1,33 @@
-WITH raw_logs AS (
-    SELECT
-        line,
-        regexp_extract(line, '^([^ ]+)', 1) AS ip_address,
-        regexp_extract(line, '\\[([^]]+)\\]', 1) AS timestamp,
-        regexp_extract(line, '"([^\"]*)"', 1) AS request,
-        regexp_extract(line, '"[^\"]*"\\s+(\\d{3})', 1) AS status_code,
-        regexp_extract(line, '"[^\"]*"\\s+\\d{3}\\s+(\\d+)', 1) AS response_size
-    FROM web_logs
+WITH store_sales_agg AS (
+    SELECT ss_item_id, SUM(ss_quantity) AS store_qty
+    FROM store_sales
+    GROUP BY ss_item_id
 ),
-parsed_logs AS (
-    SELECT
-        line,
-        ip_address,
-        timestamp,
-        request,
-        status_code,
-        response_size,
-        regexp_extract(request, '^([^ ]+)', 1) AS http_method,
-        regexp_extract(request, '^([^ ]+)\\s+([^ ]+)', 2) AS url_path
-    FROM raw_logs
+web_sales_agg AS (
+    SELECT ws_item_id, SUM(ws_quantity) AS web_qty
+    FROM web_sales
+    GROUP BY ws_item_id
+),
+reviews_agg AS (
+    SELECT pr_item_id, AVG(pr_sentiment) AS avg_sentiment, COUNT(*) AS review_cnt
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
 SELECT
-    http_method,
-    COUNT(*) AS request_count,
-    COUNT(DISTINCT ip_address) AS unique_ip_count,
-    AVG(CAST(response_size AS DOUBLE)) AS avg_response_bytes,
-    SUM(CAST(response_size AS BIGINT)) AS total_response_bytes
-FROM parsed_logs
-WHERE http_method IS NOT NULL
-GROUP BY http_method
-ORDER BY request_count DESC
+    i.i_item_id,
+    i.i_name,
+    i.i_category,
+    i.i_price,
+    COALESCE(ssa.store_qty, 0) AS store_quantity,
+    COALESCE(wsa.web_qty, 0) AS web_quantity,
+    COALESCE(ssa.store_qty, 0) + COALESCE(wsa.web_qty, 0) AS total_quantity,
+    COALESCE(ra.avg_sentiment, 0) AS avg_sentiment,
+    COALESCE(ra.review_cnt, 0) AS review_count
+FROM items i
+LEFT JOIN store_sales_agg ssa ON ssa.ss_item_id = i.i_item_id
+LEFT JOIN web_sales_agg wsa ON wsa.ws_item_id = i.i_item_id
+LEFT JOIN reviews_agg ra ON ra.pr_item_id = i.i_item_id
+WHERE (COALESCE(ssa.store_qty, 0) + COALESCE(wsa.web_qty, 0)) >= 10
+  AND COALESCE(ra.review_cnt, 0) >= 5
+ORDER BY total_quantity DESC
+LIMIT 10

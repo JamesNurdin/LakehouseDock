@@ -1,35 +1,26 @@
-WITH store_agg AS (
-    SELECT i.i_category_name AS category_name,
-           SUM(ss.ss_quantity) AS store_quantity,
-           SUM(ss.ss_quantity * i.i_price) AS store_revenue
-    FROM store_sales ss
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    GROUP BY i.i_category_name
-),
-web_agg AS (
-    SELECT i.i_category_name AS category_name,
-           SUM(ws.ws_quantity) AS web_quantity,
-           SUM(ws.ws_quantity * i.i_price) AS web_revenue
-    FROM web_sales ws
-    JOIN items i ON ws.ws_item_id = i.i_item_id
-    GROUP BY i.i_category_name
-),
-rating_agg AS (
-    SELECT i.i_category_name AS category_name,
-           AVG(pr.pr_rating) AS avg_rating,
-           COUNT(pr.pr_review_id) AS review_count
-    FROM product_reviews pr
-    JOIN items i ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_category_name
+WITH customer_summary AS (
+    SELECT
+        wl_customer_id,
+        COUNT(*) AS total_page_views,
+        COUNT(DISTINCT wl_item_id) AS distinct_items_viewed,
+        MIN(CAST(wl_timestamp AS timestamp)) AS first_visit,
+        MAX(CAST(wl_timestamp AS timestamp)) AS last_visit
+    FROM web_logs
+    GROUP BY wl_customer_id
 )
-SELECT COALESCE(s.category_name, w.category_name, r.category_name) AS category_name,
-       COALESCE(s.store_quantity, 0) AS store_quantity,
-       COALESCE(s.store_revenue, 0) AS store_revenue,
-       COALESCE(w.web_quantity, 0) AS web_quantity,
-       COALESCE(w.web_revenue, 0) AS web_revenue,
-       COALESCE(r.avg_rating, 0) AS avg_rating,
-       COALESCE(r.review_count, 0) AS review_count
-FROM store_agg s
-FULL OUTER JOIN web_agg w ON s.category_name = w.category_name
-FULL OUTER JOIN rating_agg r ON COALESCE(s.category_name, w.category_name) = r.category_name
-ORDER BY category_name
+SELECT
+    wl.wl_id,
+    wl.wl_customer_id,
+    wl.wl_item_id,
+    wl.wl_webpage_name,
+    CAST(wl.wl_timestamp AS timestamp) AS view_timestamp,
+    cs.total_page_views,
+    cs.distinct_items_viewed,
+    cs.first_visit,
+    cs.last_visit
+FROM web_logs wl
+JOIN customer_summary cs
+    ON wl.wl_customer_id = cs.wl_customer_id
+WHERE cs.total_page_views > 100
+ORDER BY cs.total_page_views DESC
+LIMIT 100

@@ -1,48 +1,30 @@
-WITH sales_union AS (
-    SELECT ss.ss_item_id AS item_id,
-           ss.ss_quantity AS quantity,
-           i.i_price AS price,
-           i.i_category_id,
-           i.i_category_name
-    FROM store_sales ss
-    JOIN items i ON ss.ss_item_id = i.i_item_id
+WITH all_sales AS (
+    SELECT ss_item_id AS item_id, ss_quantity AS quantity
+    FROM store_sales
     UNION ALL
-    SELECT ws.ws_item_id AS item_id,
-           ws.ws_quantity AS quantity,
-           i.i_price AS price,
-           i.i_category_id,
-           i.i_category_name
-    FROM web_sales ws
-    JOIN items i ON ws.ws_item_id = i.i_item_id
+    SELECT ws_item_id AS item_id, ws_quantity AS quantity
+    FROM web_sales
 ),
-
-sales_by_category AS (
-    SELECT i_category_id,
-           i_category_name,
-           SUM(quantity) AS total_qty,
-           SUM(quantity * price) AS total_rev
-    FROM sales_union
-    GROUP BY i_category_id, i_category_name
+sales_agg AS (
+    SELECT item_id, SUM(quantity) AS total_quantity
+    FROM all_sales
+    GROUP BY item_id
 ),
-
-rating_by_category AS (
-    SELECT i.i_category_id,
-           i.i_category_name,
-           AVG(pr.pr_rating) AS avg_category_rating,
-           COUNT(*) AS total_reviews
-    FROM product_reviews pr
-    JOIN items i ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
+review_agg AS (
+    SELECT pr_item_id AS item_id, AVG(pr_sentiment) AS avg_sentiment, COUNT(*) AS review_count
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-
-SELECT s.i_category_id,
-       s.i_category_name,
-       s.total_qty,
-       s.total_rev,
-       r.avg_category_rating,
-       r.total_reviews
-FROM sales_by_category s
-LEFT JOIN rating_by_category r
-  ON s.i_category_id = r.i_category_id
- AND s.i_category_name = r.i_category_name
-ORDER BY s.total_rev DESC
+SELECT
+    i.i_item_id,
+    i.i_name,
+    i.i_category,
+    i.i_price,
+    s.total_quantity,
+    r.avg_sentiment,
+    r.review_count
+FROM sales_agg s
+JOIN items i ON s.item_id = i.i_item_id
+JOIN review_agg r ON i.i_item_id = r.item_id
+ORDER BY s.total_quantity DESC
+LIMIT 10

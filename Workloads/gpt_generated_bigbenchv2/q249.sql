@@ -1,40 +1,39 @@
-WITH sales AS (
+WITH store_sales_agg AS (
     SELECT ss_item_id AS item_id,
-           ss_quantity AS quantity,
-           ss_customer_id AS customer_id
+           SUM(ss_quantity) AS store_quantity
     FROM store_sales
-    UNION ALL
+    GROUP BY ss_item_id
+),
+web_sales_agg AS (
     SELECT ws_item_id AS item_id,
-           ws_quantity AS quantity,
-           ws_customer_id AS customer_id
+           SUM(ws_quantity) AS web_quantity
     FROM web_sales
+    GROUP BY ws_item_id
 ),
-item_sales AS (
-    SELECT s.item_id,
-           SUM(s.quantity) AS total_quantity,
-           COUNT(DISTINCT s.customer_id) AS distinct_customer_count
-    FROM sales s
-    GROUP BY s.item_id
+sales_agg AS (
+    SELECT i.i_item_id,
+           i.i_name,
+           i.i_category,
+           COALESCE(sa.store_quantity, 0) + COALESCE(wa.web_quantity, 0) AS total_quantity
+    FROM items i
+    LEFT JOIN store_sales_agg sa ON i.i_item_id = sa.item_id
+    LEFT JOIN web_sales_agg wa ON i.i_item_id = wa.item_id
 ),
-item_reviews AS (
-    SELECT pr_item_id AS item_id,
-           AVG(pr_rating) AS avg_rating,
-           COUNT(*) AS review_count
-    FROM product_reviews
-    GROUP BY pr_item_id
+review_agg AS (
+    SELECT i.i_item_id,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
+    FROM items i
+    LEFT JOIN product_reviews pr ON i.i_item_id = pr.pr_item_id
+    GROUP BY i.i_item_id
 )
-SELECT i.i_category_name,
-       i.i_name,
-       COALESCE(isales.total_quantity, 0) AS total_quantity,
-       COALESCE(isales.distinct_customer_count, 0) AS distinct_customer_count,
-       COALESCE(irev.avg_rating, 0) AS avg_rating,
-       COALESCE(irev.review_count, 0) AS review_count,
-       COALESCE(isales.total_quantity, 0) * i.i_price AS estimated_revenue
-FROM items i
-LEFT JOIN item_sales isales
-       ON i.i_item_id = isales.item_id
-LEFT JOIN item_reviews irev
-       ON i.i_item_id = irev.item_id
-WHERE i.i_category_name IS NOT NULL
-ORDER BY estimated_revenue DESC, i.i_category_name
-LIMIT 20
+SELECT s.i_item_id,
+       s.i_name,
+       s.i_category,
+       s.total_quantity,
+       r.avg_sentiment,
+       r.review_count
+FROM sales_agg s
+LEFT JOIN review_agg r ON s.i_item_id = r.i_item_id
+ORDER BY s.total_quantity DESC
+LIMIT 10

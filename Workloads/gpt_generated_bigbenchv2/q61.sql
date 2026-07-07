@@ -1,47 +1,49 @@
-WITH
-store_agg AS (
+WITH store_sales_agg AS (
     SELECT
+        i.i_category,
         i.i_item_id,
-        SUM(ss.ss_quantity) AS store_qty,
+        i.i_price,
+        SUM(ss.ss_quantity) AS store_quantity,
         SUM(ss.ss_quantity * i.i_price) AS store_revenue
     FROM store_sales ss
-    JOIN items i
-        ON ss.ss_item_id = i.i_item_id
-    GROUP BY i.i_item_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
+    GROUP BY i.i_category, i.i_item_id, i.i_price
 ),
-web_agg AS (
+web_sales_agg AS (
     SELECT
+        i.i_category,
         i.i_item_id,
-        SUM(ws.ws_quantity) AS web_qty,
+        i.i_price,
+        SUM(ws.ws_quantity) AS web_quantity,
         SUM(ws.ws_quantity * i.i_price) AS web_revenue
     FROM web_sales ws
-    JOIN items i
-        ON ws.ws_item_id = i.i_item_id
-    GROUP BY i.i_item_id
+    JOIN items i ON ws.ws_item_id = i.i_item_id
+    GROUP BY i.i_category, i.i_item_id, i.i_price
 ),
-review_agg AS (
+reviews_agg AS (
     SELECT
-        pr.pr_item_id,
-        COUNT(*) AS review_cnt,
-        AVG(pr.pr_rating) AS avg_rating
+        i.i_category,
+        i.i_item_id,
+        i.i_price,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(pr.pr_review_id) AS review_count
     FROM product_reviews pr
-    GROUP BY pr.pr_item_id
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category, i.i_item_id, i.i_price
 )
 SELECT
-    i.i_item_id,
-    i.i_name,
-    i.i_category_name,
-    COALESCE(sa.store_qty, 0) + COALESCE(wa.web_qty, 0) AS total_quantity,
-    COALESCE(sa.store_revenue, 0) + COALESCE(wa.web_revenue, 0) AS total_revenue,
-    COALESCE(ra.avg_rating, 0) AS avg_rating,
-    COALESCE(ra.review_cnt, 0) AS review_count,
-    COALESCE(ra.avg_rating, 0) * (COALESCE(sa.store_revenue, 0) + COALESCE(wa.web_revenue, 0)) AS weighted_score
-FROM items i
-LEFT JOIN store_agg sa
-    ON i.i_item_id = sa.i_item_id
-LEFT JOIN web_agg wa
-    ON i.i_item_id = wa.i_item_id
-LEFT JOIN review_agg ra
-    ON i.i_item_id = ra.pr_item_id
-ORDER BY weighted_score DESC
-LIMIT 10
+    COALESCE(ss.i_category, ws.i_category, r.i_category) AS category,
+    COALESCE(ss.i_item_id, ws.i_item_id, r.i_item_id) AS item_id,
+    COALESCE(ss.i_price, ws.i_price, r.i_price) AS price,
+    ss.store_quantity,
+    ss.store_revenue,
+    ws.web_quantity,
+    ws.web_revenue,
+    r.avg_sentiment,
+    r.review_count
+FROM store_sales_agg ss
+FULL OUTER JOIN web_sales_agg ws
+    ON ss.i_item_id = ws.i_item_id
+FULL OUTER JOIN reviews_agg r
+    ON COALESCE(ss.i_item_id, ws.i_item_id) = r.i_item_id
+ORDER BY category, item_id

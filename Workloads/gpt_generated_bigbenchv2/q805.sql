@@ -1,32 +1,36 @@
 WITH store_agg AS (
-    SELECT
-        ss.ss_customer_id,
-        SUM(ss.ss_quantity) AS store_qty,
-        SUM(ss.ss_quantity * i.i_price) AS store_spent
-    FROM store_sales ss
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    GROUP BY ss.ss_customer_id
+    SELECT ss_item_id,
+           ss_store_id,
+           SUM(ss_quantity) AS store_quantity
+    FROM store_sales
+    GROUP BY ss_item_id, ss_store_id
 ),
 web_agg AS (
-    SELECT
-        ws.ws_customer_id,
-        SUM(ws.ws_quantity) AS web_qty,
-        SUM(ws.ws_quantity * i.i_price) AS web_spent
-    FROM web_sales ws
-    JOIN items i ON ws.ws_item_id = i.i_item_id
-    GROUP BY ws.ws_customer_id
+    SELECT ws_item_id,
+           SUM(ws_quantity) AS web_quantity
+    FROM web_sales
+    GROUP BY ws_item_id
+),
+review_agg AS (
+    SELECT pr_item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    c.c_customer_id,
-    c.c_name,
-    COALESCE(sa.store_qty, 0) AS store_quantity,
-    COALESCE(sa.store_spent, 0.0) AS store_spent,
-    COALESCE(wa.web_qty, 0) AS web_quantity,
-    COALESCE(wa.web_spent, 0.0) AS web_spent,
-    COALESCE(sa.store_spent, 0.0) + COALESCE(wa.web_spent, 0.0) AS total_spent,
-    ROW_NUMBER() OVER (ORDER BY COALESCE(sa.store_spent, 0.0) + COALESCE(wa.web_spent, 0.0) DESC) AS spend_rank
-FROM customers c
-LEFT JOIN store_agg sa ON c.c_customer_id = sa.ss_customer_id
-LEFT JOIN web_agg wa ON c.c_customer_id = wa.ws_customer_id
-ORDER BY total_spent DESC
-LIMIT 10
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category,
+       s.s_store_name,
+       COALESCE(sa.store_quantity, 0) AS store_quantity,
+       COALESCE(wa.web_quantity, 0) AS web_quantity,
+       COALESCE(sa.store_quantity, 0) + COALESCE(wa.web_quantity, 0) AS total_quantity,
+       ra.avg_sentiment,
+       ra.review_count
+FROM store_agg sa
+JOIN items i ON sa.ss_item_id = i.i_item_id
+JOIN stores s ON sa.ss_store_id = s.s_store_id
+LEFT JOIN web_agg wa ON i.i_item_id = wa.ws_item_id
+LEFT JOIN review_agg ra ON i.i_item_id = ra.pr_item_id
+ORDER BY total_quantity DESC
+LIMIT 100

@@ -1,50 +1,40 @@
-WITH store_metrics AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        s.s_store_id,
-        s.s_store_name,
-        SUM(ss.ss_quantity) AS store_qty,
-        SUM(ss.ss_quantity * i.i_price) AS store_revenue
-    FROM store_sales ss
-    JOIN items i ON ss.ss_item_id = i.i_item_id
-    JOIN stores s ON ss.ss_store_id = s.s_store_id
-    GROUP BY i.i_category_id, i.i_category_name, s.s_store_id, s.s_store_name
+WITH combined_sales AS (
+    SELECT ss_item_id AS item_id,
+           ss_quantity AS quantity,
+           ss_customer_id AS customer_id
+    FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS item_id,
+           ws_quantity AS quantity,
+           ws_customer_id AS customer_id
+    FROM web_sales
 ),
-web_metrics AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        SUM(ws.ws_quantity) AS web_qty,
-        SUM(ws.ws_quantity * i.i_price) AS web_revenue
-    FROM web_sales ws
-    JOIN items i ON ws.ws_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
+
+sales_agg AS (
+    SELECT cs.item_id,
+           SUM(cs.quantity) AS total_quantity,
+           COUNT(DISTINCT cs.customer_id) AS distinct_customers
+    FROM combined_sales cs
+    GROUP BY cs.item_id
 ),
-review_metrics AS (
-    SELECT
-        i.i_category_id,
-        i.i_category_name,
-        COUNT(pr.pr_review_id) AS review_count,
-        AVG(pr.pr_rating) AS avg_rating
-    FROM product_reviews pr
-    JOIN items i ON pr.pr_item_id = i.i_item_id
-    GROUP BY i.i_category_id, i.i_category_name
+
+review_agg AS (
+    SELECT pr_item_id AS item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    sm.i_category_id,
-    sm.i_category_name,
-    sm.s_store_id,
-    sm.s_store_name,
-    sm.store_qty,
-    sm.store_revenue,
-    wm.web_qty,
-    wm.web_revenue,
-    rm.review_count,
-    rm.avg_rating
-FROM store_metrics sm
-LEFT JOIN web_metrics wm
-    ON sm.i_category_id = wm.i_category_id
-LEFT JOIN review_metrics rm
-    ON sm.i_category_id = rm.i_category_id
-ORDER BY sm.i_category_name, sm.s_store_name
+SELECT i.i_category_id,
+       i.i_category,
+       SUM(sa.total_quantity) AS total_quantity_sold,
+       SUM(sa.total_quantity * i.i_price) AS total_revenue,
+       AVG(ra.avg_sentiment) AS avg_sentiment,
+       SUM(ra.review_count) AS total_reviews,
+       SUM(sa.distinct_customers) AS total_customers
+FROM sales_agg sa
+JOIN items i ON sa.item_id = i.i_item_id
+LEFT JOIN review_agg ra ON i.i_item_id = ra.item_id
+GROUP BY i.i_category_id, i.i_category
+ORDER BY total_revenue DESC
+LIMIT 10

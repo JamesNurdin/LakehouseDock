@@ -1,20 +1,26 @@
-WITH page_lengths AS (
+WITH sales_enriched AS (
     SELECT
-        w_web_page_id,
-        w_web_page_name,
-        w_web_page_type,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
-    WHERE w_web_page_type IS NOT NULL
+        ss.ss_quantity,
+        ss.ss_customer_id,
+        ss.ss_store_id,
+        ss.ss_item_id,
+        c.c_name,
+        s.s_store_name,
+        i.i_category,
+        i.i_price,
+        (ss.ss_quantity * i.i_price) AS line_total
+    FROM store_sales ss
+    JOIN customers c ON ss.ss_customer_id = c.c_customer_id
+    JOIN stores s ON ss.ss_store_id = s.s_store_id
+    JOIN items i ON ss.ss_item_id = i.i_item_id
 )
 SELECT
-    w_web_page_type,
-    COUNT(*) AS page_count,
-    COUNT(DISTINCT w_web_page_name) AS distinct_name_count,
-    AVG(name_len) AS avg_name_length,
-    MAX(name_len) AS max_name_length,
-    MIN(name_len) AS min_name_length
-FROM page_lengths
-GROUP BY w_web_page_type
-HAVING COUNT(*) >= 5
-ORDER BY page_count DESC
+    s_store_name,
+    i_category,
+    SUM(line_total) AS total_sales_amount,
+    SUM(ss_quantity) AS total_units_sold,
+    COUNT(DISTINCT ss_customer_id) AS distinct_customers
+FROM sales_enriched
+GROUP BY s_store_name, i_category
+ORDER BY total_sales_amount DESC
+LIMIT 10

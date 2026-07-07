@@ -1,26 +1,38 @@
-WITH review_stats AS (
+WITH sales_agg AS (
     SELECT
-        pr_item_id,
-        COUNT(*) AS review_count,
-        AVG(pr_rating) AS avg_rating,
-        MIN(pr_rating) AS min_rating,
-        MAX(pr_rating) AS max_rating
-    FROM product_reviews
-    GROUP BY pr_item_id
+        s.s_store_id,
+        s.s_store_name,
+        i.i_category_id,
+        i.i_category,
+        SUM(ss.ss_quantity) AS total_quantity,
+        COUNT(DISTINCT ss.ss_customer_id) AS distinct_customers
+    FROM store_sales ss
+    JOIN stores s
+        ON ss.ss_store_id = s.s_store_id
+    JOIN items i
+        ON ss.ss_item_id = i.i_item_id
+    GROUP BY s.s_store_id, s.s_store_name, i.i_category_id, i.i_category
+),
+review_agg AS (
+    SELECT
+        i.i_category_id,
+        i.i_category,
+        AVG(pr.pr_sentiment) AS avg_sentiment,
+        COUNT(pr.pr_review_id) AS review_count
+    FROM product_reviews pr
+    JOIN items i
+        ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
 SELECT
-    i.i_item_id,
-    i.i_name,
-    i.i_category_name,
-    i.i_price,
-    rs.review_count,
-    rs.avg_rating,
-    rs.min_rating,
-    rs.max_rating,
-    ROW_NUMBER() OVER (PARTITION BY i.i_category_name ORDER BY rs.avg_rating DESC) AS category_rank
-FROM items i
-JOIN review_stats rs
-    ON rs.pr_item_id = i.i_item_id
-WHERE rs.review_count >= 5
-ORDER BY i.i_category_name, rs.avg_rating DESC
+    sa.s_store_name,
+    sa.i_category,
+    sa.total_quantity,
+    sa.distinct_customers,
+    ra.avg_sentiment,
+    ra.review_count
+FROM sales_agg sa
+LEFT JOIN review_agg ra
+    ON sa.i_category_id = ra.i_category_id
+ORDER BY sa.total_quantity DESC
 LIMIT 20

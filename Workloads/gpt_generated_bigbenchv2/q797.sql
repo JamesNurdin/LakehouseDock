@@ -1,21 +1,32 @@
-WITH parsed_logs AS (
-    SELECT
-        line,
-        date_parse(
-            regexp_extract(line, '\\[(.*?)\\]', 1),
-            '%d/%b/%Y:%H:%i:%s %z'
-        ) AS log_ts,
-        regexp_extract(line, '^([^ ]+)', 1) AS ip_address,
-        CAST(regexp_extract(line, '" (\\d{3}) ', 1) AS INTEGER) AS status_code
-    FROM web_logs
-    WHERE regexp_extract(line, '\\[(.*?)\\]', 1) IS NOT NULL
+WITH store_sales_agg AS (
+    SELECT ss_item_id,
+           SUM(ss_quantity) AS total_store_quantity
+    FROM store_sales
+    GROUP BY ss_item_id
+),
+web_sales_agg AS (
+    SELECT ws_item_id,
+           SUM(ws_quantity) AS total_web_quantity
+    FROM web_sales
+    GROUP BY ws_item_id
+),
+product_reviews_agg AS (
+    SELECT pr_item_id,
+           AVG(pr_sentiment) AS avg_sentiment,
+           COUNT(*) AS review_count
+    FROM product_reviews
+    GROUP BY pr_item_id
 )
-SELECT
-    date_trunc('day', log_ts) AS log_date,
-    count(*) AS total_requests,
-    approx_distinct(ip_address) AS unique_ips,
-    sum(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS successful_requests,
-    sum(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_requests
-FROM parsed_logs
-GROUP BY date_trunc('day', log_ts)
-ORDER BY log_date
+SELECT i.i_item_id,
+       i.i_name,
+       i.i_category_id,
+       i.i_category,
+       COALESCE(pr.avg_sentiment, 0) AS avg_sentiment,
+       COALESCE(pr.review_count, 0) AS review_count,
+       COALESCE(ss.total_store_quantity, 0) AS total_store_quantity,
+       COALESCE(ws.total_web_quantity, 0) AS total_web_quantity
+FROM items i
+LEFT JOIN product_reviews_agg pr ON pr.pr_item_id = i.i_item_id
+LEFT JOIN store_sales_agg ss ON ss.ss_item_id = i.i_item_id
+LEFT JOIN web_sales_agg ws ON ws.ws_item_id = i.i_item_id
+ORDER BY i.i_category_id, i.i_item_id

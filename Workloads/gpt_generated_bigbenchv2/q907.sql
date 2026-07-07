@@ -1,26 +1,43 @@
-WITH page_stats AS (
-    SELECT
-        w_web_page_type,
-        COUNT(*) OVER (PARTITION BY w_web_page_type) AS page_count,
-        AVG(length(w_web_page_name)) OVER (PARTITION BY w_web_page_type) AS avg_name_len,
-        MIN(length(w_web_page_name)) OVER (PARTITION BY w_web_page_type) AS min_name_len,
-        MAX(length(w_web_page_name)) OVER (PARTITION BY w_web_page_type) AS max_name_len,
-        ROW_NUMBER() OVER (PARTITION BY w_web_page_type ORDER BY length(w_web_page_name) DESC) AS rn,
-        w_web_page_id,
-        w_web_page_name,
-        length(w_web_page_name) AS name_len
-    FROM web_pages
-    WHERE w_web_page_type IS NOT NULL
+WITH sales AS (
+    SELECT ss_store_id AS store_id,
+           ss_item_id,
+           ss_quantity
+    FROM store_sales
+    UNION ALL
+    SELECT NULL AS store_id,
+           ws_item_id AS ss_item_id,
+           ws_quantity AS ss_quantity
+    FROM web_sales
+),
+sales_items AS (
+    SELECT s.store_id,
+           st.s_store_name,
+           i.i_category_id,
+           i.i_category,
+           s.ss_quantity,
+           i.i_item_id
+    FROM sales s
+    JOIN items i ON s.ss_item_id = i.i_item_id
+    LEFT JOIN stores st ON s.store_id = st.s_store_id
+),
+reviews AS (
+    SELECT i.i_category_id,
+           i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment
+    FROM product_reviews pr
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category_id, i.i_category
 )
 SELECT
-    w_web_page_type,
-    page_count,
-    avg_name_len,
-    min_name_len,
-    max_name_len,
-    w_web_page_id AS longest_page_id,
-    w_web_page_name AS longest_page_name,
-    name_len AS longest_name_len
-FROM page_stats
-WHERE rn = 1
-ORDER BY page_count DESC
+    COALESCE(si.s_store_name, 'Online') AS store_name,
+    si.i_category,
+    SUM(si.ss_quantity) AS total_quantity_sold,
+    r.avg_sentiment
+FROM sales_items si
+LEFT JOIN reviews r ON si.i_category_id = r.i_category_id
+GROUP BY
+    COALESCE(si.s_store_name, 'Online'),
+    si.i_category,
+    r.avg_sentiment
+ORDER BY total_quantity_sold DESC
+LIMIT 10

@@ -1,27 +1,35 @@
-WITH item_ratings AS (
-    SELECT
-        pr.pr_item_id,
-        AVG(pr.pr_rating) AS avg_rating
+WITH all_sales AS (
+    SELECT ss_item_id AS i_item_id, ss_quantity AS quantity FROM store_sales
+    UNION ALL
+    SELECT ws_item_id AS i_item_id, ws_quantity AS quantity FROM web_sales
+),
+sales_agg AS (
+    SELECT i_item_id, SUM(quantity) AS total_quantity
+    FROM all_sales
+    GROUP BY i_item_id
+),
+review_agg AS (
+    SELECT i.i_category,
+           AVG(pr.pr_sentiment) AS avg_sentiment,
+           COUNT(pr.pr_review_id) AS review_count
     FROM product_reviews pr
-    GROUP BY pr.pr_item_id
+    JOIN items i ON pr.pr_item_id = i.i_item_id
+    GROUP BY i.i_category
+),
+final AS (
+    SELECT i.i_category,
+           ra.avg_sentiment,
+           ra.review_count,
+           SUM(COALESCE(sa.total_quantity, 0)) AS total_quantity_sold
+    FROM items i
+    LEFT JOIN sales_agg sa ON i.i_item_id = sa.i_item_id
+    JOIN review_agg ra ON i.i_category = ra.i_category
+    GROUP BY i.i_category, ra.avg_sentiment, ra.review_count
 )
-SELECT
-    s.s_store_name,
-    SUM(ss.ss_quantity * i.i_price) AS total_revenue,
-    SUM(ss.ss_quantity) AS total_quantity,
-    SUM(ss.ss_quantity * COALESCE(ir.avg_rating, 0)) / NULLIF(SUM(ss.ss_quantity), 0) AS weighted_avg_rating,
-    COUNT(DISTINCT c.c_customer_id) AS distinct_customers,
-    AVG(LENGTH(c.c_name)) AS avg_customer_name_length,
-    COUNT(DISTINCT i.i_item_id) AS distinct_items_sold
-FROM store_sales ss
-JOIN stores s
-    ON ss.ss_store_id = s.s_store_id
-JOIN items i
-    ON ss.ss_item_id = i.i_item_id
-JOIN customers c
-    ON ss.ss_customer_id = c.c_customer_id
-LEFT JOIN item_ratings ir
-    ON i.i_item_id = ir.pr_item_id
-GROUP BY s.s_store_name
-ORDER BY total_revenue DESC
+SELECT i_category,
+       avg_sentiment,
+       review_count,
+       total_quantity_sold
+FROM final
+ORDER BY total_quantity_sold DESC
 LIMIT 10
