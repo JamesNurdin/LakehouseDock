@@ -44,7 +44,9 @@ predictive/
 │
 ├── qppnet/                 plan-structured per-operator net  
 ├── zero_shot/              plan-graph GNN                   
+├── dace/                   tree-masked Transformer over plan sequence 
 ├── reqo/                   bidirectional tree-GNN + NLL head 
+├── roq/                    dual encoder (tree-conv + graph-pool) + aleatoric/epistemic 
 ├── nngp/                   analytic NNGP kernel + GP         
 │
 └── tlstm/                  tree-LSTM heteroscedastic regressor 
@@ -62,7 +64,9 @@ predictive/
 | Conformal Prediction | `conformal` | shared features | calibrated intervals |
 | QPPNet | `qppnet` | plan-tree (per-op units) | point | point only | — |
 | Zero-Shot Cost Model | `zero_shot` | plan GNN | point | point only | — |
+| DACE | `dace` | tree-masked Transformer (plan sequence) | point | point only | — |
 | Reqo | `reqo` | bidirectional tree-GNN | Gaussian |
+| Roq | `roq` | dual encoder (plan-tree conv + graph pool) | Gaussian (aleatoric + MC-dropout epistemic) |
 | NNGP | `nngp` | shared features + NNGP kernel | Gaussian |
 | TLSTM (predictive) | `tlstm` | tree-LSTM | Gaussian |
 
@@ -76,7 +80,7 @@ Two entry points build model-ready data from the loaded plans/runs:
 - `build_feature_dataset(...)` → flat standardised feature vectors + targets
   (feature-based models: the six T2 mechanisms + NNGP).
 - `build_graph_dataset(...)` → per-plan tree/graph tensors + targets
-  (structured models: QPPNet, Zero-Shot, Reqo).
+  (structured models: QPPNet, Zero-Shot, DACE, Reqo, Roq).
 
 Both fit their adapters on the **training split only** (no test leakage) and
 return aligned `train`/`test` arrays plus the kept query ids.
@@ -140,6 +144,8 @@ Runnable end-to-end examples live one level up in `uncertainty_prediction/`:
 - `test_predictive_baseline_mlp_heads.ipynb` — Mean–Variance NLL, MC-Dropout, Deep Ensembles.
 - `test_predictive_baseline_classical.ipynb` — NGBoost, Quantile Regression, Conformal.
 - `test_predictive_baseline_named.ipynb` — QPPNet, Zero-Shot, Reqo, NNGP.
+- `test_predictive_baseline_dace.ipynb` — DACE (tree-masked Transformer point model).
+- `test_predictive_baseline_roq.ipynb` — Roq (dual-encoder, aleatoric + epistemic).
 
 ## Metrics (`common/metrics.py`)
 
@@ -162,9 +168,10 @@ tab-separated header/value rows to paste into the workbook.
 - All models take a `seed`; call `set_seed(42)` (from `uncertainty_prediction.src`)
   once at the top of a notebook.
 - Adapters standardise on the training split only.
-- Structured models (QPPNet/Zero-Shot/Reqo) train one plan at a time (faithful
-  to tree structure, un-batched) — fine for a few hundred queries; add batching
-  before scaling to thousands.
+- Structured models (QPPNet/Zero-Shot/DACE/Reqo/Roq) train one plan at a time
+  (faithful to tree structure, un-batched) — fine for a few hundred queries; add
+  batching before scaling to thousands. Roq additionally does `mc_samples` (10)
+  stochastic forward passes at predict time for its epistemic term.
 - NNGP is an exact GP: O(n²) kernel + n×n Cholesky in train size; trivial at the
   current split, worth noting for larger ones. Tune `noise` if coverage drifts.
 - `ngboost` is the only extra dependency (`pip install ngboost`), imported
