@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from trino_stack.query_generator import (  # re-use QueryDock helpers
+from trino_stack.query_generator import (  # re-use helpers
     load_schema,
     make_openai_client,
     warm_up_model,

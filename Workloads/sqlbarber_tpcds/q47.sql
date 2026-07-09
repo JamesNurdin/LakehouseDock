@@ -1,0 +1,1 @@
+SELECT r.cr_returned_date_sk, SUM(r.cr_return_amount) AS total_return_amount FROM catalog_returns r JOIN catalog_sales s ON r.cr_item_sk = s.cs_item_sk WHERE r.cr_returned_date_sk = 2450926 GROUP BY r.cr_returned_date_sk
