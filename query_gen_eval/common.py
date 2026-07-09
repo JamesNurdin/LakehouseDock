@@ -28,8 +28,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import query_gen_eval._bootstrap  # noqa: F401  (puts LakehouseDock on sys.path)
-
 from trino_stack.query_generator import (  # re-use QueryDock helpers
     load_schema,
     make_openai_client,

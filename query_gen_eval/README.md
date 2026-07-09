@@ -73,7 +73,7 @@ python -m query_gen_eval.scripts.run_baseline \
 
 ```bash
 python -m query_gen_eval.scripts.run_all \
-    --schemas tpcds ssb imdb ldbc_snb_bi bigbenchv2_sf1 stats_ceb_sf1 \
+    --schemas tpcds ssb imdb ldbc_snb_sf1000 bigbenchv2_sf1000 stats_ceb_sf1000 \
     --instance lakehouse-a --namespace pgr24james --num-queries 1000
 ```
 
@@ -98,7 +98,6 @@ Per-baseline knobs (e.g. `--extra '{"rewrite_pass": false}'` for SQLStorm, or
 ```
 LakehouseDock/query_gen_eval/
     __init__.py          # BaselineContext + context builders + write_baseline_workload
-    _bootstrap.py        # ensures the enclosing LakehouseDock/ is on sys.path (reuse trino_stack, loader)
     common.py            # shared context: LLM calls, EXPLAIN validate, cost profiling, value sampling, report writer
     sql_features.py      # static SQL metaheuristics (sqlglot or regex fallback)
     baselines/           # the five baselines + BASELINES registry

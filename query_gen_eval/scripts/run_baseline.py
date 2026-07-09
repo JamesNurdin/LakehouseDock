@@ -28,7 +28,6 @@ import argparse
 import json
 import sys
 
-import query_gen_eval._bootstrap  # noqa: F401
 from query_gen_eval.common import context_from_factories, context_from_lakehouse
 from query_gen_eval.baselines import BASELINES
 
