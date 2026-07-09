@@ -52,102 +52,31 @@ def relationship_to_text(rel) -> str:
     )
 
 
-def _connected_components(
-    nodes: set[str],
-    graph: dict[str, set[str]],
-) -> list[set[str]]:
-    """Partition `nodes` into connected components, using edges restricted to `nodes`."""
-    remaining = set(nodes)
-    components: list[set[str]] = []
-
-    while remaining:
-        start = next(iter(remaining))
-        component = {start}
-        frontier = deque([start])
-        remaining.discard(start)
-
-        while frontier:
-            current = frontier.popleft()
-            for neighbour in graph[current]:
-                if neighbour in remaining:
-                    remaining.discard(neighbour)
-                    component.add(neighbour)
-                    frontier.append(neighbour)
-
-        components.append(component)
-
-    return components
-
-
-def _shortest_path(
-    sources: set[str],
-    targets: set[str],
-    graph: dict[str, set[str]],
-) -> list[str] | None:
-    """BFS from any node in `sources` to the nearest node in `targets`, over the full graph."""
-    visited = set(sources)
-    frontier = deque((node, [node]) for node in sources)
-
-    while frontier:
-        node, path = frontier.popleft()
-        if node in targets:
-            return path
-        for neighbour in graph[node]:
-            if neighbour not in visited:
-                visited.add(neighbour)
-                frontier.append((neighbour, path + [neighbour]))
-
-    return None
-
-
-def sample_unbiased_tables(
+def sample_connected_tables(
     schema: dict,
     n_tables: int,
     seed: int | None = None,
 ) -> list[str]:
-    """
-    Sample a joinable table subset without the hub bias of a graph walk.
-
-    A BFS/random-walk expansion (picking a start table, then repeatedly
-    hopping to a random unvisited neighbour) visits well-connected "hub"
-    tables far more often than peripheral ones, since neighbours are only
-    reachable through whatever is already selected -- so highly-connected
-    tables end up over-represented across a generated workload, and
-    low-degree tables are under-covered.
-
-    This instead samples `n_tables` tables independently and uniformly at
-    random: every table has an equal chance of being picked, regardless of
-    its degree in the join graph. A uniform sample isn't guaranteed to be
-    connected, so any resulting islands are stitched together with the
-    minimum number of extra "bridge" tables (shortest path over the full
-    relationship graph), which keeps every returned table set fully
-    joinable. Bridge tables are the one place hub tables still get pulled in
-    preferentially -- which is correct, not a bias to fix: a hub table is
-    often genuinely the only way to join two otherwise-unrelated parts of
-    the schema.
-    """
     rng = random.Random(seed)
     graph = build_relationship_graph(schema)
 
     all_tables = list(schema["tables"])
-    n_tables = min(n_tables, len(all_tables))
+    start = rng.choice(all_tables)
 
-    selected = set(rng.sample(all_tables, n_tables))
+    selected = {start}
+    frontier = deque([start])
 
-    components = _connected_components(selected, graph)
+    while frontier and len(selected) < n_tables:
+        current = frontier.popleft()
+        neighbours = list(graph[current])
+        rng.shuffle(neighbours)
 
-    while len(components) > 1:
-        anchor, *rest = components
-        others = set().union(*rest)
-
-        bridge = _shortest_path(anchor, others, graph)
-        if bridge is None:
-            # The schema's relationship graph is itself disconnected here;
-            # nothing left to bridge with.
-            break
-
-        selected.update(bridge)
-        components = _connected_components(selected, graph)
+        for neighbour in neighbours:
+            if neighbour not in selected:
+                selected.add(neighbour)
+                frontier.append(neighbour)
+                if len(selected) >= n_tables:
+                    break
 
     return sorted(selected)
 
@@ -540,7 +469,7 @@ def generate_query(
     rng = random.Random(random_seed)
     n_tables = rng.randint(min_tables, max_tables)
 
-    selected_tables = sample_unbiased_tables(
+    selected_tables = sample_connected_tables(
         schema=schema_json,
         n_tables=n_tables,
         seed=rng.randint(0, 10**9),
