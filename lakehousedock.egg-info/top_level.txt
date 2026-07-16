@@ -1,0 +1,3 @@
+loader
+query_gen_eval
+trino_stack

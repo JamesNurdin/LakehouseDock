@@ -12,3 +12,5 @@ ipywidgets
 umap-learn
 xgboost
 lightgbm
+openai
+sqlglot
