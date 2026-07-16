@@ -5,12 +5,12 @@ Every baseline exposes a single ``generate_workload(ctx, *, workload_name,
 num_queries, ...) -> dict`` entry point that follows the paper's own pipeline
 as closely as the lakehouse context allows, and writes the same artefacts as
 QueryDock (``q<i>.sql`` + ``generation_report.json``) via
-:func:`query_gen_eval.common.write_baseline_workload`.
+:func:`workload_generation.common.write_baseline_workload`.
 
 The ``BASELINES`` registry lets the runner scripts dispatch by name.
 """
 
-from query_gen_eval.baselines import (
+from workload_generation.baselines import (
     sqlstorm,
     sqlbarber,
     e2etune,

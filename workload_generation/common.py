@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from trino_stack.query_generator import (  # re-use helpers
+from workload_generation.query_generator import (  # re-use helpers
     load_schema,
     make_openai_client,
     warm_up_model,
@@ -50,7 +50,7 @@ from trino_stack.config import (
     WORKLOAD_ROOT,
 )
 
-from query_gen_eval.sql_features import query_features, workload_metaheuristics
+from workload_generation.sql_features import query_features, workload_metaheuristics
 
 
 # ---------------------------------------------------------------------------
