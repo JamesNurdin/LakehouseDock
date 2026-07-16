@@ -28,9 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import workload_generation._bootstrap  # noqa: F401  (puts LakehouseDock on sys.path)
-
-from workload_generation.query_generator import (  # re-use QueryDock helpers
+from workload_generation.query_generator import (  # re-use helpers
     load_schema,
     make_openai_client,
     warm_up_model,

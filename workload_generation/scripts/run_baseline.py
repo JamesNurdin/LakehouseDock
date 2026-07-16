@@ -28,7 +28,6 @@ import argparse
 import json
 import sys
 
-import workload_generation._bootstrap  # noqa: F401
 from workload_generation.common import context_from_factories, context_from_lakehouse
 from workload_generation.baselines import BASELINES
 
