@@ -1,0 +1,1 @@
+SELECT it.i_category, SUM(i.inv_quantity_on_hand) AS total_quantity FROM inventory i JOIN item it ON i.inv_item_sk = it.i_item_sk WHERE it.i_rec_start_date >= DATE '2000-10-27' AND it.i_rec_end_date <= DATE '2001-10-26' GROUP BY it.i_category

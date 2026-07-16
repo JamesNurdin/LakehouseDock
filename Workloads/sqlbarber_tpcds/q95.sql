@@ -1,0 +1,1 @@
+SELECT ca.ca_state, c.c_preferred_cust_flag, COUNT(*) AS total_returns, SUM(sr.sr_return_amt) AS total_return_amount FROM store_returns sr JOIN customer c ON sr.sr_customer_sk = c.c_customer_sk JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk WHERE sr.sr_returned_date_sk = 2451822 AND c.c_birth_year = 1973 GROUP BY ca.ca_state, c.c_preferred_cust_flag

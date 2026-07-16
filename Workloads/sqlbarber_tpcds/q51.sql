@@ -1,0 +1,1 @@
+SELECT ca_state, SUM(wr_return_amt) AS total_return_amount FROM web_returns INNER JOIN customer_address ON web_returns.wr_refunded_addr_sk = customer_address.ca_address_sk WHERE ca_state = 'SD' AND wr_returned_date_sk = 2451486 GROUP BY ca_state
