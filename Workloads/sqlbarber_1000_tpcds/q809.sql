@@ -1,0 +1,1 @@
+SELECT p.p_promo_name, SUM(ss.ss_ext_sales_price) AS total_sales FROM store_sales ss JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk WHERE p.p_start_date_sk >= 2450324 AND p.p_end_date_sk <= 2450879 GROUP BY p.p_promo_name ORDER BY total_sales DESC

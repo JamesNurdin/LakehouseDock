@@ -1,0 +1,1 @@
+SELECT i_brand, w_state, SUM(ws_net_paid) AS total_net_paid, COUNT(*) AS order_count FROM web_sales ws JOIN item i ON ws.ws_item_sk = i.i_item_sk JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk WHERE i.i_brand_id = 7004003 AND ws.ws_sold_date_sk = 2451449 GROUP BY i_brand, w_state

@@ -1,0 +1,1 @@
+SELECT cd_gender, SUM(cr_return_amount) AS total_return_amount FROM catalog_returns JOIN customer_demographics ON catalog_returns.cr_refunded_cdemo_sk = customer_demographics.cd_demo_sk WHERE catalog_returns.cr_returned_date_sk = 2451139 GROUP BY cd_gender

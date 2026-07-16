@@ -1,0 +1,1 @@
+SELECT w.w_warehouse_name, SUM(cs.cs_net_paid) AS total_net_paid FROM catalog_sales cs JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk WHERE cs.cs_sold_date_sk = 2450856 GROUP BY w.w_warehouse_name

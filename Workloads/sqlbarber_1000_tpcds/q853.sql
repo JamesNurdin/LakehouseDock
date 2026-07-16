@@ -1,0 +1,1 @@
+SELECT ca.ca_state, SUM(cr.cr_return_amount) AS total_return_amount, AVG(cs.cs_net_paid) AS avg_net_paid FROM catalog_returns cr JOIN catalog_sales cs ON cr.cr_order_number = cs.cs_order_number JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk WHERE ca.ca_state = 'OK' AND cs.cs_sold_date_sk = 2450835 GROUP BY ca.ca_state

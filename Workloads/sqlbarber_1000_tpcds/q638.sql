@@ -1,0 +1,1 @@
+SELECT s.s_store_name, s.s_city, SUM(ss.ss_net_paid) AS total_net_paid FROM store_sales ss JOIN store s ON ss.ss_store_sk = s.s_store_sk WHERE s.s_state = 'SD' AND ss.ss_sold_date_sk = 2451135 GROUP BY s.s_store_name, s.s_city

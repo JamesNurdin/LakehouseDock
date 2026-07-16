@@ -1,0 +1,1 @@
+SELECT d.d_year AS year, s.s_state AS state, SUM(sr.sr_return_amt) AS total_return_amount, COUNT(*) AS total_returns FROM store_returns sr JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk JOIN store s ON sr.sr_store_sk = s.s_store_sk WHERE d.d_year = 1910 AND s.s_state = 'NM' GROUP BY d.d_year, s.s_state

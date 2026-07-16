@@ -1,0 +1,1 @@
+SELECT hd.hd_buy_potential, SUM(ss.ss_ext_sales_price) AS total_sales, SUM(sr.sr_return_amt) AS total_returns FROM store_sales ss JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk JOIN store_returns sr ON sr.sr_item_sk = ss.ss_item_sk WHERE ss.ss_sold_date_sk = 2452183 AND sr.sr_returned_date_sk = 2451653 GROUP BY hd.hd_buy_potential

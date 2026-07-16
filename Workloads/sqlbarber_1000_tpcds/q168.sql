@@ -1,0 +1,1 @@
+SELECT wp.wp_type, SUM(wr.wr_return_amt) AS total_return FROM web_page wp JOIN web_returns wr ON wr.wr_web_page_sk = wp.wp_web_page_sk WHERE wp.wp_type = 'protected                                         ' GROUP BY wp.wp_type

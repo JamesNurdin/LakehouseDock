@@ -1,0 +1,1 @@
+SELECT i.i_category, p.p_promo_name, SUM(ss.ss_net_paid) AS total_net_paid, AVG(ss.ss_ext_discount_amt) AS avg_discount_amt FROM store_sales ss JOIN item i ON ss.ss_item_sk = i.i_item_sk JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk WHERE i.i_brand_id = 8009005 AND p.p_discount_active = 'N' AND ss.ss_sold_date_sk = 2451522 GROUP BY i.i_category, p.p_promo_name

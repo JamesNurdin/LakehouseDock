@@ -1,0 +1,1 @@
+SELECT d.d_year, p.p_channel_email, COUNT(DISTINCT c.c_customer_id) AS unique_customers, SUM(p.p_cost) AS total_promotion_cost FROM customer c JOIN date_dim d ON c.c_first_shipto_date_sk = d.d_date_sk JOIN promotion p ON p.p_start_date_sk = d.d_date_sk WHERE d.d_year = 1922 AND p.p_discount_active = 'N' GROUP BY d.d_year, p.p_channel_email

@@ -1,0 +1,1 @@
+SELECT hd.hd_demo_sk, hd.hd_income_band_sk, hd.hd_buy_potential, SUM(wr.wr_return_amt) AS total_return_amount FROM household_demographics hd JOIN web_returns wr ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk WHERE hd.hd_buy_potential = '1001-5000      ' GROUP BY hd.hd_demo_sk, hd.hd_income_band_sk, hd.hd_buy_potential

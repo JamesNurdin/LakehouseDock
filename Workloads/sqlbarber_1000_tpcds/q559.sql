@@ -1,0 +1,1 @@
+SELECT r.r_reason_desc, td.t_hour, SUM(cr.cr_return_amount) AS total_return_amount, COUNT(DISTINCT cr.cr_order_number) AS distinct_orders FROM catalog_returns cr JOIN time_dim td ON cr.cr_returned_time_sk = td.t_time_sk JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk WHERE cr.cr_returned_date_sk = 2451005 AND td.t_hour = 20 GROUP BY r.r_reason_desc, td.t_hour

@@ -1,0 +1,1 @@
+SELECT ib.ib_lower_bound, AVG(hd.hd_vehicle_count) AS avg_vehicle_count FROM household_demographics hd JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk WHERE hd.hd_dep_count > 4 GROUP BY ib.ib_lower_bound ORDER BY ib.ib_lower_bound

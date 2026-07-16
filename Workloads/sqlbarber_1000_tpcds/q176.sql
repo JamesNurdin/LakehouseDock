@@ -1,0 +1,1 @@
+SELECT item.i_brand, item.i_category, SUM(promotion.p_cost) AS total_promo_cost FROM promotion JOIN item ON promotion.p_item_sk = item.i_item_sk WHERE item.i_current_price > 10.61 GROUP BY item.i_brand, item.i_category

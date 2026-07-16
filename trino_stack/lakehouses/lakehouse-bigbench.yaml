@@ -4,23 +4,23 @@ namespace: pgr24james
 
 trino:
   profiler: 
-    enabled: false
+    enabled: true
     when: ['before']
-  logger: false
+  logger: true
   pod:
     image: 2570809n/trino-node-exporter:latest
   worker:
     resources:
       cpu: "4"
-      memory: "8Gi"
+      memory: "64Gi"
     replicasPerNode: 1
-    count: 1
+    count: 4
     nodes:
       - ""
   coord:
     resources:
       cpu: "4"
-      memory: "8Gi"
+      memory: "64Gi"
     nodeName: ""  # or "" for random
 
 test:

@@ -1,0 +1,1 @@
+SELECT wsite.web_name, d.d_month_seq, SUM(ws.ws_net_paid) AS total_net_paid, COUNT(*) AS order_count FROM web_sales ws JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk JOIN web_site wsite ON ws.ws_web_site_sk = wsite.web_site_sk WHERE d.d_year = 1936 AND wsite.web_state = 'IN' GROUP BY wsite.web_name, d.d_month_seq ORDER BY total_net_paid DESC

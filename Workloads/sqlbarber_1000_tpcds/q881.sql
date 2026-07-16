@@ -1,0 +1,1 @@
+SELECT p.p_promo_name, ca.ca_state, SUM(cs.cs_net_paid) AS total_net_paid, AVG(cs.cs_quantity) AS avg_quantity FROM catalog_sales cs JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk WHERE cs.cs_sold_date_sk BETWEEN 2450827 AND 2450837 GROUP BY p.p_promo_name, ca.ca_state

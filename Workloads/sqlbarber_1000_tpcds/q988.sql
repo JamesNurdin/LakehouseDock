@@ -1,0 +1,1 @@
+SELECT cc.cc_name, SUM(cs.cs_net_paid) AS total_net_paid FROM catalog_sales cs INNER JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk WHERE cc.cc_state = 'LA' AND cs.cs_sold_date_sk = 2450816 GROUP BY cc.cc_name
