@@ -24,7 +24,6 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-import workload_generation._bootstrap  # noqa: F401
 from workload_generation.common import context_from_factories, context_from_lakehouse
 from workload_generation.baselines import BASELINES
 
