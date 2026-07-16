@@ -1,19 +1,21 @@
 """
 Path bootstrap.
 
-``query_gen_eval`` re-uses the QueryDock generation/validation helpers that
-live in ``src/LakehouseDock/trino_stack`` (and ``.../loader``).  Those modules
-are imported as top-level packages (``trino_stack``, ``loader``) exactly the
-way the ``launch_lakehouse.ipynb`` notebook imports them, i.e. with the
+``workload_generation`` re-uses infrastructure helpers that live in
+``src/LakehouseDock/trino_stack`` (config, workload utilities, Trino
+connections) and ``.../loader``.  Those modules are imported as top-level
+packages (``trino_stack``, ``loader``) exactly the way the
+``launch_lakehouse.ipynb`` notebook imports them, i.e. with the
 ``LakehouseDock`` directory on ``sys.path``.
 
-Since this package now lives *inside* ``LakehouseDock`` (as
-``LakehouseDock/query_gen_eval``), ``trino_stack`` / ``loader`` are siblings and
+Since this package lives *inside* ``LakehouseDock`` (as
+``LakehouseDock/workload_generation``), ``trino_stack`` / ``loader`` are siblings and
 are already importable whenever the notebook cwd is ``LakehouseDock``.  This
 module makes that robust for standalone use too by ensuring the enclosing
 ``LakehouseDock`` directory is on ``sys.path`` so that::
 
-    from trino_stack.query_generator import load_schema, make_openai_client
+    from trino_stack.workload import ensure_dir
+    from trino_stack.config import WORKLOAD_ROOT
 
 works from anywhere.
 """
@@ -24,7 +26,7 @@ import os
 import sys
 from pathlib import Path
 
-# src/LakehouseDock/query_gen_eval/_bootstrap.py  ->  src/LakehouseDock
+# src/LakehouseDock/workload_generation/_bootstrap.py  ->  src/LakehouseDock
 _THIS_DIR = Path(__file__).resolve().parent
 _LAKEHOUSE_DIR = _THIS_DIR.parent
 
