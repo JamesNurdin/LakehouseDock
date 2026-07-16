@@ -62,9 +62,9 @@ except Exception:
         return path
 
 try:
-    from trino_stack.query_generator import make_openai_client as stack_make_openai_client
-    from trino_stack.query_generator import call_with_retry as stack_call_with_retry
-    from trino_stack.query_generator import warm_up_model as stack_warm_up_model
+    from workload_generation.query_generator import make_openai_client as stack_make_openai_client
+    from workload_generation.query_generator import call_with_retry as stack_call_with_retry
+    from workload_generation.query_generator import warm_up_model as stack_warm_up_model
 except Exception:
     stack_make_openai_client = None
     stack_call_with_retry = None
@@ -252,7 +252,7 @@ def make_client(base_url: str, api_key_env: str):
     if stack_make_openai_client is not None:
         return stack_make_openai_client(base_url=base_url, api_key_env=api_key_env)
     if OpenAI is None:
-        raise RuntimeError("openai package is not available and trino_stack.query_generator could not be imported")
+        raise RuntimeError("openai package is not available and workload_generation.query_generator could not be imported")
     return OpenAI(base_url=base_url, api_key=os.environ[api_key_env])
 
 

@@ -47,9 +47,9 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from query_gen_eval.common import BaselineContext, write_baseline_workload
-from query_gen_eval.sql_features import query_features, _tokens
-from trino_stack.query_generator import sanitize_sql
+from workload_generation.common import BaselineContext, write_baseline_workload
+from workload_generation.sql_features import query_features, _tokens
+from workload_generation.query_generator import sanitize_sql
 
 try:
     import sqlglot

@@ -1,8 +1,8 @@
-# query_gen_eval — related-work SQL generation baselines
+# workload_generation — QueryDock generator + related-work SQL generation baselines
 
-This package lives at `LakehouseDock/query_gen_eval/` (alongside `trino_stack`
-and `loader`). It implements the SQL-workload-generation baselines that
-QueryDock (`trino_stack/query_generator.py`) is compared against, adapted
+This package lives at `LakehouseDock/workload_generation/` (alongside `trino_stack`
+and `loader`). It contains the QueryDock generator itself
+(`query_generator.py`) and the SQL-workload-generation baselines it is compared against, adapted
 to the **Trino / Iceberg lakehouse** context so the comparison is fair: every
 baseline reuses the *same* QueryDock infrastructure (schema loading, live DDL
 introspection, the OpenAI client + retry/back-off, and `EXPLAIN`-based
@@ -63,7 +63,7 @@ Both entry points accept either a live `Lakehouse` release (as in
 **One baseline:**
 
 ```bash
-python -m query_gen_eval.scripts.run_baseline \
+python -m workload_generation.scripts.run_baseline \
     --baseline sqlstorm --schema tpcds \
     --instance lakehouse-a --namespace pgr24james \
     --num-queries 1000 --workload-name sqlstorm_tpcds
@@ -72,7 +72,7 @@ python -m query_gen_eval.scripts.run_baseline \
 **Full sweep (all baselines × schemas + `comparison_summary.json`):**
 
 ```bash
-python -m query_gen_eval.scripts.run_all \
+python -m workload_generation.scripts.run_all \
     --schemas tpcds ssb imdb ldbc_snb_bi bigbenchv2_sf1 stats_ceb_sf1 \
     --instance lakehouse-a --namespace pgr24james --num-queries 1000
 ```
@@ -81,8 +81,8 @@ python -m query_gen_eval.scripts.run_all \
 
 ```python
 from trino_stack.lakehouse import Lakehouse
-from query_gen_eval import context_from_lakehouse
-from query_gen_eval.baselines import sqlbarber
+from workload_generation import context_from_lakehouse
+from workload_generation.baselines import sqlbarber
 
 lh  = Lakehouse.from_release(instance_name="lakehouse-a", namespace="pgr24james")
 ctx = context_from_lakehouse(lh, schema="tpcds", reasoning="high")
@@ -96,8 +96,9 @@ Per-baseline knobs (e.g. `--extra '{"rewrite_pass": false}'` for SQLStorm, or
 ## Layout
 
 ```
-LakehouseDock/query_gen_eval/
+LakehouseDock/workload_generation/
     __init__.py          # BaselineContext + context builders + write_baseline_workload
+    query_generator.py   # the QueryDock generator (schema sampling, DDL context, LLM generation, workload writer)
     _bootstrap.py        # ensures the enclosing LakehouseDock/ is on sys.path (reuse trino_stack, loader)
     common.py            # shared context: LLM calls, EXPLAIN validate, cost profiling, value sampling, report writer
     sql_features.py      # static SQL metaheuristics (sqlglot or regex fallback)
