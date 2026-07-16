@@ -5,14 +5,14 @@ Two ways to provide a Trino connection + LLM client:
 
   A) Live Lakehouse (matches launch_lakehouse.ipynb) -- default:
 
-        python -m query_gen_eval.scripts.run_baseline \
+        python -m workload_generation.scripts.run_baseline \
             --baseline sqlstorm --schema tpcds \
             --instance lakehouse-a --namespace pgr24james \
             --num-queries 100 --workload-name sqlstorm_tpcds
 
   B) Raw Trino host (no kubernetes), e.g. from inside the control container:
 
-        python -m query_gen_eval.scripts.run_baseline \
+        python -m workload_generation.scripts.run_baseline \
             --baseline e2etune --schema tpcds \
             --trino-host trino-service-lakehouse-a.pgr24james.svc.cluster.local \
             --num-queries 100
@@ -28,8 +28,8 @@ import argparse
 import json
 import sys
 
-from query_gen_eval.common import context_from_factories, context_from_lakehouse
-from query_gen_eval.baselines import BASELINES
+from workload_generation.common import context_from_factories, context_from_lakehouse
+from workload_generation.baselines import BASELINES
 
 
 def _build_context(args):

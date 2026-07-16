@@ -7,7 +7,7 @@ the QueryDock generator and all baselines can be compared side by side.
 
 Example (from the LakehouseDock control container / notebook kernel):
 
-    python -m query_gen_eval.scripts.run_all \
+    python -m workload_generation.scripts.run_all \
         --schemas tpcds ssb imdb \
         --instance lakehouse-a --namespace pgr24james \
         --num-queries 1000
@@ -24,8 +24,8 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-from query_gen_eval.common import context_from_factories, context_from_lakehouse
-from query_gen_eval.baselines import BASELINES
+from workload_generation.common import context_from_factories, context_from_lakehouse
+from workload_generation.baselines import BASELINES
 
 
 def _context_builder(args, schema):

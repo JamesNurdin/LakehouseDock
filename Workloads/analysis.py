@@ -9,7 +9,7 @@ Two families of metrics feed into a single comparable row per workload:
 
   * Static SQL "metaheuristics" (table/join/aggregation counts, complexity
     mix, table-usage entropy, schema coverage, ...) as defined in
-    ``query_gen_eval/sql_features.py``. Every baseline generator already
+    ``workload_generation/sql_features.py``. Every baseline generator already
     writes these into ``generation_report.json``; if a workload has one, we
     read them straight from there. Otherwise (e.g. hand-written/imported
     workloads such as ``tpcds``) we compute them directly from the .sql
@@ -37,9 +37,9 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 import pandas as pd
 
 from loader.stats import load_sql_workload
-from query_gen_eval.sql_features import query_features, workload_metaheuristics
+from workload_generation.sql_features import query_features, workload_metaheuristics
 from trino_stack.config import WORKLOAD_ROOT as _DEFAULT_WORKLOAD_ROOT
-from trino_stack.query_generator import extract_schema_tables, load_schema
+from workload_generation.query_generator import extract_schema_tables, load_schema
 
 
 # ---------------------------------------------------------------------------
