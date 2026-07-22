@@ -174,6 +174,74 @@ def metaheuristics_row(
 
 
 # ---------------------------------------------------------------------------
+# Generation overhead (generation_report.json: wall-clock time, throughput,
+# validation efficiency). Present for every generated workload; absent for
+# hand-written imports such as ``tpcds``, which have no generation cost and so
+# simply carry NaNs for these columns.
+# ---------------------------------------------------------------------------
+
+def load_generation_overhead(
+    workload_dir: str | Path,
+    *,
+    prefix: str = "gen_",
+) -> Dict[str, Any]:
+    """
+    Flat ``gen_``-prefixed generation-overhead columns pulled from a workload's
+    ``generation_report.json``:
+
+      * wall-clock generation time and derived throughput,
+      * validation/repair efficiency (candidates generated vs. accepted), where
+        the generator records it, and
+      * provenance (generator name, backbone model, reasoning effort).
+
+    Returns an empty dict for workloads without a generation_report.json.
+    """
+    report = load_generation_report(workload_dir)
+    if not report:
+        return {}
+
+    model = report.get("model") or {}
+    parallelism = report.get("parallelism") or {}
+    validation = report.get("validation") or {}
+
+    num_queries = report.get("num_queries")
+    duration_s = report.get("duration_s")
+
+    row: Dict[str, Any] = {
+        f"{prefix}generator": report.get("generator") or report.get("baseline"),
+        f"{prefix}model": model.get("name"),
+        f"{prefix}reasoning": report.get("reasoning") or model.get("reasoning"),
+        f"{prefix}temperature": model.get("temperature"),
+        f"{prefix}num_queries": num_queries,
+        f"{prefix}duration_s": duration_s,
+        f"{prefix}created_at_utc": report.get("created_at_utc"),
+        f"{prefix}completed_at_utc": report.get("completed_at_utc"),
+        f"{prefix}generation_workers": parallelism.get("generation_workers"),
+    }
+
+    # Derived throughput (guard against missing / zero values).
+    if duration_s and num_queries:
+        row[f"{prefix}queries_per_min"] = round(num_queries / (duration_s / 60.0), 4)
+        row[f"{prefix}seconds_per_query"] = round(duration_s / num_queries, 4)
+
+    # Validation / repair efficiency, where recorded (our generator).
+    if validation:
+        candidates = validation.get("total_candidates_generated")
+        rejected = validation.get("num_invalid_queries_rejected")
+        written = validation.get("num_valid_queries_written")
+        row[f"{prefix}candidates_generated"] = candidates
+        row[f"{prefix}valid_written"] = written
+        row[f"{prefix}invalid_rejected"] = rejected
+        row[f"{prefix}batches_run"] = validation.get("batches_run")
+        if candidates:
+            row[f"{prefix}rejection_rate"] = round((rejected or 0) / candidates, 4)
+            if num_queries:
+                row[f"{prefix}candidates_per_query"] = round(candidates / num_queries, 4)
+
+    return row
+
+
+# ---------------------------------------------------------------------------
 # Plan-based diversity metrics (requires a live Lakehouse)
 # ---------------------------------------------------------------------------
 
@@ -245,6 +313,8 @@ def analyse_workload(
             force_recompute=force_recompute_metaheuristics,
         )
     )
+
+    row.update(load_generation_overhead(workload_path))
 
     return row
 
