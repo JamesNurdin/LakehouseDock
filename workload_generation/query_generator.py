@@ -290,7 +290,7 @@ def make_openai_client(
     *,
     base_url: str = BASE_MODEL_URL,
     api_key_env: str = API_KEY_ENV,
-    timeout_s: float = 240.0,
+    timeout_s: float = 600.0,
 ) -> OpenAI:
     return OpenAI(
         base_url=base_url,
@@ -329,9 +329,9 @@ def call_with_retry(
 def call_with_retry_start_up(
     fn,
     *,
-    max_retries: int = 8,
+    max_retries: int = 16,
     base_sleep_s: float = 10.0,
-    max_sleep_s: float = 120.0,
+    max_sleep_s: float = 240.0,
 ):
     last_error = None
 

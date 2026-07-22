@@ -51,7 +51,7 @@ from trino_stack.resource_logger import NodeLogger
 from trino_stack.resource_profile import LakehouseResourceProfiler
 
 # query_generator
-from workload_generation.query_generator_v2 import (
+from workload_generation.query_generator_v3 import (
     load_schema,
     make_openai_client,
     warm_up_model,
