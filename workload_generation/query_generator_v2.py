@@ -15,7 +15,7 @@ copied) from v1.
 
 Evaluation target
 -----------------
-``Workloads/tpcds_generator_analysis.ipynb`` scores a generator on two axes
+``workload_generation/analysis/tpcds_generator_analysis.ipynb`` scores a generator on two axes
 simultaneously:
 
   * **fidelity** -- mean absolute relative error (MARE) of every
