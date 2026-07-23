@@ -29,7 +29,14 @@ Faithful adaptation of SQL-Factory's three-team, six-agent framework
     * Management Agent      -- schedules exploration (Generation) vs
       exploitation (Expansion): starts in exploration, switches to expansion
       after a fixed number of cycles, and switches back if redundancy rises or
-      executability drops.
+      executability drops.  Termination is target-driven, mirroring the
+      upstream ``management_node`` (which ends when ``current_sql_num >=
+      target_sql_num`` under an effectively unbounded recursion limit rather
+      than a fixed round budget).  A progress-based *stall guard* ends a run
+      that stops making progress -- a runaway safety valve, not a throughput
+      ceiling -- and an optional *saturation stop* (paper Sec 5.2.6) can end
+      a run early once the Expansion Team dominates the pool and the pool
+      similarity trends upward (semantic saturation).
 
 We approximate the "powerful vs lightweight" model split with reasoning-effort
 (``high`` for generation, ``low`` for expansion) on the single deployed model,
@@ -252,6 +259,14 @@ def _parse_queries(raw: str) -> List[str]:
         return [sanitize_sql(p) for p in parts if "select" in p.lower()]
 
 
+def _sustained_increase(window: List[float]) -> bool:
+    """True if `window` is a non-decreasing, net-rising trend (saturation)."""
+    if len(window) < 2:
+        return False
+    non_decreasing = all(b >= a - 1e-9 for a, b in zip(window, window[1:]))
+    return non_decreasing and window[-1] > window[0]
+
+
 # ---------------------------------------------------------------------------
 # Pipeline (Management Team scheduling)
 # ---------------------------------------------------------------------------
@@ -262,17 +277,30 @@ def generate_workload(
     workload_name: str,
     num_queries: int = 100,
     tables_per_selection: int = 4,
-    queries_per_call: int = 6,
+    queries_per_call: int = 10,
     similarity_threshold: float = 0.9,
     exploration_cycles: int = 3,
     expansion_cycles: int = 2,
     validation_workers: int = 8,
-    max_rounds: int = 30,
+    max_stall_rounds: int = 6,
+    saturation_stop: bool = False,
+    saturation_expansion_ratio: float = 0.7,
+    saturation_window: int = 4,
     warmup: bool = True,
     random_seed: Optional[int] = None,
     workload_root=None,
 ) -> Dict[str, Any]:
-    """Run the SQL-Factory multi-agent pipeline and write a workload + report."""
+    """Run the SQL-Factory multi-agent pipeline and write a workload + report.
+
+    Termination mirrors the upstream target-driven stop: the loop runs until
+    ``num_queries`` accepted queries are collected, with no fixed round budget.
+    ``max_stall_rounds`` is a runaway guard that ends a run only after that many
+    *consecutive* rounds accept nothing (scales to any target). When
+    ``saturation_stop`` is set, the run also ends early once the Expansion Team
+    supplies at least ``saturation_expansion_ratio`` of the pool and the mean
+    similarity of newly accepted queries rises across ``saturation_window``
+    consecutive productive rounds (paper Sec 5.2.6 semantic saturation).
+    """
     started_at = datetime.now(timezone.utc)
     rng = random.Random(random_seed)
 
@@ -293,7 +321,14 @@ def generate_workload(
     state = "GEN"       # Management Agent starts in exploration
     cycles_in_state = 0
 
-    while len(pool) < num_queries and rounds < max_rounds:
+    stall = 0                      # consecutive rounds that accepted nothing
+    accepted_from_expansion = 0    # for the saturation expansion-ratio signal
+    sim_trend: List[float] = []    # mean accepted similarity per productive round
+    stop_reason = "target_reached"
+
+    # Target-driven loop (no fixed round budget); guarded against runaway by the
+    # stall counter below and, optionally, an early saturation stop.
+    while len(pool) < num_queries:
         rounds += 1
         cycles_in_state += 1
 
@@ -333,6 +368,7 @@ def generate_workload(
         # --- Critical Agent: hybrid redundancy filter ---
         n_before = len(pool)
         redundant_this_round = 0
+        accepted_sims: List[float] = []
         for c in valid:
             sim = _hybrid_similarity(c["sql"], pool_sql)
             # expansion queries are judged more strictly (paper: stricter eval)
@@ -352,6 +388,9 @@ def generate_workload(
                           "max_pool_similarity": round(sim, 4)},
             })
             pool_sql.append(c["sql"])
+            accepted_sims.append(sim)
+            if state == "EXP":
+                accepted_from_expansion += 1
             if len(pool) >= num_queries:
                 break
 
@@ -359,12 +398,15 @@ def generate_workload(
         executability = (len(valid) / len(candidates)) if candidates else 0.0
         redundancy_rate = (redundant_this_round / len(valid)) if valid else 0.0
 
+        expansion_ratio = (accepted_from_expansion / len(pool)) if pool else 0.0
         schedule_log.append({
             "round": rounds, "state": state,
             "generated": len(cand_sql), "valid": len(valid),
             "accepted": accepted_this_round,
             "executability": round(executability, 3),
             "redundancy_rate": round(redundancy_rate, 3),
+            "expansion_ratio": round(expansion_ratio, 3),
+            "stall": stall,
         })
 
         # --- Management Agent: exploration/exploitation scheduling ---
@@ -375,9 +417,26 @@ def generate_workload(
             if redundancy_rate > 0.5 or executability < 0.4 or cycles_in_state >= expansion_cycles:
                 state, cycles_in_state = "GEN", 0
 
-        if not cand_sql and state == "GEN":
-            # avoid a stuck exploration loop
-            if rounds > 3 and accepted_this_round == 0 and len(pool) == 0:
+        # --- runaway guard: bail after N consecutive unproductive rounds ---
+        # (replaces the old fixed `max_rounds` budget; scales to any target).
+        if accepted_this_round > 0:
+            stall = 0
+        else:
+            stall += 1
+            if stall >= max_stall_rounds:
+                stop_reason = "stalled"
+                break
+
+        # --- optional saturation early-stop (paper Sec 5.2.6) ---
+        # Expansion Team dominates the pool AND the similarity of newly accepted
+        # queries is on a sustained upward trend => semantic saturation.
+        if saturation_stop and accepted_sims:
+            sim_trend.append(sum(accepted_sims) / len(accepted_sims))
+            window = sim_trend[-saturation_window:]
+            if (expansion_ratio >= saturation_expansion_ratio
+                    and len(window) >= saturation_window
+                    and _sustained_increase(window)):
+                stop_reason = "saturation"
                 break
 
     pool = pool[:num_queries]
@@ -398,6 +457,16 @@ def generate_workload(
         "scheduling": {"exploration_cycles": exploration_cycles,
                        "expansion_cycles": expansion_cycles,
                        "log": schedule_log},
+        "termination": {
+            "mode": "target-driven (no fixed round budget)",
+            "stop_reason": stop_reason,
+            "max_stall_rounds": max_stall_rounds,
+            "saturation_stop": saturation_stop,
+            "saturation_expansion_ratio": saturation_expansion_ratio,
+            "saturation_window": saturation_window,
+            "final_expansion_ratio": round(
+                (accepted_from_expansion / len(pool)) if pool else 0.0, 3),
+        },
         "table_coverage": dict(coverage),
         "counts": {
             "rounds": rounds,
