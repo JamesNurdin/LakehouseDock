@@ -128,6 +128,7 @@ import math
 import random
 import re
 import threading
+import os
 import time
 
 from collections import Counter, deque
@@ -876,6 +877,14 @@ _OUTPUT_SCHEMA = {
     },
 }
 
+# Opt-in Responses-API streaming (see generate_sql). Default OFF so local
+# OpenAI-compatible servers that lack Responses streaming keep working; set
+# QUERYDOCK_STREAM=1 to stream (needed to dodge remote-router 504s on long
+# high-reasoning calls, e.g. the Hugging Face router).
+USE_RESPONSES_STREAMING = os.environ.get("QUERYDOCK_STREAM", "0").strip().lower() not in (
+    "", "0", "false", "no", "off",
+)
+
 
 def generate_sql(
     client: OpenAI,
@@ -887,15 +896,24 @@ def generate_sql(
     temperature: float = 0.6,
 ) -> dict:
     def _call():
-        return client.responses.create(
+        kwargs = dict(
             model=model_name,
             instructions=INSTRUCTIONS_TEMPLATE,
             input=PROMPT_TEMPLATE.format(schema_context=schema_context, task=task),
-            reasoning={"effort": reasoning},
             text={"format": _OUTPUT_SCHEMA},
             temperature=temperature,
             store=False,
         )
+        # Streaming keeps the connection alive on long high-reasoning
+        # generations so a remote router (e.g. HF) doesn't 504. It is opt-in
+        # because many *local* OpenAI-compatible servers don't implement
+        # Responses-API streaming and raise AssertionError/IndexError in
+        # get_final_response(). Enable with env QUERYDOCK_STREAM=1 for HF;
+        # leave unset (default) for local / non-streaming endpoints.
+        if USE_RESPONSES_STREAMING:
+            with client.responses.stream(**kwargs) as stream:
+                return stream.get_final_response()
+        return client.responses.create(**kwargs)
 
     result = call_with_retry(_call)
     data = json.loads(result.output_text)
