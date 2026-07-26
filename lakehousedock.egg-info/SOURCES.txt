@@ -28,7 +28,11 @@ workload_generation/__init__.py
 workload_generation/common.py
 workload_generation/query_generator.py
 workload_generation/query_generator_v2.py
+workload_generation/query_generator_v3.py
+workload_generation/query_generator_v4.py
 workload_generation/sql_features.py
+workload_generation/analysis/__init__.py
+workload_generation/analysis/analysis.py
 workload_generation/baselines/__init__.py
 workload_generation/baselines/bootstrapping_lcm.py
 workload_generation/baselines/e2etune.py
