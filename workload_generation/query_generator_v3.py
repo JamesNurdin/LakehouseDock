@@ -606,7 +606,6 @@ def generate_query_batch(
             tracker=tracker,
             connected_fraction=connected_fraction,
         )
-        # A: EXPLAIN here (concurrently) -- validates + yields the plan signature
         if q.get("sql"):
             plan_json = _explain_plan_json(conn_factory, q["sql"])
             if plan_json is None:
