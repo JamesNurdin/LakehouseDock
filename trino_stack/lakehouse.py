@@ -50,18 +50,17 @@ from trino_stack.profile import NodeProfiler
 from trino_stack.resource_logger import NodeLogger
 from trino_stack.resource_profile import LakehouseResourceProfiler
 
-# query_generator (v7: plan-feedback generator with self-calibrating operator idf)
-from workload_generation.query_generator_v7 import (
+# query_generator (v7.1: online additive plan-feedback, no calibration)
+from workload_generation.query_generator_v71 import (
     load_schema,
     make_openai_client,
     warm_up_model,
-    warm_up_operator_idf,
     generate_query as generate_query_pipeline,
     generate_query_batch,
     write_workload_directory,
     fetch_table_columns,
     fetch_schema_table_columns,
-    DiversityTrackerV7,
+    DiversityTrackerV71,
 )
 
 @dataclass
@@ -686,7 +685,6 @@ class Lakehouse:
         generation_workers: int = 4,
         validation_workers: int = 4,
         plan_feedback: bool = True,
-        calibration_kwargs: dict | None = None,
     ) -> dict:
         schema_json = load_schema(schema)
     
@@ -714,34 +712,12 @@ class Lakehouse:
         started_at = datetime.now(timezone.utc)
         rng = random.Random(random_seed)
 
-        # One tracker is shared across calibration and every generation batch so
-        # the frozen operator-idf table + learned lever affinity (calibration)
-        # and the accumulating plan/schema coverage (generation) live together.
-        # plan_feedback=False leaves the tracker un-warm -> v7 == v6 exactly.
-        tracker = DiversityTrackerV7()
-        calibration_report = None
-
-        if plan_feedback:
-            if self.verbose:
-                print("Calibrating operator idf + lever affinity (unbiased warmup)")
-            calibration_report = warm_up_operator_idf(
-                conn_factory=conn_factory,
-                schema_json=schema_json,
-                catalog=catalog,
-                trino_schema=schema,
-                client_factory=client_factory,
-                model_name=model_name,
-                tracker=tracker,
-                temperature=temperature,
-                reasoning=reasoning,
-                min_tables=min_tables,
-                max_tables=max_tables,
-                random_seed=rng.randint(0, 10**9),
-                generation_workers=generation_workers,
-                ddl_cache=ddl_cache,
-                ddl_cache_lock=ddl_cache_lock,
-                **(calibration_kwargs or {}),
-            )
+        # One tracker is shared across every generation batch so the online
+        # plan-space coverage + lever->operator attribution accumulate over the
+        # whole workload. v7.1 needs no calibration phase; feedback is online and
+        # additive. plan_feedback=False disables steering -> v7.1 == v6 exactly.
+        tracker = DiversityTrackerV71()
+        tracker.feedback_enabled = plan_feedback
 
 
         if not validate:
@@ -779,13 +755,10 @@ class Lakehouse:
                 max_tables=max_tables,
                 random_seed=random_seed,
                 started_at=started_at,
-                calibration_report=calibration_report,
+                tracker=tracker,
                 extra_report_fields={
                     "reasoning":reasoning,
-                    "plan_feedback": {
-                        "enabled": plan_feedback,
-                        "tracker_warm": tracker.is_warm,
-                    },
+                    "plan_feedback_enabled": plan_feedback,
                     "validation": {
                         "enabled": False,
                     },
@@ -873,14 +846,11 @@ class Lakehouse:
             max_tables=max_tables,
             random_seed=random_seed,
             started_at=started_at,
-            calibration_report=calibration_report,
+            tracker=tracker,
             extra_report_fields=
             {
                 "reasoning":reasoning,
-                "plan_feedback": {
-                    "enabled": plan_feedback,
-                    "tracker_warm": tracker.is_warm,
-                },
+                "plan_feedback_enabled": plan_feedback,
                 "validation": {
                     "enabled": True,
                     "method": "EXPLAIN via Lakehouse.issue_query(save=False)",
