@@ -1,42 +1,62 @@
 WITH sales_agg AS (
-    SELECT
-        w.w_warehouse_name AS warehouse_name,
-        sm.sm_type AS ship_mode_type,
-        d_sold.d_year AS sales_year,
-        SUM(ws.ws_net_profit) AS total_profit,
-        SUM(ws.ws_quantity) AS total_qty,
-        AVG(ws.ws_net_profit) AS avg_profit,
-        CASE
-            WHEN SUM(ws.ws_net_profit) > 100000 THEN 'HIGH'
-            WHEN SUM(ws.ws_net_profit) > 50000 THEN 'MEDIUM'
-            ELSE 'LOW'
-        END AS profit_category
-    FROM web_sales ws
-    JOIN date_dim d_sold ON ws.ws_sold_date_sk = d_sold.d_date_sk
-    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
-    JOIN web_site ws_site ON ws.ws_web_site_sk = ws_site.web_site_sk
-    JOIN inventory inv ON inv.inv_warehouse_sk = w.w_warehouse_sk
-    JOIN date_dim d_inv ON inv.inv_date_sk = d_inv.d_date_sk
-    WHERE d_sold.d_year = 2001
-      AND ws_site.web_gmt_offset = -6.00
-      AND sm.sm_type = 'AIR'
-      AND w.w_state = 'CA'
-      AND inv.inv_quantity_on_hand > 0
-      AND ws.ws_net_profit > 0
-      AND ws_site.web_mkt_class LIKE '%New%'
-    GROUP BY w.w_warehouse_name, sm.sm_type, d_sold.d_year
+   SELECT i.i_item_sk,
+          i.i_product_name,
+          SUM(cs.cs_ext_sales_price) AS total_sales,
+          COUNT(*) AS sales_cnt
+   FROM catalog_sales cs
+   JOIN item i ON cs.cs_item_sk = i.i_item_sk
+   JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+   WHERE d.d_year = 2022
+     AND regexp_like(i.i_product_name, '^A.*')
+     AND regexp_like(i.i_item_desc, '[A-Z]{3}')
+   GROUP BY i.i_item_sk, i.i_product_name
+),
+returns_agg AS (
+   SELECT i.i_item_sk,
+          i.i_product_name,
+          SUM(cr.cr_return_amount) AS total_returns,
+          COUNT(*) AS return_cnt
+   FROM catalog_returns cr
+   JOIN item i ON cr.cr_item_sk = i.i_item_sk
+   JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+   JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+   WHERE d.d_year = 2022
+     AND NOT regexp_like(r.r_reason_desc, 'defect')
+   GROUP BY i.i_item_sk, i.i_product_name
+),
+combined AS (
+   SELECT s.i_item_sk,
+          s.i_product_name,
+          s.total_sales,
+          s.sales_cnt,
+          0 AS total_returns,
+          0 AS return_cnt,
+          'sales' AS src
+   FROM sales_agg s
+   UNION ALL
+   SELECT r.i_item_sk,
+          r.i_product_name,
+          0 AS total_sales,
+          0 AS sales_cnt,
+          r.total_returns,
+          r.return_cnt,
+          'returns' AS src
+   FROM returns_agg r
 )
-SELECT
-    warehouse_name,
-    profit_category,
-    total_profit,
-    total_qty,
-    avg_profit,
-    CASE
-        WHEN total_profit > (SELECT AVG(total_profit) FROM sales_agg) THEN 'ABOVE_AVG'
-        ELSE 'BELOW_AVG'
-    END AS profit_vs_avg
-FROM sales_agg
-ORDER BY total_profit DESC
+SELECT c.i_item_sk,
+       c.i_product_name,
+       c.total_sales,
+       c.sales_cnt,
+       c.total_returns,
+       c.return_cnt,
+       c.src
+FROM combined c
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM catalog_returns cr2
+    JOIN reason r2 ON cr2.cr_reason_sk = r2.r_reason_sk
+    WHERE cr2.cr_item_sk = c.i_item_sk
+      AND regexp_like(r2.r_reason_desc, 'damage')
+)
+ORDER BY c.total_sales DESC, c.total_returns DESC
 LIMIT 100

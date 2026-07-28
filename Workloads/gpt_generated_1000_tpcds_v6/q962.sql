@@ -1,46 +1,113 @@
-WITH filtered_sales AS (
+WITH catalog_agg AS (
    SELECT
-       ws.ws_item_sk,
-       ws.ws_ext_sales_price,
-       i.i_item_id,
-       i.i_product_name,
-       i.i_class_id,
-       i.i_rec_start_date,
-       ca_bill.ca_city AS ca_city,
-       ca_ship.ca_state AS ca_state
-   FROM web_sales ws
-   JOIN item i ON ws.ws_item_sk = i.i_item_sk
-   JOIN customer_address ca_bill ON ws.ws_bill_addr_sk = ca_bill.ca_address_sk
-   JOIN customer_address ca_ship ON ws.ws_ship_addr_sk = ca_ship.ca_address_sk
-   WHERE i.i_class_id IN (2, 8, 13)
-     AND ca_bill.ca_city = 'Springfield'
-     AND ca_ship.ca_state = 'CA'
-     AND i.i_rec_start_date BETWEEN DATE '1999-01-01' AND DATE '2002-12-31'
-     AND ws.ws_ext_sales_price > 100
-     AND EXISTS (
-         SELECT 1
-         FROM inventory inv
-         WHERE inv.inv_item_sk = i.i_item_sk
-           AND inv.inv_quantity_on_hand > 100
-     )
+       d.d_year AS year,
+       r.r_reason_desc AS reason,
+       SUM(cs.cs_net_paid) AS sales_amount,
+       SUM(cr.cr_net_loss) AS return_loss,
+       ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(cs.cs_net_paid) DESC) AS rank
+   FROM catalog_sales cs
+   JOIN catalog_returns cr
+     ON cs.cs_item_sk = cr.cr_item_sk
+    AND cs.cs_order_number = cr.cr_order_number
+   JOIN date_dim d
+     ON cs.cs_sold_date_sk = d.d_date_sk
+   JOIN date_dim d_ret
+     ON cr.cr_returned_date_sk = d_ret.d_date_sk
+   JOIN catalog_page cp
+     ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+   JOIN warehouse w
+     ON cs.cs_warehouse_sk = w.w_warehouse_sk
+   JOIN reason r
+     ON cr.cr_reason_sk = r.r_reason_sk
+   JOIN customer_demographics cd
+     ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+   JOIN household_demographics hd
+     ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+   JOIN income_band ib
+     ON hd.hd_income_band_sk = ib.ib_income_band_sk
+   GROUP BY d.d_year, r.r_reason_desc
 ),
-aggregated AS (
+store_agg AS (
    SELECT
-       i_item_id,
-       i_product_name,
-       i_class_id,
-       ca_city,
-       SUM(ws_ext_sales_price) AS total_sales
-   FROM filtered_sales
-   GROUP BY i_item_id, i_product_name, i_class_id, ca_city
+       d.d_year AS year,
+       r.r_reason_desc AS reason,
+       SUM(sr.sr_return_amt) AS store_return_amount,
+       SUM(sr.sr_net_loss) AS store_net_loss,
+       ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(sr.sr_return_amt) DESC) AS rank
+   FROM store_returns sr
+   JOIN date_dim d
+     ON sr.sr_returned_date_sk = d.d_date_sk
+   JOIN reason r
+     ON sr.sr_reason_sk = r.r_reason_sk
+   GROUP BY d.d_year, r.r_reason_desc
+),
+web_agg AS (
+   SELECT
+       d.d_year AS year,
+       r.r_reason_desc AS reason,
+       SUM(wr.wr_return_amt) AS web_return_amount,
+       SUM(wr.wr_net_loss) AS web_net_loss,
+       ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(wr.wr_return_amt) DESC) AS rank
+   FROM web_returns wr
+   JOIN date_dim d
+     ON wr.wr_returned_date_sk = d.d_date_sk
+   JOIN reason r
+     ON wr.wr_reason_sk = r.r_reason_sk
+   GROUP BY d.d_year, r.r_reason_desc
+),
+inventory_agg AS (
+   SELECT
+       d.d_year AS year,
+       w.w_warehouse_name AS reason,
+       NULL AS sales_amount,
+       NULL AS return_loss,
+       SUM(inv.inv_quantity_on_hand) AS store_return_amount,
+       NULL AS web_return_amount,
+       ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(inv.inv_quantity_on_hand) DESC) AS rank
+   FROM inventory inv
+   JOIN date_dim d
+     ON inv.inv_date_sk = d.d_date_sk
+   JOIN warehouse w
+     ON inv.inv_warehouse_sk = w.w_warehouse_sk
+   GROUP BY d.d_year, w.w_warehouse_name
+),
+web_site_agg AS (
+   SELECT
+       d.d_year AS year,
+       ws.web_name AS reason,
+       NULL AS sales_amount,
+       NULL AS return_loss,
+       NULL AS store_return_amount,
+       NULL AS web_return_amount,
+       ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY COUNT(*) DESC) AS rank
+   FROM web_site ws
+   JOIN date_dim d
+     ON ws.web_open_date_sk = d.d_date_sk
+   GROUP BY d.d_year, ws.web_name
+),
+combined AS (
+   SELECT year, reason, sales_amount, return_loss, NULL AS store_return_amount, NULL AS web_return_amount, rank FROM catalog_agg
+   UNION ALL
+   SELECT year, reason, NULL, NULL, store_return_amount, NULL, rank FROM store_agg
+   UNION ALL
+   SELECT year, reason, NULL, NULL, NULL, web_return_amount, rank FROM web_agg
+   UNION ALL
+   SELECT year, reason, NULL, NULL, store_return_amount, NULL, rank FROM inventory_agg
+   UNION ALL
+   SELECT year, reason, NULL, NULL, NULL, NULL, rank FROM web_site_agg
 )
 SELECT
-    a.i_item_id,
-    a.i_product_name,
-    a.i_class_id,
-    a.ca_city,
-    a.total_sales,
-    RANK() OVER (ORDER BY a.total_sales DESC) AS sales_rank
-FROM aggregated a
-ORDER BY sales_rank
+   year,
+   reason,
+   SUM(sales_amount) AS total_sales,
+   SUM(return_loss) AS total_return_loss,
+   SUM(COALESCE(store_return_amount, 0) + COALESCE(web_return_amount, 0)) AS total_returns,
+   CASE
+       WHEN SUM(COALESCE(store_return_amount, 0)) > SUM(COALESCE(web_return_amount, 0)) THEN 'STORE'
+       ELSE 'WEB'
+   END AS dominant_return_source,
+   MAX(rank) AS max_rank
+FROM combined
+GROUP BY GROUPING SETS ((year, reason), (year), ())
+ORDER BY year DESC, total_sales DESC
 LIMIT 100

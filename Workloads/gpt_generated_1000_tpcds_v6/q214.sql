@@ -1,27 +1,48 @@
+WITH cust_hh AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_birth_year,
+        c.c_birth_month,
+        c.c_birth_day,
+        c.c_preferred_cust_flag,
+        c.c_first_shipto_date_sk,
+        hd.hd_buy_potential,
+        hd.hd_dep_count,
+        hd.hd_vehicle_count
+    FROM tpcds.customer c
+    JOIN tpcds.household_demographics hd
+      ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE c.c_first_shipto_date_sk BETWEEN 2450540 AND 2452253
+      AND c.c_birth_year BETWEEN 1970 AND 1995
+      AND c.c_birth_month IN (1, 2, 3, 4, 5, 6)
+      AND c.c_birth_day IN (10, 12, 22, 23, 28)
+      AND c.c_preferred_cust_flag = 'Y'
+      AND hd.hd_dep_count <= 5
+      AND hd.hd_buy_potential IN ('0-500', '501-1000', '5001-10000')
+), agg AS (
+    SELECT
+        hd_buy_potential,
+        COUNT(DISTINCT c_customer_sk) AS customer_cnt,
+        AVG(hd_vehicle_count) AS avg_vehicle_count,
+        MIN(c_birth_year) AS min_birth_year,
+        MAX(c_birth_year) AS max_birth_year,
+        SUM(c_first_shipto_date_sk) AS sum_shipto_key
+    FROM cust_hh
+    GROUP BY hd_buy_potential
+)
 SELECT
-    cc.cc_market_manager,
-    sm.sm_type,
-    SUM(cs.cs_net_profit) AS total_net_profit,
-    AVG(cs.cs_sales_price) AS avg_sales_price,
-    COUNT(DISTINCT cs.cs_order_number) AS distinct_orders,
-    MIN(cs.cs_sold_date_sk) AS min_sold_date_sk,
-    MAX(cs.cs_sold_date_sk) AS max_sold_date_sk
-FROM catalog_sales cs
-JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
-JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
-JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-WHERE
-    cc.cc_rec_start_date >= DATE '2001-01-01'
-    AND cc.cc_rec_end_date <= DATE '2001-12-31'
-    AND sm.sm_carrier = 'MSC'
-    AND sm.sm_type = 'EXPRESS'
-    AND cp.cp_catalog_page_number BETWEEN 10 AND 20
-    AND cc.cc_street_name = 'Sycamore'
-GROUP BY
-    cc.cc_market_manager,
-    sm.sm_type
-HAVING
-    SUM(cs.cs_net_profit) > 10000
-ORDER BY total_net_profit DESC
+    hd_buy_potential,
+    customer_cnt,
+    avg_vehicle_count,
+    min_birth_year,
+    max_birth_year,
+    sum_shipto_key,
+    SUM(customer_cnt) OVER (
+        PARTITION BY hd_buy_potential
+        ORDER BY customer_cnt DESC
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS cumulative_customer_cnt,
+    RANK() OVER (ORDER BY customer_cnt DESC) AS rank_by_customers
+FROM agg
+ORDER BY customer_cnt DESC
 LIMIT 100

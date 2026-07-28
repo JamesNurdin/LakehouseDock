@@ -1,38 +1,46 @@
-WITH inventory_agg AS (
-    SELECT inv_warehouse_sk,
-           SUM(inv_quantity_on_hand) AS total_qty
-    FROM inventory
-    GROUP BY inv_warehouse_sk
+WITH agg_store_sales AS (
+    SELECT ss_cdemo_sk,
+           SUM(ss_net_paid) AS total_store_sales,
+           SUM(ss_net_profit) AS total_store_profit
+    FROM store_sales
+    GROUP BY ss_cdemo_sk
+),
+agg_web_sales AS (
+    SELECT ws_bill_cdemo_sk,
+           SUM(ws_net_paid) AS total_web_sales,
+           SUM(ws_net_profit) AS total_web_profit
+    FROM web_sales
+    GROUP BY ws_bill_cdemo_sk
 )
 SELECT
-    hd.hd_buy_potential,
-    w.w_state,
-    ia.total_qty,
-    COUNT(DISTINCT ws.ws_order_number) AS web_orders,
-    SUM(ws.ws_net_profit) AS web_profit,
-    SUM(ss.ss_net_profit) AS store_profit,
-    AVG(ws.ws_net_paid_inc_tax) AS avg_web_paid
-FROM inventory_agg ia
-JOIN warehouse w
-    ON ia.inv_warehouse_sk = w.w_warehouse_sk
-JOIN web_sales ws
-    ON ws.ws_warehouse_sk = w.w_warehouse_sk
-JOIN household_demographics hd
-    ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-JOIN web_returns wr
-    ON wr.wr_order_number = ws.ws_order_number
-JOIN reason r
-    ON wr.wr_reason_sk = r.r_reason_sk
-JOIN web_page wp
-    ON ws.ws_web_page_sk = wp.wp_web_page_sk
-JOIN store_sales ss
-    ON ss.ss_hdemo_sk = hd.hd_demo_sk
-WHERE ws.ws_sold_date_sk BETWEEN 2450000 AND 2453650
-  AND ws.ws_quantity > 1
-  AND ss.ss_list_price > 20
-  AND w.w_state IN ('CA', 'TX')
-  AND r.r_reason_desc LIKE '%size%'
-GROUP BY hd.hd_buy_potential, w.w_state, ia.total_qty
-HAVING SUM(ws.ws_net_profit) > 1000
-ORDER BY web_profit DESC
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.cd_education_status,
+    cd.cd_purchase_estimate,
+    ss.total_store_sales,
+    ws.total_web_sales,
+    (COALESCE(ss.total_store_sales, 0) + COALESCE(ws.total_web_sales, 0)) AS total_combined_sales,
+    RANK() OVER (PARTITION BY cd.cd_education_status ORDER BY (COALESCE(ss.total_store_sales, 0) + COALESCE(ws.total_web_sales, 0)) DESC) AS sales_rank,
+    r.r_reason_desc,
+    sm.sm_ship_mode_id,
+    sm.sm_code,
+    cr.cr_return_amount,
+    cr.cr_returned_date_sk
+FROM customer_demographics cd
+LEFT JOIN agg_store_sales ss
+    ON cd.cd_demo_sk = ss.ss_cdemo_sk
+LEFT JOIN agg_web_sales ws
+    ON cd.cd_demo_sk = ws.ws_bill_cdemo_sk
+LEFT JOIN catalog_returns cr
+    ON cd.cd_demo_sk = cr.cr_refunded_cdemo_sk
+LEFT JOIN reason r
+    ON cr.cr_reason_sk = r.r_reason_sk
+LEFT JOIN ship_mode sm
+    ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+WHERE cd.cd_education_status IN ('College', 'Advanced Degree')
+  AND cd.cd_purchase_estimate > 3000
+  AND sm.sm_code = 'AIR'
+  AND cr.cr_return_amount > 1000
+  AND r.r_reason_desc LIKE '%defect%'
+ORDER BY sales_rank, cd.cd_demo_sk
 LIMIT 100

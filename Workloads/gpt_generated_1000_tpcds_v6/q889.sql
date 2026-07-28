@@ -1,41 +1,39 @@
-WITH sales_ranked AS (
+WITH filtered_sales AS (
     SELECT
-        s.s_store_id,
-        s.s_store_name,
-        i.i_product_name,
-        i.i_class,
-        ss.ss_net_profit,
-        ss.ss_ext_discount_amt,
-        ROW_NUMBER() OVER (PARTITION BY s.s_store_id ORDER BY ss.ss_net_profit DESC) AS profit_rank
-    FROM tpcds.store_sales ss
-    JOIN tpcds.store s
-        ON ss.ss_store_sk = s.s_store_sk
-    JOIN tpcds.item i
-        ON ss.ss_item_sk = i.i_item_sk
-    WHERE ss.ss_net_profit > 1000
-      AND ss.ss_wholesale_cost IN (21.27, 86.27, 79.71)
-      AND i.i_class IN ('pants', 'dresses')
+        cs.cs_sold_time_sk,
+        cs.cs_warehouse_sk,
+        cs.cs_net_paid_inc_ship,
+        cs.cs_wholesale_cost,
+        cs.cs_order_number,
+        cs.cs_quantity,
+        cs.cs_ext_sales_price,
+        cs.cs_ext_discount_amt
+    FROM catalog_sales cs
+    WHERE cs.cs_net_paid_inc_ship > 5000
+      AND cs.cs_wholesale_cost < 80
+      AND cs.cs_quantity >= 1
 )
 SELECT
-    s_store_id,
-    s_store_name,
-    i_product_name,
-    ss_net_profit,
-    profit_rank
-FROM sales_ranked
-WHERE profit_rank <= 5
-
-UNION ALL
-
-SELECT
-    s_store_id,
-    s_store_name,
-    i_product_name,
-    ss_net_profit,
-    profit_rank
-FROM sales_ranked
-WHERE ss_ext_discount_amt > 500
-  AND i_class = 'dresses'
-
-ORDER BY ss_net_profit DESC
+    w.w_city,
+    w.w_state,
+    t.t_hour,
+    COUNT(DISTINCT s.cs_order_number)                     AS order_cnt,
+    SUM(s.cs_net_paid_inc_ship)                         AS total_paid_inc_ship,
+    AVG(s.cs_wholesale_cost)                             AS avg_wholesale_cost,
+    SUM(COALESCE(i.inv_quantity_on_hand, 0))            AS total_inventory_on_hand,
+    MIN(s.cs_ext_discount_amt)                          AS min_discount,
+    MAX(s.cs_ext_sales_price)                           AS max_sales_price
+FROM filtered_sales s
+JOIN time_dim t
+  ON s.cs_sold_time_sk = t.t_time_sk
+JOIN warehouse w
+  ON s.cs_warehouse_sk = w.w_warehouse_sk
+LEFT OUTER JOIN inventory i
+  ON i.inv_warehouse_sk = w.w_warehouse_sk
+  AND i.inv_date_sk = 2451046
+  AND i.inv_quantity_on_hand > 500
+WHERE w.w_city = 'Salem'
+  AND w.w_gmt_offset = -5.00
+GROUP BY w.w_city, w.w_state, t.t_hour
+ORDER BY total_paid_inc_ship DESC
 LIMIT 100

@@ -1,68 +1,49 @@
-WITH base AS (
+WITH filtered_customers AS (
     SELECT
-        cr.cr_return_amount,
-        cr.cr_return_tax,
-        cr.cr_return_quantity,
-        cr.cr_net_loss,
-        d.d_year,
-        d.d_week_seq,
-        hd_ref.hd_buy_potential AS refunded_buy_potential,
-        hd_ref.hd_vehicle_count AS refunded_vehicle_cnt,
-        hd_ret.hd_buy_potential AS returning_buy_potential,
-        hd_ret.hd_vehicle_count AS returning_vehicle_cnt,
-        s.s_manager,
-        s.s_company_name,
-        w.web_class,
-        w.web_name
-    FROM catalog_returns cr
-    JOIN date_dim d
-        ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN household_demographics hd_ref
-        ON cr.cr_refunded_hdemo_sk = hd_ref.hd_demo_sk
-    JOIN household_demographics hd_ret
-        ON cr.cr_returning_hdemo_sk = hd_ret.hd_demo_sk
-    JOIN store s
-        ON s.s_closed_date_sk = d.d_date_sk
-    JOIN web_site w
-        ON w.web_open_date_sk = d.d_date_sk
-    WHERE
-        d.d_year = 2001
-        AND d.d_week_seq BETWEEN 6 AND 12
-        AND hd_ref.hd_buy_potential = '501-1000'
-        AND hd_ref.hd_vehicle_count >= 1
-        AND s.s_manager = 'William Ward'
-        AND w.web_class = 'Retail'
-        AND cr.cr_return_quantity > 0
+        c_customer_sk,
+        c_salutation,
+        c_first_name,
+        c_last_name,
+        c_email_address,
+        regexp_extract(c_email_address, '@([^.]*)\\.', 1) AS email_domain
+    FROM tpcds.customer
+    WHERE regexp_like(c_email_address, '^.+@example\\.com$')
+      AND c_salutation LIKE 'Mr.%'
 ),
-agg AS (
+returns_joined AS (
     SELECT
-        d_year,
-        s_manager,
-        web_class,
-        refunded_buy_potential,
-        SUM(cr_return_amount) AS total_return_amount,
-        AVG(cr_return_tax) AS avg_return_tax,
-        COUNT(*) AS return_cnt,
-        MIN(cr_return_quantity) AS min_quantity,
-        MAX(cr_net_loss) AS max_net_loss
-    FROM base
-    GROUP BY
-        d_year,
-        s_manager,
-        web_class,
-        refunded_buy_potential
+        wr.wr_refunded_customer_sk,
+        wr.wr_returned_date_sk,
+        wr.wr_return_amt,
+        wr.wr_return_quantity
+    FROM tpcds.web_returns wr
+    JOIN tpcds.date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
+    WHERE d.d_year = 2002
+),
+inventory_agg AS (
+    SELECT
+        inv_date_sk,
+        SUM(inv_quantity_on_hand) AS total_inventory_qty
+    FROM tpcds.inventory
+    GROUP BY inv_date_sk
 )
 SELECT
-    d_year,
-    s_manager,
-    web_class,
-    refunded_buy_potential,
-    total_return_amount,
-    avg_return_tax,
-    return_cnt,
-    min_quantity,
-    max_net_loss,
-    SUM(total_return_amount) OVER (PARTITION BY s_manager ORDER BY total_return_amount DESC) AS manager_cumulative_amount
-FROM agg
+    fc.c_salutation,
+    CONCAT(fc.c_first_name, ' ', fc.c_last_name) AS full_name,
+    fc.email_domain,
+    d.d_year,
+    SUM(rj.wr_return_amt) AS total_return_amount,
+    SUM(rj.wr_return_quantity) AS total_return_qty,
+    COUNT(DISTINCT rj.wr_returned_date_sk) AS distinct_return_days,
+    SUM(i.total_inventory_qty) AS total_inventory_on_return_dates
+FROM filtered_customers fc
+JOIN returns_joined rj ON fc.c_customer_sk = rj.wr_refunded_customer_sk
+JOIN tpcds.date_dim d ON rj.wr_returned_date_sk = d.d_date_sk
+LEFT JOIN inventory_agg i ON i.inv_date_sk = rj.wr_returned_date_sk
+GROUP BY
+    fc.c_salutation,
+    CONCAT(fc.c_first_name, ' ', fc.c_last_name),
+    fc.email_domain,
+    d.d_year
 ORDER BY total_return_amount DESC
 LIMIT 100

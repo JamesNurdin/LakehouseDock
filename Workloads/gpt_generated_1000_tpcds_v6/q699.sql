@@ -1,92 +1,50 @@
-WITH sales_agg AS (
-    SELECT
-        ws.ws_order_number,
-        ws.ws_sold_date_sk,
-        d_sold.d_year,
-        ws.ws_warehouse_sk,
-        w.w_warehouse_name,
-        ws.ws_ship_mode_sk,
-        sm.sm_type,
-        ws.ws_web_site_sk,
-        site.web_name,
-        ws.ws_promo_sk,
-        p.p_promo_name,
-        ws.ws_web_page_sk,
-        SUM(ws.ws_ext_sales_price) AS total_sales,
-        SUM(ws.ws_net_profit) AS total_profit,
-        COUNT(*) AS sales_cnt
-    FROM web_sales ws
-    JOIN date_dim d_sold
-        ON ws.ws_sold_date_sk = d_sold.d_date_sk
-    JOIN warehouse w
-        ON ws.ws_warehouse_sk = w.w_warehouse_sk
-    JOIN ship_mode sm
-        ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN web_site site
-        ON ws.ws_web_site_sk = site.web_site_sk
-    JOIN promotion p
-        ON ws.ws_promo_sk = p.p_promo_sk
-    JOIN web_page wp
-        ON ws.ws_web_page_sk = wp.wp_web_page_sk
-    WHERE d_sold.d_year BETWEEN 2001 AND 2002
-      AND w.w_state IN ('CA', 'TX', 'NY')
-      AND sm.sm_type = 'AIR'
-      AND p.p_channel_tv = 'Y'
-      AND site.web_class = 'Unknown'
-      AND ws.ws_quantity > 1
-      AND wp.wp_type = 'Content'
-    GROUP BY
-        ws.ws_order_number,
-        ws.ws_sold_date_sk,
-        d_sold.d_year,
-        ws.ws_warehouse_sk,
-        w.w_warehouse_name,
-        ws.ws_ship_mode_sk,
-        sm.sm_type,
-        ws.ws_web_site_sk,
-        site.web_name,
-        ws.ws_promo_sk,
-        p.p_promo_name,
-        ws.ws_web_page_sk
-),
-returns_agg AS (
-    SELECT
-        sr.sr_ticket_number,
-        sr.sr_returned_date_sk,
-        d_ret.d_year AS return_year,
-        SUM(sr.sr_return_amt) AS total_return_amt,
-        COUNT(*) AS return_cnt
-    FROM store_returns sr
-    JOIN date_dim d_ret
-        ON sr.sr_returned_date_sk = d_ret.d_date_sk
-    WHERE d_ret.d_year = 2001
-      AND sr.sr_return_quantity > 0
-    GROUP BY
-        sr.sr_ticket_number,
-        sr.sr_returned_date_sk,
-        d_ret.d_year
+WITH sales_enriched AS (
+   SELECT
+      ss.ss_ticket_number,
+      ss.ss_sold_date_sk,
+      d.d_year,
+      i.i_category,
+      i.i_brand,
+      i.i_brand_id,
+      c.c_customer_id,
+      c.c_customer_sk,
+      c.c_birth_month,
+      p.p_promo_name,
+      ss.ss_quantity,
+      ss.ss_ext_sales_price,
+      CASE WHEN p.p_discount_active = 'Y' THEN ss.ss_ext_sales_price * 0.9 ELSE ss.ss_ext_sales_price END AS adjusted_sales,
+      wr.wr_return_quantity,
+      wp.wp_autogen_flag,
+      ws.web_name
+   FROM store_sales ss
+   JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+   JOIN item i ON ss.ss_item_sk = i.i_item_sk
+   JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+   JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+   LEFT JOIN web_returns wr ON wr.wr_item_sk = ss.ss_item_sk AND wr.wr_returned_date_sk = ss.ss_sold_date_sk
+   LEFT JOIN web_page wp ON wp.wp_customer_sk = ss.ss_customer_sk AND wp.wp_creation_date_sk = ss.ss_sold_date_sk
+   LEFT JOIN web_site ws ON ws.web_open_date_sk = ss.ss_sold_date_sk
+   WHERE d.d_year BETWEEN 2000 AND 2002
+     AND i.i_brand_id IN (101, 102, 103)
+     AND c.c_birth_month BETWEEN 4 AND 8
+     AND (wp.wp_autogen_flag = 'Y' OR wp.wp_autogen_flag IS NULL)
 )
 SELECT
-    s.d_year,
-    s.w_warehouse_name,
-    s.sm_type,
-    s.web_name,
-    s.p_promo_name,
-    s.total_sales,
-    s.total_profit,
-    s.sales_cnt,
-    COALESCE(r.total_return_amt, 0) AS total_return_amt,
-    COALESCE(r.return_cnt, 0) AS return_cnt,
-    (s.total_sales - COALESCE(r.total_return_amt, 0)) AS net_sales_after_returns,
-    CASE WHEN s.total_sales > 100000 THEN 'High' ELSE 'Normal' END AS sales_category
-FROM sales_agg s
-LEFT OUTER JOIN returns_agg r
-    ON s.ws_order_number = r.sr_ticket_number
+   se.i_category,
+   se.i_brand,
+   SUM(se.adjusted_sales) AS total_adj_sales,
+   COUNT(*) AS sales_cnt,
+   CASE WHEN SUM(se.adjusted_sales) > 50000 THEN 'HIGH' ELSE 'LOW' END AS sales_level,
+   ROW_NUMBER() OVER (PARTITION BY se.i_category ORDER BY SUM(se.adjusted_sales) DESC) AS category_rank
+FROM sales_enriched se
 WHERE EXISTS (
     SELECT 1
-    FROM web_page wp2
-    WHERE wp2.wp_web_page_sk = s.ws_web_page_sk
-      AND wp2.wp_type = 'Content'
+    FROM call_center cc
+    JOIN date_dim dcc ON cc.cc_closed_date_sk = dcc.d_date_sk
+    WHERE dcc.d_date_sk = se.ss_sold_date_sk
+      AND cc.cc_state = 'CA'
 )
-ORDER BY s.total_sales DESC
+GROUP BY se.i_category, se.i_brand
+HAVING SUM(se.adjusted_sales) > 50000
+ORDER BY total_adj_sales DESC
 LIMIT 100

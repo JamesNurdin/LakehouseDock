@@ -1,77 +1,71 @@
-WITH base AS (
-    SELECT
-        cr.cr_returned_date_sk,
-        cr.cr_returned_time_sk,
-        cr.cr_item_sk,
-        cr.cr_refunded_customer_sk,
-        cr.cr_returning_customer_sk,
-        cr.cr_ship_mode_sk,
-        cr.cr_warehouse_sk,
-        cr.cr_return_quantity,
-        cr.cr_return_amount,
-        cr.cr_return_tax,
-        cr.cr_return_amt_inc_tax,
-        cr.cr_fee,
-        cr.cr_return_ship_cost,
-        cr.cr_refunded_cash,
-        cr.cr_reversed_charge,
-        cr.cr_store_credit,
-        cr.cr_net_loss,
-        cr.cr_order_number,
-        d.d_year,
-        d.d_month_seq,
-        d.d_date,
-        t.t_hour,
-        sm.sm_type,
-        w.w_state,
-        w.w_city,
-        s.s_state,
-        s.s_gmt_offset,
-        p.p_discount_active
-    FROM catalog_returns cr
-    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN time_dim t ON cr.cr_returned_time_sk = t.t_time_sk
-    JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
-    JOIN store s ON s.s_closed_date_sk = d.d_date_sk
-    JOIN promotion p ON p.p_start_date_sk = d.d_date_sk
-    JOIN inventory inv ON inv.inv_date_sk = d.d_date_sk AND inv.inv_warehouse_sk = w.w_warehouse_sk
-    JOIN customer c_ref ON cr.cr_refunded_customer_sk = c_ref.c_customer_sk
-    JOIN customer c_ret ON cr.cr_returning_customer_sk = c_ret.c_customer_sk
-    WHERE d.d_year = 2001
-      AND w.w_city = 'Oak Ninth'
-      AND s.s_gmt_offset = -8.00
-      AND t.t_hour BETWEEN 12 AND 14
-      AND p.p_discount_active = 'Y'
-),
-agg AS (
-    SELECT
-        d_year,
-        w_state,
-        sm_type,
-        SUM(cr_return_amount) AS total_return_amount,
-        COUNT(DISTINCT cr_order_number) AS distinct_orders,
-        AVG(cr_return_tax) AS avg_return_tax,
-        MIN(cr_return_quantity) AS min_quantity,
-        MAX(cr_return_amt_inc_tax) AS max_amount_inc_tax
-    FROM base
-    GROUP BY GROUPING SETS (
-        (d_year, w_state, sm_type),
-        (d_year, w_state),
-        (d_year),
-        ()
-    )
+WITH inventory_agg AS (
+    SELECT inv_item_sk,
+           SUM(inv_quantity_on_hand) AS total_on_hand
+    FROM inventory
+    WHERE inv_quantity_on_hand > 0
+    GROUP BY inv_item_sk
 )
 SELECT
-    d_year,
-    w_state,
-    sm_type,
-    CASE WHEN total_return_amount > 10000 THEN 'HIGH' ELSE 'LOW' END AS return_category,
-    total_return_amount,
-    distinct_orders,
-    avg_return_tax,
-    min_quantity,
-    max_amount_inc_tax
-FROM agg
-ORDER BY d_year DESC, w_state, sm_type
+    s.s_store_name,
+    i.i_item_id,
+    i.i_brand,
+    hd.hd_vehicle_count,
+    ib.ib_upper_bound,
+    p.p_promo_name,
+    td.t_hour,
+    SUM(ss.ss_net_paid) AS total_store_sales,
+    SUM(sr.sr_return_amt) AS total_store_returns,
+    SUM(ws.ws_net_paid) AS total_web_sales,
+    SUM(wr.wr_return_amt) AS total_web_returns,
+    inventory_agg.total_on_hand,
+    COUNT(DISTINCT ss.ss_ticket_number) AS distinct_tickets
+FROM store_sales ss
+JOIN store s
+  ON ss.ss_store_sk = s.s_store_sk
+JOIN item i
+  ON ss.ss_item_sk = i.i_item_sk
+JOIN customer c
+  ON ss.ss_customer_sk = c.c_customer_sk
+JOIN customer_address ca
+  ON ss.ss_addr_sk = ca.ca_address_sk
+JOIN household_demographics hd
+  ON ss.ss_hdemo_sk = hd.hd_demo_sk
+JOIN income_band ib
+  ON hd.hd_income_band_sk = ib.ib_income_band_sk
+JOIN promotion p
+  ON ss.ss_promo_sk = p.p_promo_sk
+JOIN time_dim td
+  ON ss.ss_sold_time_sk = td.t_time_sk
+LEFT JOIN store_returns sr
+  ON sr.sr_ticket_number = ss.ss_ticket_number
+ AND sr.sr_item_sk = ss.ss_item_sk
+LEFT JOIN reason r
+  ON sr.sr_reason_sk = r.r_reason_sk
+LEFT JOIN web_sales ws
+  ON ws.ws_item_sk = ss.ss_item_sk
+ AND ws.ws_bill_customer_sk = c.c_customer_sk
+LEFT JOIN web_page wp
+  ON ws.ws_web_page_sk = wp.wp_web_page_sk
+LEFT JOIN web_returns wr
+  ON wr.wr_order_number = ws.ws_order_number
+ AND wr.wr_item_sk = ws.ws_item_sk
+LEFT JOIN inventory_agg
+  ON inventory_agg.inv_item_sk = i.i_item_sk
+WHERE
+    s.s_market_desc LIKE '%Architects%'
+  AND s.s_number_employees >= 220
+  AND hd.hd_vehicle_count >= 1
+  AND ib.ib_upper_bound <= 110000
+  AND p.p_discount_active = 'Y'
+  AND td.t_hour BETWEEN 9 AND 17
+GROUP BY
+    s.s_store_name,
+    i.i_item_id,
+    i.i_brand,
+    hd.hd_vehicle_count,
+    ib.ib_upper_bound,
+    p.p_promo_name,
+    td.t_hour,
+    inventory_agg.total_on_hand
+ORDER BY total_store_sales DESC
 LIMIT 100

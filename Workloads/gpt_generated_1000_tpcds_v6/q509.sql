@@ -1,34 +1,49 @@
-WITH filtered_dates AS (
-    SELECT d_date_sk, d_year
-    FROM date_dim
-    WHERE d_year BETWEEN 2000 AND 2002
+/* Goal: Compare daily total amounts from catalog returns, web returns, and web sales for the year 2001, rank each source by amount per day, and list the top 100 records. */
+WITH catalog_ret AS (
+    SELECT d.d_date AS dt,
+           SUM(cr.cr_return_amount) AS total_amount
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    WHERE d.d_year = 2001
+    GROUP BY d.d_date
+),
+web_ret AS (
+    SELECT d.d_date AS dt,
+           SUM(wr.wr_return_amt) AS total_amount
+    FROM web_returns wr
+    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
+    WHERE d.d_year = 2001
+    GROUP BY d.d_date
+),
+web_sal AS (
+    SELECT d.d_date AS dt,
+           SUM(ws.ws_ext_sales_price) AS total_amount
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2001
+    GROUP BY d.d_date
+),
+combined AS (
+    SELECT dt,
+           'catalog_return' AS source,
+           total_amount
+    FROM catalog_ret
+    UNION ALL
+    SELECT dt,
+           'web_return' AS source,
+           total_amount
+    FROM web_ret
+    UNION ALL
+    SELECT dt,
+           'web_sales' AS source,
+           total_amount
+    FROM web_sal
 )
-SELECT
-    fd.d_year AS year,
-    p.p_channel_tv AS promo_channel_tv,
-    SUM(cs.cs_net_paid_inc_tax) AS total_net_paid_inc_tax,
-    'Catalog' AS sales_source
-FROM catalog_sales cs
-JOIN filtered_dates fd ON cs.cs_sold_date_sk = fd.d_date_sk
-JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
-JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-WHERE p.p_channel_tv = 'Y'
-  AND hd.hd_income_band_sk = 4
-GROUP BY fd.d_year, p.p_channel_tv
-
-UNION ALL
-
-SELECT
-    fd.d_year AS year,
-    p.p_channel_tv AS promo_channel_tv,
-    SUM(ss.ss_net_paid_inc_tax) AS total_net_paid_inc_tax,
-    'Store' AS sales_source
-FROM store_sales ss
-JOIN filtered_dates fd ON ss.ss_sold_date_sk = fd.d_date_sk
-JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
-JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-WHERE p.p_channel_tv = 'Y'
-  AND hd.hd_income_band_sk = 4
-GROUP BY fd.d_year, p.p_channel_tv
-ORDER BY year, total_net_paid_inc_tax DESC
+SELECT DISTINCT
+       dt,
+       source,
+       total_amount,
+       ROW_NUMBER() OVER (PARTITION BY source ORDER BY total_amount DESC) AS rank_per_source
+FROM combined
+ORDER BY dt, source
 LIMIT 100

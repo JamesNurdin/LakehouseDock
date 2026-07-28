@@ -1,40 +1,31 @@
-WITH sales_returns AS (
-    SELECT
-        cs.cs_bill_hdemo_sk AS hd_demo_sk,
-        SUM(cs.cs_ext_sales_price) AS total_sales,
-        SUM(cs.cs_net_profit) AS total_profit,
-        COUNT(DISTINCT cs.cs_order_number) AS num_orders,
-        SUM(sr.sr_return_amt) AS total_return_amt,
-        COUNT(DISTINCT sr.sr_ticket_number) AS num_returns
-    FROM catalog_sales cs
-    JOIN household_demographics hd
-        ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-    JOIN store_returns sr
-        ON sr.sr_hdemo_sk = hd.hd_demo_sk
-    WHERE cs.cs_sold_date_sk BETWEEN 2450000 AND 2450100
-      AND cs.cs_quantity > 1
-      AND cs.cs_wholesale_cost > 5
-      AND hd.hd_dep_count >= 2
-      AND hd.hd_buy_potential <> 'Unknown'
-      AND sr.sr_return_quantity > 0
-    GROUP BY cs.cs_bill_hdemo_sk
-)
 SELECT
-    ib.ib_income_band_sk,
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    SUM(s.total_sales) AS sum_sales,
-    AVG(s.total_profit) AS avg_profit,
-    SUM(s.total_return_amt) AS sum_returns,
-    COUNT(*) AS num_demographics
-FROM sales_returns s
-JOIN household_demographics hd
-    ON s.hd_demo_sk = hd.hd_demo_sk
-JOIN income_band ib
-    ON hd.hd_income_band_sk = ib.ib_income_band_sk
-WHERE ib.ib_upper_bound <= 200000
-  AND ib.ib_lower_bound >= 20000
-GROUP BY ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
-HAVING SUM(s.total_sales) > 10000
-ORDER BY sum_sales DESC
+    d_sold.d_year,
+    i.i_category,
+    i.i_brand,
+    SUM(cs.cs_net_paid_inc_tax) AS total_net_paid,
+    SUM(cr.cr_return_amount) AS total_return_amount,
+    COUNT(DISTINCT cs.cs_order_number) AS orders,
+    AVG(cs.cs_quantity) AS avg_quantity_sold,
+    SUM(inv.inv_quantity_on_hand) AS total_inventory,
+    COUNT(DISTINCT wr.wr_order_number) AS web_return_orders
+FROM catalog_sales cs
+JOIN date_dim d_sold ON cs.cs_sold_date_sk = d_sold.d_date_sk
+JOIN date_dim d_ship ON cs.cs_ship_date_sk = d_ship.d_date_sk
+JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+JOIN item i ON cs.cs_item_sk = i.i_item_sk
+LEFT JOIN catalog_returns cr ON cr.cr_order_number = cs.cs_order_number
+LEFT JOIN date_dim d_return ON cr.cr_returned_date_sk = d_return.d_date_sk
+LEFT JOIN reason r_return ON cr.cr_reason_sk = r_return.r_reason_sk
+LEFT JOIN web_returns wr ON wr.wr_item_sk = i.i_item_sk
+LEFT JOIN reason r_web ON wr.wr_reason_sk = r_web.r_reason_sk
+LEFT JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk
+LEFT JOIN warehouse w_inv ON inv.inv_warehouse_sk = w_inv.w_warehouse_sk
+LEFT JOIN store s ON s.s_closed_date_sk = d_sold.d_date_sk
+WHERE cs.cs_net_paid_inc_tax > (
+    SELECT AVG(cs2.cs_net_paid_inc_tax)
+    FROM catalog_sales cs2
+)
+GROUP BY d_sold.d_year, i.i_category, i.i_brand
+ORDER BY total_net_paid DESC
 LIMIT 100

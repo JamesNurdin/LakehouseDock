@@ -1,29 +1,51 @@
-WITH store_part AS (
-    SELECT i.i_class AS item_class,
-           'store' AS channel,
-           SUM(sr.sr_net_loss) AS total_net_loss,
-           CASE WHEN SUM(sr.sr_net_loss) > 100 THEN 'YES' ELSE 'NO' END AS high_loss_flag
-    FROM tpcds.store_returns sr
-    JOIN tpcds.item i ON sr.sr_item_sk = i.i_item_sk
-    JOIN tpcds.store s ON sr.sr_store_sk = s.s_store_sk
-    WHERE i.i_wholesale_cost > 1.0
-      AND s.s_state = 'Unknown'
-    GROUP BY i.i_class
-),
-web_part AS (
-    SELECT i.i_class AS item_class,
-           'web' AS channel,
-           SUM(wr.wr_net_loss) AS total_net_loss,
-           CASE WHEN SUM(wr.wr_net_loss) > 100 THEN 'YES' ELSE 'NO' END AS high_loss_flag
-    FROM tpcds.web_returns wr
-    JOIN tpcds.item i ON wr.wr_item_sk = i.i_item_sk
-    WHERE i.i_wholesale_cost > 1.0
-    GROUP BY i.i_class
-)
-SELECT *
-FROM store_part
-UNION ALL
-SELECT *
-FROM web_part
-ORDER BY total_net_loss DESC
+WITH
+    sales AS (
+        SELECT
+            ss.ss_sold_date_sk,
+            ss.ss_cdemo_sk,
+            ss.ss_net_profit,
+            ss.ss_quantity,
+            ss.ss_item_sk
+        FROM store_sales ss
+        WHERE ss.ss_net_profit > 0
+    ),
+    date_info AS (
+        SELECT d_date_sk, d_year, d_month_seq, d_date
+        FROM date_dim
+        WHERE d_year = 2001
+    ),
+    cust_demo AS (
+        SELECT cd_demo_sk,
+               cd_education_status,
+               cd_dep_college_count,
+               cd_purchase_estimate
+        FROM customer_demographics
+        WHERE cd_education_status LIKE '%College%'
+          AND cd_dep_college_count >= 1
+    ),
+    catalog AS (
+        SELECT cp_catalog_page_sk,
+               cp_catalog_page_id,
+               cp_type,
+               cp_start_date_sk,
+               cp_end_date_sk,
+               regexp_extract(cp_catalog_page_id, '[A-Z]{9}([A-Z])', 1) AS id_last_char
+        FROM catalog_page
+        WHERE regexp_like(cp_catalog_page_id, '^A{8,}B')
+          AND cp_type IN ('quarterly', 'monthly')
+    )
+SELECT
+    c.cp_type,
+    c.id_last_char,
+    d.d_year,
+    CONCAT(c.cp_type, '-', c.id_last_char) AS type_code,
+    SUM(s.ss_net_profit) AS total_net_profit,
+    COUNT(DISTINCT s.ss_item_sk) AS distinct_items_sold,
+    AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+FROM sales s
+JOIN date_info d       ON s.ss_sold_date_sk = d.d_date_sk
+JOIN cust_demo cd      ON s.ss_cdemo_sk = cd.cd_demo_sk
+JOIN catalog c         ON c.cp_start_date_sk = d.d_date_sk
+GROUP BY c.cp_type, c.id_last_char, d.d_year, CONCAT(c.cp_type, '-', c.id_last_char)
+ORDER BY total_net_profit DESC
 LIMIT 100

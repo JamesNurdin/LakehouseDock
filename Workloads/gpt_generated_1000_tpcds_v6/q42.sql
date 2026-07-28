@@ -1,44 +1,57 @@
-WITH agg AS (
+WITH joined_data AS (
   SELECT
-    w.w_warehouse_sk,
-    w.w_warehouse_name,
-    sm.sm_code,
-    td.t_shift,
-    SUM(ws.ws_net_profit) AS total_profit,
-    COUNT(*) AS order_cnt
-  FROM web_sales ws
-  JOIN time_dim td
-    ON ws.ws_sold_time_sk = td.t_time_sk
-  JOIN ship_mode sm
-    ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-  JOIN warehouse w
-    ON ws.ws_warehouse_sk = w.w_warehouse_sk
-  JOIN customer_address ca
-    ON ws.ws_bill_addr_sk = ca.ca_address_sk
-  JOIN customer_demographics cd
-    ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-  JOIN household_demographics hd
-    ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-  WHERE td.t_shift = 'first'
-    AND td.t_minute BETWEEN 0 AND 10
-    AND w.w_state = 'CA'
-    AND sm.sm_code = 'AIR'
-  GROUP BY
-    w.w_warehouse_sk,
-    w.w_warehouse_name,
-    sm.sm_code,
-    td.t_shift
+    d.d_year,
+    cc.cc_name,
+    cs.cs_net_paid_inc_tax,
+    ss.ss_net_paid,
+    cr.cr_net_loss,
+    wr.wr_net_loss,
+    inv.inv_quantity_on_hand,
+    ws.web_site_id
+  FROM tpcds.date_dim d
+  LEFT JOIN tpcds.store_sales ss
+    ON ss.ss_sold_date_sk = d.d_date_sk
+  LEFT JOIN tpcds.catalog_sales cs
+    ON cs.cs_sold_date_sk = d.d_date_sk
+  LEFT JOIN tpcds.call_center cc
+    ON cs.cs_call_center_sk = cc.cc_call_center_sk
+  LEFT JOIN tpcds.catalog_page cp
+    ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+  LEFT JOIN tpcds.ship_mode sm
+    ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+  LEFT JOIN tpcds.catalog_returns cr
+    ON cr.cr_order_number = cs.cs_order_number
+    AND cr.cr_returned_date_sk = d.d_date_sk
+  LEFT JOIN tpcds.inventory inv
+    ON inv.inv_date_sk = d.d_date_sk
+  LEFT JOIN tpcds.web_returns wr
+    ON wr.wr_returned_date_sk = d.d_date_sk
+  LEFT JOIN tpcds.web_site ws
+    ON ws.web_open_date_sk = d.d_date_sk
+),
+agg_by_year_cc AS (
+  SELECT
+    d_year,
+    cc_name,
+    SUM(cs_net_paid_inc_tax) AS sum_sales,
+    SUM(ss_net_paid) AS sum_store_sales,
+    SUM(cr_net_loss) AS sum_catalog_returns_loss,
+    SUM(wr_net_loss) AS sum_web_returns_loss,
+    SUM(inv_quantity_on_hand) AS sum_inventory_qty,
+    COUNT(DISTINCT web_site_id) AS cnt_web_sites
+  FROM joined_data
+  WHERE d_year BETWEEN 1998 AND 2000
+    AND cc_name IS NOT NULL
+    AND cs_net_paid_inc_tax > 0
+    AND ss_net_paid > 0
+  GROUP BY d_year, cc_name
 )
 SELECT
-  a.w_warehouse_name,
-  a.sm_code,
-  a.t_shift,
-  a.total_profit,
-  a.order_cnt,
-  (SELECT AVG(ws2.ws_net_profit)
-     FROM web_sales ws2
-    WHERE ws2.ws_warehouse_sk = a.w_warehouse_sk) AS avg_warehouse_profit,
-  RANK() OVER (PARTITION BY a.w_warehouse_name ORDER BY a.total_profit DESC) AS profit_rank
-FROM agg a
-ORDER BY a.total_profit DESC
-LIMIT 100
+  d_year,
+  AVG(sum_sales) AS avg_sales_per_cc,
+  AVG(sum_store_sales) AS avg_store_sales_per_cc,
+  AVG(sum_catalog_returns_loss) AS avg_catalog_loss_per_cc
+FROM agg_by_year_cc
+WHERE cnt_web_sites >= 1
+GROUP BY d_year
+ORDER BY d_year DESC

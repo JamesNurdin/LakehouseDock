@@ -1,48 +1,51 @@
-WITH date_returns AS (
+WITH cat_sales AS (
     SELECT
-        d.d_date_sk,
-        d.d_date,
-        d.d_quarter_name,
-        SUM(sr.sr_net_loss) AS total_net_loss,
-        COUNT(*) AS return_cnt
-    FROM store_returns sr
-    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
-    GROUP BY d.d_date_sk, d.d_date, d.d_quarter_name
+        d.d_year AS year,
+        i.i_category AS category,
+        SUM(cs.cs_ext_sales_price) AS sales_amount,
+        COUNT(*) AS sales_cnt,
+        CAST(NULL AS decimal(7,2)) AS profit_amount
+    FROM catalog_sales cs
+    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    WHERE d.d_year BETWEEN 2000 AND 2002
+    GROUP BY d.d_year, i.i_category
 ),
-catalog_on_same_date AS (
+store_sales_agg AS (
     SELECT
-        cp.cp_catalog_page_id,
-        cp.cp_type,
-        d.d_date_sk
-    FROM catalog_page cp
-    JOIN date_dim d ON cp.cp_end_date_sk = d.d_date_sk
-    WHERE regexp_like(cp.cp_catalog_page_id, '^AAAA.*$')
-      AND cp.cp_type LIKE 'quarter%'
+        d.d_year AS year,
+        i.i_category AS category,
+        CAST(NULL AS decimal(7,2)) AS sales_amount,
+        CAST(NULL AS integer) AS sales_cnt,
+        SUM(ss.ss_net_profit) AS profit_amount
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    WHERE d.d_year BETWEEN 2000 AND 2002
+    GROUP BY d.d_year, i.i_category
+),
+union_all AS (
+    SELECT * FROM cat_sales
+    UNION ALL
+    SELECT * FROM store_sales_agg
+),
+agg AS (
+    SELECT
+        year,
+        category,
+        SUM(sales_amount) AS total_sales,
+        SUM(profit_amount) AS total_profit,
+        SUM(sales_cnt) AS total_transactions
+    FROM union_all
+    GROUP BY ROLLUP (year, category)
 )
 SELECT
-    c.cp_catalog_page_id,
-    c.cp_type,
-    dr.d_quarter_name,
-    dr.return_cnt,
-    dr.total_net_loss,
-    COUNT(DISTINCT wp.wp_web_page_id) AS web_page_cnt,
-    MAX(regexp_extract(wp.wp_url, 'https?://([^/]+)/', 1)) AS example_domain
-FROM catalog_on_same_date c
-JOIN date_returns dr ON c.d_date_sk = dr.d_date_sk
-LEFT JOIN web_page wp
-    ON wp.wp_access_date_sk = dr.d_date_sk
-    AND regexp_like(wp.wp_url, '^https?://.*example\\.com')
-WHERE EXISTS (
-    SELECT 1 FROM store_returns sr2
-    WHERE sr2.sr_customer_sk = 11750971
-      AND sr2.sr_returned_date_sk = dr.d_date_sk
-)
-GROUP BY
-    c.cp_catalog_page_id,
-    c.cp_type,
-    dr.d_quarter_name,
-    dr.return_cnt,
-    dr.total_net_loss
-HAVING dr.total_net_loss > 200
-ORDER BY dr.total_net_loss DESC
+    year,
+    category,
+    total_sales,
+    total_profit,
+    total_transactions,
+    SUM(total_sales) OVER (PARTITION BY category ORDER BY year) AS cumulative_sales_by_category
+FROM agg
+ORDER BY year, category
 LIMIT 100

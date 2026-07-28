@@ -1,55 +1,56 @@
-WITH store_loss AS (
+WITH grouped AS (
     SELECT
-        s.s_store_name AS store_name,
-        hd.hd_buy_potential AS buy_potential,
-        SUM(sr.sr_net_loss) AS total_store_loss,
-        COUNT(DISTINCT sr.sr_ticket_number) AS store_return_count
-    FROM store_returns sr
-    JOIN store s ON sr.sr_store_sk = s.s_store_sk
-    JOIN household_demographics hd ON sr.sr_hdemo_sk = hd.hd_demo_sk
-    JOIN time_dim t ON sr.sr_return_time_sk = t.t_time_sk
-    WHERE t.t_sub_shift = 'morning'
-      AND hd.hd_buy_potential IN ('1001-5000', '5001-10000')
-    GROUP BY s.s_store_name, hd.hd_buy_potential
-),
-web_loss AS (
-    SELECT
-        c.c_customer_id AS customer_id,
-        hd.hd_buy_potential AS buy_potential,
-        SUM(wr.wr_net_loss) AS total_web_loss,
-        COUNT(DISTINCT wr.wr_order_number) AS web_return_count
+        d_wr.d_year,
+        i.i_category,
+        i.i_color,
+        ca.ca_state,
+        cd_refunded.cd_marital_status,
+        r.r_reason_desc,
+        COUNT(DISTINCT wr.wr_order_number) AS orders_cnt,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        AVG(wr.wr_return_quantity) AS avg_qty,
+        MIN(d_wr.d_date) AS first_return_date,
+        MAX(d_wr.d_date) AS last_return_date,
+        CASE WHEN SUM(wr.wr_return_amt) > (
+                SELECT AVG(wr2.wr_return_amt)
+                FROM web_returns wr2
+            ) THEN 'Above Avg'
+            ELSE 'Below Avg'
+        END AS amt_category
     FROM web_returns wr
-    JOIN customer c ON wr.wr_returning_customer_sk = c.c_customer_sk
-    JOIN household_demographics hd ON wr.wr_returning_hdemo_sk = hd.hd_demo_sk
-    JOIN time_dim t ON wr.wr_returned_time_sk = t.t_time_sk
-    WHERE t.t_sub_shift = 'evening'
-      AND hd.hd_buy_potential = '0-500'
-    GROUP BY c.c_customer_id, hd.hd_buy_potential
+    JOIN date_dim d_wr ON wr.wr_returned_date_sk = d_wr.d_date_sk
+    JOIN item i ON wr.wr_item_sk = i.i_item_sk
+    JOIN customer_address ca ON wr.wr_refunded_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd_refunded ON wr.wr_refunded_cdemo_sk = cd_refunded.cd_demo_sk
+    JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
+    JOIN catalog_page cp ON cp.cp_end_date_sk = d_wr.d_date_sk
+    WHERE d_wr.d_year = 2001
+      AND i.i_color IN ('royal', 'tan')
+      AND ca.ca_state = 'CA'
+      AND cd_refunded.cd_marital_status = 'M'
+      AND r.r_reason_desc LIKE '%defective%'
+    GROUP BY
+        d_wr.d_year,
+        i.i_category,
+        i.i_color,
+        ca.ca_state,
+        cd_refunded.cd_marital_status,
+        r.r_reason_desc
 )
-SELECT DISTINCT
-    combined.channel,
-    combined.id,
-    combined.buy_potential,
-    combined.net_loss,
-    combined.return_cnt,
-    (SELECT COUNT(*) FROM reason r WHERE r.r_reason_desc = 'Damaged') AS damaged_reason_cnt
-FROM (
-    SELECT
-        'store' AS channel,
-        sl.store_name AS id,
-        sl.buy_potential,
-        sl.total_store_loss AS net_loss,
-        sl.store_return_count AS return_cnt
-    FROM store_loss sl
-    UNION ALL
-    SELECT
-        'web' AS channel,
-        wl.customer_id AS id,
-        wl.buy_potential,
-        wl.total_web_loss AS net_loss,
-        wl.web_return_count AS return_cnt
-    FROM web_loss wl
-) combined
-WHERE EXISTS (SELECT 1 FROM reason r WHERE r.r_reason_desc = 'Damaged')
-ORDER BY combined.net_loss DESC
+SELECT
+    g.d_year,
+    g.i_category,
+    g.i_color,
+    g.ca_state,
+    g.cd_marital_status,
+    g.r_reason_desc,
+    g.orders_cnt,
+    g.total_return_amt,
+    g.avg_qty,
+    g.first_return_date,
+    g.last_return_date,
+    g.amt_category,
+    RANK() OVER (ORDER BY g.total_return_amt DESC) AS return_amount_rank
+FROM grouped g
+ORDER BY g.total_return_amt DESC
 LIMIT 100

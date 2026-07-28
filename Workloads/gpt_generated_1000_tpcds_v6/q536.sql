@@ -1,63 +1,55 @@
-WITH returns_item AS (
-   SELECT
-       wr.wr_item_sk,
-       i.i_brand,
-       i.i_category,
-       wr.wr_web_page_sk,
-       SUM(wr.wr_return_amt) AS total_return_amt,
-       AVG(wr.wr_return_quantity) AS avg_return_qty,
-       COUNT(*) AS return_cnt
-   FROM web_returns wr
-   JOIN item i
-     ON wr.wr_item_sk = i.i_item_sk
-   WHERE wr.wr_return_amt > 100
-     AND wr.wr_reversed_charge > 50
-     AND wr.wr_return_ship_cost > 200
-   GROUP BY wr.wr_item_sk, i.i_brand, i.i_category, wr.wr_web_page_sk
-),
-inventory_agg AS (
-   SELECT
-       inv.inv_item_sk,
-       inv.inv_warehouse_sk,
-       SUM(inv.inv_quantity_on_hand) AS total_on_hand,
-       MAX(inv.inv_quantity_on_hand) AS max_on_hand
-   FROM inventory inv
-   WHERE inv.inv_quantity_on_hand > 800
-     AND inv.inv_date_sk = 2451074
-   GROUP BY inv.inv_item_sk, inv.inv_warehouse_sk
+WITH agg AS (
+    SELECT
+        d.d_date,
+        s.s_store_name,
+        ws.web_name,
+        t.t_hour,
+        SUM(cs.cs_net_paid) AS total_sales,
+        SUM(cs.cs_net_profit) AS total_profit,
+        SUM(cr.cr_return_amount) AS total_catalog_returns,
+        SUM(sr.sr_return_amt) AS total_store_returns,
+        SUM(wr.wr_return_amt) AS total_web_returns,
+        AVG(inv.inv_quantity_on_hand) AS avg_inventory,
+        COUNT(DISTINCT cs.cs_bill_customer_sk) AS distinct_customers
+    FROM date_dim d
+    LEFT JOIN catalog_sales cs
+        ON cs.cs_sold_date_sk = d.d_date_sk
+    LEFT JOIN catalog_returns cr
+        ON cr.cr_returned_date_sk = d.d_date_sk
+        AND cr.cr_item_sk = cs.cs_item_sk
+        AND cr.cr_order_number = cs.cs_order_number
+    LEFT JOIN store_returns sr
+        ON sr.sr_returned_date_sk = d.d_date_sk
+    LEFT JOIN store s
+        ON s.s_closed_date_sk = d.d_date_sk
+    LEFT JOIN web_returns wr
+        ON wr.wr_returned_date_sk = d.d_date_sk
+    LEFT JOIN web_site ws
+        ON ws.web_open_date_sk = d.d_date_sk
+    LEFT JOIN inventory inv
+        ON inv.inv_date_sk = d.d_date_sk
+    LEFT JOIN time_dim t
+        ON t.t_time_sk = cs.cs_sold_time_sk
+    WHERE d.d_fy_year = 1917
+      AND inv.inv_item_sk IN (101444, 101419)
+      AND s.s_number_employees >= 100
+      AND cs.cs_net_paid > 5000
+      AND wr.wr_return_amt > 200
+    GROUP BY d.d_date, s.s_store_name, ws.web_name, t.t_hour
 )
 SELECT
-   w.w_warehouse_name,
-   w.w_state,
-   i_ret.i_brand,
-   i_ret.i_category,
-   i_ret.total_return_amt,
-   i_ret.avg_return_qty,
-   inv_agg.total_on_hand,
-   inv_agg.max_on_hand,
-   COUNT(DISTINCT i_ret.wr_item_sk) AS distinct_items,
-   SUM(i_ret.total_return_amt) OVER (PARTITION BY w.w_state ORDER BY i_ret.total_return_amt DESC) AS state_cum_return,
-   RANK() OVER (PARTITION BY w.w_state ORDER BY i_ret.total_return_amt DESC) AS state_rank
-FROM returns_item i_ret
-JOIN inventory_agg inv_agg
-  ON i_ret.wr_item_sk = inv_agg.inv_item_sk
-JOIN warehouse w
-  ON inv_agg.inv_warehouse_sk = w.w_warehouse_sk
-JOIN web_page wp
-  ON i_ret.wr_web_page_sk = wp.wp_web_page_sk
-WHERE w.w_state = 'CA'
-  AND w.w_gmt_offset = -5.00
-  AND wp.wp_access_date_sk = 2452623
-  AND wp.wp_type = 'product'
-GROUP BY
-   w.w_warehouse_name,
-   w.w_state,
-   i_ret.i_brand,
-   i_ret.i_category,
-   i_ret.total_return_amt,
-   i_ret.avg_return_qty,
-   inv_agg.total_on_hand,
-   inv_agg.max_on_hand
-HAVING SUM(i_ret.total_return_amt) > 5000
-ORDER BY i_ret.total_return_amt DESC
+    d_date,
+    s_store_name,
+    web_name,
+    t_hour,
+    total_sales,
+    total_profit,
+    total_catalog_returns,
+    total_store_returns,
+    total_web_returns,
+    avg_inventory,
+    distinct_customers,
+    SUM(total_sales) OVER (PARTITION BY s_store_name ORDER BY d_date ROWS UNBOUNDED PRECEDING) AS running_sales
+FROM agg
+ORDER BY total_sales DESC
 LIMIT 100

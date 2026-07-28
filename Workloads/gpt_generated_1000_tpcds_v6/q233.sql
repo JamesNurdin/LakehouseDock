@@ -1,47 +1,60 @@
-/*
-Goal: Rank warehouses by total net profit from web sales, show inventory on‑hand metrics, classify profit as 'Profitable' or 'Loss', and provide row numbers per state ordered by quantity sold.
-*/
-WITH ws_agg AS (
+WITH sales_agg AS (
     SELECT
-        ws.ws_warehouse_sk,
-        SUM(ws.ws_net_profit) AS total_net_profit,
-        SUM(ws.ws_quantity) AS total_quantity,
-        CASE WHEN SUM(ws.ws_net_profit) > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_category
-    FROM web_sales ws
-    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
-    WHERE ws.ws_list_price > 50
-      AND ws.ws_ext_wholesale_cost < 3000
-      AND ws.ws_sold_date_sk BETWEEN 2450800 AND 2451100
-    GROUP BY ws.ws_warehouse_sk
-),
-inv_agg AS (
-    SELECT
-        inv.inv_warehouse_sk,
-        SUM(inv.inv_quantity_on_hand) AS total_on_hand,
-        COUNT(DISTINCT inv.inv_item_sk) AS distinct_items
-    FROM inventory inv
-    WHERE inv.inv_quantity_on_hand > 0
-      AND inv.inv_warehouse_sk IN (3, 12, 15, 18)
-      AND inv.inv_date_sk >= 2450900
-    GROUP BY inv.inv_warehouse_sk
+        ss_store_sk,
+        ss_item_sk,
+        SUM(ss_quantity) AS total_quantity_sold,
+        SUM(ss_ext_sales_price) AS total_sales
+    FROM store_sales
+    WHERE ss_list_price > 100
+      AND ss_sales_price > 10
+    GROUP BY ss_store_sk, ss_item_sk
 )
 SELECT
-    w.w_warehouse_id,
-    w.w_warehouse_name,
-    w.w_city,
-    w.w_state,
-    ws_agg.total_net_profit,
-    ws_agg.total_quantity,
-    ws_agg.profit_category,
-    inv_agg.total_on_hand,
-    inv_agg.distinct_items,
-    RANK() OVER (ORDER BY ws_agg.total_net_profit DESC) AS profit_rank,
-    ROW_NUMBER() OVER (PARTITION BY w.w_state ORDER BY ws_agg.total_quantity DESC) AS qty_rownum
-FROM warehouse w
-JOIN ws_agg ON ws_agg.ws_warehouse_sk = w.w_warehouse_sk
-LEFT JOIN inv_agg ON inv_agg.inv_warehouse_sk = w.w_warehouse_sk
-WHERE w.w_state IN ('CA', 'TX', 'NY')
-  AND w.w_city LIKE '%Spring%'
-  AND w.w_gmt_offset BETWEEN -5.00 AND 0.00
-ORDER BY profit_rank
+    s.s_store_id,
+    s.s_state,
+    s.s_market_manager,
+    s.s_tax_percentage,
+    sa.total_quantity_sold,
+    sa.total_sales,
+    COUNT(DISTINCT r.sr_ticket_number) AS distinct_returns,
+    SUM(r.sr_net_loss) AS total_net_loss,
+    CASE
+        WHEN SUM(r.sr_net_loss) > 0 THEN 'LOSS'
+        ELSE 'GAIN'
+    END AS profit_indicator,
+    SUM(r.sr_reversed_charge) AS total_reversed_charge,
+    SUM(r.sr_store_credit) AS total_store_credit,
+    RANK() OVER (ORDER BY sa.total_sales DESC) AS sales_rank,
+    SUM(SUM(r.sr_net_loss)) OVER () AS cumulative_net_loss
+FROM store s
+JOIN sales_agg sa
+    ON s.s_store_sk = sa.ss_store_sk
+JOIN store_returns r
+    ON r.sr_store_sk = s.s_store_sk
+   AND r.sr_item_sk = sa.ss_item_sk
+   AND r.sr_ticket_number = (
+        SELECT ss_ticket_number
+        FROM store_sales ss
+        WHERE ss.ss_store_sk = s.s_store_sk
+          AND ss.ss_item_sk = sa.ss_item_sk
+        ORDER BY ss.ss_sold_date_sk DESC
+        LIMIT 1
+   )
+WHERE s.s_state = 'CA'
+  AND s.s_tax_percentage >= 0.05
+  AND r.sr_reversed_charge > 30
+  AND EXISTS (
+        SELECT 1
+        FROM store_returns r2
+        WHERE r2.sr_store_sk = s.s_store_sk
+          AND r2.sr_store_credit > 200
+   )
+GROUP BY
+    s.s_store_id,
+    s.s_state,
+    s.s_market_manager,
+    s.s_tax_percentage,
+    sa.total_quantity_sold,
+    sa.total_sales
+ORDER BY sa.total_sales DESC
 LIMIT 100

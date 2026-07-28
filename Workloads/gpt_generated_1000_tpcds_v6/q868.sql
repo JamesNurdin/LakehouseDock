@@ -1,49 +1,55 @@
-WITH sales_page AS (
+WITH sales_data AS (
     SELECT
-        ws.ws_bill_addr_sk,
-        ws.ws_ship_addr_sk,
-        ws.ws_web_page_sk,
-        ws.ws_quantity,
-        ws.ws_list_price,
-        ws.ws_net_paid,
-        ws.ws_ext_sales_price,
-        ws.ws_ext_discount_amt,
-        ws.ws_net_profit
-    FROM web_sales ws
-    WHERE ws.ws_list_price > 50
-      AND ws.ws_quantity >= 2
+        cp.cp_department AS department,
+        i.i_brand AS brand,
+        CASE 
+            WHEN cs.cs_net_paid_inc_ship_tax > 5000 THEN 'High'
+            WHEN cs.cs_net_paid_inc_ship_tax > 2000 THEN 'Medium'
+            ELSE 'Low'
+        END AS revenue_level,
+        cs.cs_net_paid_inc_ship_tax,
+        ss.ss_net_profit
+    FROM catalog_sales cs
+    JOIN catalog_page cp
+        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN item i
+        ON cs.cs_item_sk = i.i_item_sk
+    JOIN store_sales ss
+        ON ss.ss_item_sk = i.i_item_sk
+    WHERE cs.cs_warehouse_sk IN (13, 14)
+      AND cp.cp_department = 'Sports'
+      AND i.i_container = 'Unknown'
+      AND cs.cs_promo_sk = 1472
+      AND EXISTS (
+          SELECT 1 FROM store s
+          WHERE s.s_store_sk = ss.ss_store_sk
+            AND s.s_hours = '8AM-4PM'
+            AND s.s_state = 'CA'
+      )
+),
+agg AS (
+    SELECT
+        department,
+        brand,
+        revenue_level,
+        COUNT(*) AS transaction_cnt,
+        SUM(cs_net_paid_inc_ship_tax) AS total_revenue,
+        AVG(ss_net_profit) AS avg_profit,
+        MIN(cs_net_paid_inc_ship_tax) AS min_revenue,
+        MAX(cs_net_paid_inc_ship_tax) AS max_revenue
+    FROM sales_data
+    GROUP BY department, brand, revenue_level
 )
 SELECT
-    ca.ca_state,
-    ca.ca_city,
-    wp.wp_type,
-    COUNT(DISTINCT sp.ws_bill_addr_sk) AS bill_addr_cnt,
-    SUM(sp.ws_ext_sales_price) AS total_sales,
-    AVG(sp.ws_net_profit) AS avg_profit,
-    MIN(sp.ws_list_price) AS min_list_price,
-    MAX(sp.ws_list_price) AS max_list_price,
-    COALESCE(wp.wp_image_count, 0) AS image_count
-FROM sales_page sp
-JOIN customer_address ca
-    ON sp.ws_bill_addr_sk = ca.ca_address_sk
-LEFT JOIN web_page wp
-    ON sp.ws_web_page_sk = wp.wp_web_page_sk
-    AND wp.wp_image_count >= 5
-    AND wp.wp_link_count BETWEEN 10 AND 20
-    AND wp.wp_url = 'http://www.foo.com'
-    AND wp.wp_rec_start_date >= DATE '2001-01-01'
-WHERE
-    ca.ca_country = 'United States'
-    AND ca.ca_street_type = 'Boulevard'
-GROUP BY
-    ca.ca_state,
-    ca.ca_city,
-    wp.wp_type,
-    wp.wp_image_count
-HAVING
-    SUM(sp.ws_ext_sales_price) > (
-        SELECT AVG(ws_ext_sales_price)
-        FROM web_sales
-    )
-ORDER BY total_sales DESC
+    department,
+    brand,
+    revenue_level,
+    transaction_cnt,
+    total_revenue,
+    avg_profit,
+    min_revenue,
+    max_revenue,
+    ROW_NUMBER() OVER (PARTITION BY department ORDER BY total_revenue DESC) AS dept_rank
+FROM agg
+ORDER BY total_revenue DESC
 LIMIT 100

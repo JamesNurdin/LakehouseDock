@@ -1,33 +1,32 @@
-WITH start_pages AS (
+WITH agg AS (
     SELECT
-        d.d_year AS year,
-        cp.cp_department AS department,
-        SUM(i.inv_quantity_on_hand) AS total_quantity,
-        'START' AS period_type
-    FROM catalog_page cp
-    JOIN date_dim d ON cp.cp_start_date_sk = d.d_date_sk
-    JOIN inventory i ON i.inv_date_sk = d.d_date_sk
-    WHERE d.d_weekend = 'N'
-      AND cp.cp_catalog_page_number BETWEEN 10 AND 20
-    GROUP BY d.d_year, cp.cp_department
-),
-end_pages AS (
-    SELECT
-        d.d_year AS year,
-        cp.cp_department AS department,
-        SUM(i.inv_quantity_on_hand) AS total_quantity,
-        'END' AS period_type
-    FROM catalog_page cp
-    JOIN date_dim d ON cp.cp_end_date_sk = d.d_date_sk
-    JOIN inventory i ON i.inv_date_sk = d.d_date_sk
-    WHERE d.d_weekend = 'Y'
-      AND cp.cp_catalog_page_number BETWEEN 5 AND 15
-    GROUP BY d.d_year, cp.cp_department
+        cp.cp_department,
+        sm.sm_type,
+        ca.ca_location_type,
+        SUM(cs.cs_net_profit) AS total_profit,
+        AVG(cs.cs_ext_sales_price) AS avg_ext_sales,
+        COUNT(DISTINCT cs.cs_order_number) AS order_cnt,
+        SUM(cs.cs_quantity) AS total_quantity
+    FROM catalog_sales cs
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
+    JOIN catalog_returns cr ON cs.cs_order_number = cr.cr_order_number
+    WHERE cp.cp_catalog_number IN (5, 8)
+      AND ca.ca_location_type = 'single family'
+      AND cs.cs_ext_list_price > 1000
+    GROUP BY cp.cp_department, sm.sm_type, ca.ca_location_type
 )
-SELECT year, department, total_quantity, period_type
-FROM start_pages
-UNION ALL
-SELECT year, department, total_quantity, period_type
-FROM end_pages
-ORDER BY year DESC, total_quantity DESC
+SELECT
+    cp_department,
+    sm_type,
+    ca_location_type,
+    total_profit,
+    avg_ext_sales,
+    order_cnt,
+    CASE WHEN total_quantity > 100 THEN 'HIGH' ELSE 'LOW' END AS quantity_level,
+    ROW_NUMBER() OVER (PARTITION BY cp_department ORDER BY total_profit DESC) AS dept_rank
+FROM agg
+ORDER BY total_profit DESC
 LIMIT 100

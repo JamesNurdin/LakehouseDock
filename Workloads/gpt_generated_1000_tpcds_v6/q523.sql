@@ -1,38 +1,42 @@
-WITH joined AS (
-  SELECT DISTINCT
-    cr.cr_order_number,
-    cr.cr_return_amount,
-    cr.cr_net_loss,
-    sr.sr_ticket_number,
-    sr.sr_net_loss,
-    wr.wr_order_number,
-    wr.wr_net_loss,
-    d.d_year,
-    r.r_reason_desc,
-    CASE WHEN cr.cr_return_amount > 100 THEN 'High' ELSE 'Low' END AS cr_amount_category,
-    (cr.cr_net_loss + sr.sr_net_loss + wr.wr_net_loss) AS total_net_loss
-  FROM catalog_returns cr
-  JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-  JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-  JOIN store_returns sr ON sr.sr_returned_date_sk = d.d_date_sk
-                      AND sr.sr_reason_sk = r.r_reason_sk
-  JOIN web_returns wr ON wr.wr_returned_date_sk = d.d_date_sk
-                     AND wr.wr_reason_sk = r.r_reason_sk
-  WHERE d.d_year IN (2001, 2002)
-    AND r.r_reason_desc LIKE '%Not%'
-    AND cr.cr_return_quantity > 0
-    AND sr.sr_return_quantity > 0
-    AND wr.wr_return_quantity > 0
-    AND cr.cr_return_amount IS NOT NULL
+WITH filtered_returns AS (
+    SELECT
+        cr.cr_returned_date_sk,
+        cr.cr_return_amount,
+        cr.cr_returning_customer_sk,
+        cr.cr_catalog_page_sk,
+        cr.cr_item_sk
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    WHERE d.d_year = 2021
+),
+agg_returns AS (
+    SELECT
+        cp.cp_department AS department,
+        cp.cp_catalog_page_id,
+        SUM(fr.cr_return_amount) AS total_return_amount,
+        COUNT(*) AS return_cnt,
+        REGEXP_EXTRACT(i.i_item_desc, '([A-Za-z]+)-', 1) AS item_desc_prefix,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_name
+    FROM filtered_returns fr
+    JOIN catalog_page cp ON fr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN item i ON fr.cr_item_sk = i.i_item_sk
+    JOIN customer c ON fr.cr_returning_customer_sk = c.c_customer_sk
+    WHERE REGEXP_LIKE(cp.cp_description, '(?i)electronic')
+      AND i.i_units LIKE 'Box%'
+    GROUP BY
+        cp.cp_department,
+        cp.cp_catalog_page_id,
+        REGEXP_EXTRACT(i.i_item_desc, '([A-Za-z]+)-', 1),
+        CONCAT(c.c_first_name, ' ', c.c_last_name)
 )
 SELECT
-  d_year,
-  r_reason_desc,
-  cr_amount_category,
-  COUNT(DISTINCT cr_order_number) AS catalog_orders,
-  SUM(total_net_loss) AS total_net_loss,
-  RANK() OVER (PARTITION BY d_year ORDER BY SUM(total_net_loss) DESC) AS loss_rank
-FROM joined
-GROUP BY d_year, r_reason_desc, cr_amount_category
-HAVING SUM(total_net_loss) > 0
-ORDER BY d_year, loss_rank
+    department,
+    cp_catalog_page_id,
+    total_return_amount,
+    return_cnt,
+    item_desc_prefix,
+    customer_name,
+    ROW_NUMBER() OVER (PARTITION BY department ORDER BY total_return_amount DESC) AS dept_rank
+FROM agg_returns
+ORDER BY dept_rank, total_return_amount DESC
+LIMIT 100

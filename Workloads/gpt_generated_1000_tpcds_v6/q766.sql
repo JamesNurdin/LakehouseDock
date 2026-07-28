@@ -1,40 +1,41 @@
-WITH catalog_returns_agg AS (
+WITH base AS (
     SELECT
-        d.d_year AS year,
-        hd.hd_demo_sk,
-        SUM(cr.cr_return_amount) AS total_return_amount,
-        'catalog' AS source
-    FROM catalog_returns cr
-    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN household_demographics hd ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN inventory inv ON d.d_date_sk = inv.inv_date_sk
-    WHERE d.d_year BETWEEN 1998 AND 2000
-      AND inv.inv_quantity_on_hand > 200
-    GROUP BY d.d_year, hd.hd_demo_sk
+        s.s_division_id,
+        s.s_division_name,
+        s.s_store_sk,
+        s.s_number_employees,
+        c.cc_tax_percentage,
+        c.cc_mkt_id
+    FROM store s
+    JOIN date_dim d
+        ON s.s_closed_date_sk = d.d_date_sk
+    LEFT JOIN call_center c
+        ON c.cc_closed_date_sk = d.d_date_sk
+    WHERE s.s_country = 'United States'
+      AND s.s_division_id IN (1, 2, 3)
+      AND d.d_week_seq BETWEEN 5 AND 20
+      AND s.s_gmt_offset >= -5.00
+      AND s.s_manager IN ('John Mccoy', 'Joe Johnson')
+      AND (c.cc_tax_percentage BETWEEN 0.03 AND 0.07 OR c.cc_tax_percentage IS NULL)
 ),
-web_returns_agg AS (
+aggregated AS (
     SELECT
-        d.d_year AS year,
-        hd.hd_demo_sk,
-        SUM(wr.wr_return_amt) AS total_return_amount,
-        'web' AS source
-    FROM web_returns wr
-    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
-    JOIN household_demographics hd ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-    WHERE d.d_year BETWEEN 1998 AND 2000
-    GROUP BY d.d_year, hd.hd_demo_sk
-),
-combined AS (
-    SELECT year, hd_demo_sk, total_return_amount, source FROM catalog_returns_agg
-    UNION ALL
-    SELECT year, hd_demo_sk, total_return_amount, source FROM web_returns_agg
+        s_division_id        AS division_id,
+        s_division_name      AS division_name,
+        COUNT(DISTINCT s_store_sk)   AS store_count,
+        SUM(s_number_employees)      AS total_employees,
+        AVG(cc_tax_percentage)       AS avg_tax_pct
+    FROM base
+    GROUP BY s_division_id, s_division_name
+    HAVING COUNT(DISTINCT s_store_sk) >= 2
 )
 SELECT
-    year,
-    hd_demo_sk,
-    total_return_amount,
-    source,
-    ROW_NUMBER() OVER (PARTITION BY year ORDER BY total_return_amount DESC) AS rank_within_year
-FROM combined
-ORDER BY year, rank_within_year
+    division_id,
+    division_name,
+    store_count,
+    total_employees,
+    avg_tax_pct,
+    RANK() OVER (ORDER BY total_employees DESC) AS employee_rank
+FROM aggregated
+ORDER BY employee_rank
 LIMIT 100

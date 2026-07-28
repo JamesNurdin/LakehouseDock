@@ -1,31 +1,42 @@
-WITH filtered_items AS (
-   SELECT
-       i_item_sk,
-       i_manufact,
-       i_product_name,
-       i_container,
-       regexp_extract(i_item_desc, '(\\d+)', 1) AS first_number,
-       concat(i_brand, ' - ', i_product_name) AS brand_product,
-       substring(i_item_id, 1, 3) AS item_prefix
-   FROM item
-   WHERE regexp_like(i_manufact, '^e')
-     AND i_container LIKE '%Unknown%'
+WITH filtered_time AS (
+    SELECT t_time_sk, t_hour, t_minute
+    FROM time_dim
+    WHERE t_hour IN (10, 14)
+      AND t_minute IN (2, 7)
 )
-
 SELECT
-    f.i_manufact,
-    f.item_prefix,
-    f.brand_product,
-    f.first_number,
-    COUNT(*) AS sold_transactions,
-    SUM(ss.ss_ext_sales_price) AS total_sales,
-    AVG(ss.ss_net_paid_inc_tax) AS avg_net_paid_inc_tax,
-    SUM(ss.ss_ext_discount_amt) AS total_discount
-FROM filtered_items f
-JOIN store_sales ss
-  ON ss.ss_item_sk = f.i_item_sk
-WHERE ss.ss_ext_sales_price > 1000
-GROUP BY f.i_manufact, f.item_prefix, f.brand_product, f.first_number
-HAVING SUM(ss.ss_ext_sales_price) > 10000
-ORDER BY total_sales DESC
+    s.s_store_name,
+    sm.sm_type,
+    w.w_warehouse_name,
+    COUNT(DISTINCT cs.cs_item_sk) AS distinct_items_sold,
+    SUM(cs.cs_net_profit) AS total_net_profit,
+    SUM(CASE WHEN sr.sr_return_quantity > 0 THEN sr.sr_net_loss ELSE 0 END) AS total_return_loss,
+    AVG(cs.cs_quantity) AS avg_quantity_sold,
+    MIN(cs.cs_sold_date_sk) AS first_sale_date_sk,
+    MAX(cs.cs_sold_date_sk) AS last_sale_date_sk
+FROM filtered_time ft
+JOIN catalog_sales cs
+    ON cs.cs_sold_time_sk = ft.t_time_sk
+JOIN ship_mode sm
+    ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN warehouse w
+    ON cs.cs_warehouse_sk = w.w_warehouse_sk
+LEFT JOIN inventory i
+    ON w.w_warehouse_sk = i.inv_warehouse_sk
+JOIN store_returns sr
+    ON sr.sr_return_time_sk = ft.t_time_sk
+JOIN store s
+    ON sr.sr_store_sk = s.s_store_sk
+JOIN reason r
+    ON sr.sr_reason_sk = r.r_reason_sk
+WHERE sm.sm_type = 'EXPRESS'
+  AND r.r_reason_id = 'AAAAAAAALAAAAAAA'
+  AND s.s_state = 'CA'
+  AND cs.cs_quantity > 5
+  AND (i.inv_quantity_on_hand IS NULL OR i.inv_quantity_on_hand >= 100)
+GROUP BY
+    s.s_store_name,
+    sm.sm_type,
+    w.w_warehouse_name
+ORDER BY total_net_profit DESC
 LIMIT 100

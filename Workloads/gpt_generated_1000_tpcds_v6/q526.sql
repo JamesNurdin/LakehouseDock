@@ -1,39 +1,58 @@
-WITH overall AS (
-    SELECT avg(cr_return_amount) AS overall_avg
-    FROM catalog_returns
+WITH sales AS (
+  SELECT
+    i.i_item_id,
+    'sales' AS activity,
+    SUM(cs.cs_ext_sales_price) AS total_amount,
+    CASE
+      WHEN i.i_current_price < 20 THEN 'Low'
+      WHEN i.i_current_price BETWEEN 20 AND 50 THEN 'Medium'
+      ELSE 'High'
+    END AS price_category,
+    (SELECT AVG(i2.i_current_price)
+       FROM item i2
+      WHERE i2.i_brand = i.i_brand) AS avg_brand_price
+  FROM catalog_sales cs
+  JOIN item i ON cs.cs_item_sk = i.i_item_sk
+  JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+  WHERE cs.cs_sold_date_sk BETWEEN 2450000 AND 2452000
+  GROUP BY i.i_item_id, i.i_current_price, i.i_brand
+),
+returns AS (
+  SELECT
+    i.i_item_id,
+    'return' AS activity,
+    -SUM(cr.cr_return_amount) AS total_amount,
+    CASE
+      WHEN i.i_current_price < 20 THEN 'Low'
+      WHEN i.i_current_price BETWEEN 20 AND 50 THEN 'Medium'
+      ELSE 'High'
+    END AS price_category,
+    (SELECT AVG(i2.i_current_price)
+       FROM item i2
+      WHERE i2.i_brand = i.i_brand) AS avg_brand_price
+  FROM catalog_returns cr
+  JOIN item i ON cr.cr_item_sk = i.i_item_sk
+  JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+  WHERE cr.cr_returned_date_sk BETWEEN 2450000 AND 2452000
+    AND EXISTS (
+        SELECT 1 FROM store_returns sr
+         WHERE sr.sr_item_sk = i.i_item_sk
+    )
+  GROUP BY i.i_item_id, i.i_current_price, i.i_brand
+),
+combined AS (
+  SELECT * FROM sales
+  UNION ALL
+  SELECT * FROM returns
 )
 SELECT
-    d.d_year,
-    hd_ref.hd_buy_potential,
-    wp.wp_type,
-    SUM(cr.cr_return_amount) AS total_return_amount,
-    AVG(cr.cr_return_tax) AS avg_return_tax,
-    COUNT(*) AS return_cnt,
-    MAX(cr.cr_return_amount) AS max_return_amount,
-    (SELECT overall_avg FROM overall) AS overall_avg_return_amount
-FROM catalog_returns cr
-JOIN date_dim d
-  ON cr.cr_returned_date_sk = d.d_date_sk
-JOIN customer c_ref
-  ON cr.cr_refunded_customer_sk = c_ref.c_customer_sk
-JOIN household_demographics hd_ref
-  ON cr.cr_refunded_hdemo_sk = hd_ref.hd_demo_sk
-JOIN customer c_ret
-  ON cr.cr_returning_customer_sk = c_ret.c_customer_sk
-JOIN household_demographics hd_ret
-  ON cr.cr_returning_hdemo_sk = hd_ret.hd_demo_sk
-JOIN web_page wp
-  ON wp.wp_customer_sk = c_ret.c_customer_sk
- AND wp.wp_creation_date_sk = d.d_date_sk
-JOIN promotion p
-  ON p.p_start_date_sk = d.d_date_sk
-WHERE d.d_year = 2000
-  AND hd_ref.hd_income_band_sk IN (11, 16, 20)
-  AND hd_ref.hd_vehicle_count >= 2
-  AND c_ref.c_birth_country = 'United States'
-  AND p.p_discount_active = 'Y'
-  AND wp.wp_type = 'product'
-  AND cr.cr_return_amount > 10.00
-GROUP BY d.d_year, hd_ref.hd_buy_potential, wp.wp_type
-ORDER BY total_return_amount DESC
+  i_item_id,
+  activity,
+  total_amount,
+  price_category,
+  avg_brand_price,
+  ROW_NUMBER() OVER (PARTITION BY activity ORDER BY total_amount DESC) AS activity_rank
+FROM combined
+WHERE total_amount <> 0
+ORDER BY total_amount DESC
 LIMIT 100

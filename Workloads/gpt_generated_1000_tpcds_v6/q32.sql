@@ -1,35 +1,66 @@
-WITH filtered AS (
-  SELECT
-    hd.hd_demo_sk,
-    hd.hd_income_band_sk,
-    hd.hd_buy_potential,
-    hd.hd_dep_count,
-    hd.hd_vehicle_count,
-    ib.ib_income_band_sk,
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    regexp_extract(hd.hd_buy_potential, '(\\d+)-\\d+', 1) AS lower_range,
-    regexp_extract(hd.hd_buy_potential, '-(\\d+)', 1) AS upper_range,
-    CASE
-      WHEN regexp_like(hd.hd_buy_potential, '^>') THEN 'high'
-      WHEN hd.hd_buy_potential = 'Unknown' THEN 'unknown'
-      ELSE 'normal'
-    END AS potential_category
-  FROM household_demographics hd
-  JOIN income_band ib
-    ON hd.hd_income_band_sk = ib.ib_income_band_sk
-  WHERE hd.hd_buy_potential LIKE '%-%'
-    AND ib.ib_upper_bound >= 50000
+WITH sales_by_date AS (
+    SELECT
+        cs.cs_sold_date_sk,
+        cs.cs_warehouse_sk,
+        SUM(cs.cs_ext_sales_price) AS total_sales,
+        AVG(cs.cs_ext_discount_amt) AS avg_discount,
+        COUNT(DISTINCT cs.cs_item_sk) AS distinct_items_sold,
+        MIN(cs.cs_net_profit) AS min_profit,
+        MAX(cs.cs_net_profit) AS max_profit
+    FROM catalog_sales cs
+    WHERE cs.cs_quantity > 1
+      AND cs.cs_wholesale_cost > 50
+    GROUP BY cs.cs_sold_date_sk, cs.cs_warehouse_sk
+),
+
+inventory_by_date AS (
+    SELECT
+        inv.inv_date_sk,
+        inv.inv_warehouse_sk,
+        SUM(inv.inv_quantity_on_hand) AS total_on_hand
+    FROM inventory inv
+    WHERE inv.inv_quantity_on_hand > 100
+    GROUP BY inv.inv_date_sk, inv.inv_warehouse_sk
+),
+
+high_low_months AS (
+    SELECT d.d_year,
+           d.d_month_seq,
+           'HIGH' AS profit_category
+    FROM date_dim d
+    JOIN catalog_sales cs ON cs.cs_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+    HAVING SUM(cs.cs_net_profit) > 100000
+    UNION DISTINCT
+    SELECT d.d_year,
+           d.d_month_seq,
+           'LOW' AS profit_category
+    FROM date_dim d
+    JOIN catalog_sales cs ON cs.cs_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_year, d.d_month_seq
+    HAVING SUM(cs.cs_net_profit) < 10000
 )
 SELECT
-  filtered.ib_income_band_sk,
-  CONCAT('Band ', CAST(filtered.ib_lower_bound AS VARCHAR), '-', CAST(filtered.ib_upper_bound AS VARCHAR)) AS income_band_label,
-  COUNT(*) AS households,
-  AVG(CAST(filtered.lower_range AS DOUBLE)) AS avg_lower_buy_range,
-  AVG(CAST(filtered.upper_range AS DOUBLE)) AS avg_upper_buy_range,
-  SUM(filtered.hd_vehicle_count) AS total_vehicles,
-  SUM(CASE WHEN filtered.potential_category = 'high' THEN 1 ELSE 0 END) AS high_potential_households
-FROM filtered
-GROUP BY filtered.ib_income_band_sk, filtered.ib_lower_bound, filtered.ib_upper_bound
-ORDER BY households DESC
-LIMIT 10
+    d.d_year,
+    d.d_month_seq,
+    sb.total_sales,
+    sb.avg_discount,
+    sb.distinct_items_sold,
+    ib.total_on_hand,
+    hl.profit_category,
+    (SELECT AVG(cs2.cs_net_profit) FROM catalog_sales cs2) AS overall_avg_profit
+FROM sales_by_date sb
+JOIN date_dim d
+     ON sb.cs_sold_date_sk = d.d_date_sk
+LEFT JOIN inventory_by_date ib
+     ON ib.inv_date_sk = d.d_date_sk
+    AND ib.inv_warehouse_sk = sb.cs_warehouse_sk
+JOIN high_low_months hl
+     ON hl.d_year = d.d_year
+    AND hl.d_month_seq = d.d_month_seq
+WHERE d.d_current_month = 'Y'
+  AND d.d_month_seq BETWEEN 3 AND 10
+  AND d.d_year = 2001
+  AND sb.total_sales > 5000
+ORDER BY sb.total_sales DESC
+LIMIT 100

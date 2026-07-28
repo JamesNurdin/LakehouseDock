@@ -1,69 +1,112 @@
-/*
-Goal: Identify the highest‑profit catalog items for each warehouse sold to male customers, enrich the result with web‑sales performance and any store‑return reasons, and rank items by total catalog profit and by return quantity.
-*/
-WITH sales_agg AS (
+WITH
+  -- Subquery A: store sales perspective
+  store_sales_agg AS (
     SELECT
-        cs.cs_item_sk,
-        cs.cs_warehouse_sk,
-        i.i_item_id,
-        i.i_product_name,
-        SUM(cs.cs_net_profit)               AS total_cs_profit,
-        SUM(cs.cs_quantity)                 AS total_cs_qty,
-        ROW_NUMBER() OVER (
-            PARTITION BY cs.cs_warehouse_sk
-            ORDER BY SUM(cs.cs_net_profit) DESC
-        )                                   AS cs_profit_rank
-    FROM catalog_sales cs
-    JOIN item i
-        ON cs.cs_item_sk = i.i_item_sk
+      d.d_year AS year,
+      CASE WHEN ib.ib_upper_bound > 50000 THEN 'High Income' ELSE 'Low Income' END AS income_category,
+      sm.sm_ship_mode_id AS ship_mode_id,
+      COUNT(DISTINCT ss.ss_ticket_number) AS orders,
+      SUM(ss.ss_net_paid) AS net_paid,
+      SUM(COALESCE(cr.cr_return_amount, 0)) AS return_amount,
+      SUM(inv.inv_quantity_on_hand) AS inventory_qty,
+      AVG(p.p_cost) AS avg_promo_cost,
+      MIN(d.d_date) AS min_date,
+      MAX(d.d_date) AS max_date
+    FROM store_sales ss
+    JOIN date_dim d
+      ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN time_dim t
+      ON ss.ss_sold_time_sk = t.t_time_sk
     JOIN customer_demographics cd
-        ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
-    WHERE cs.cs_sold_date_sk BETWEEN 2450815 AND 2451195               -- filter a date range (surrogate keys)
-      AND cs.cs_quantity > 2                                          -- only sizable orders
-      AND cd.cd_gender = 'M'                                          -- male customers only
-      AND cs.cs_net_paid > 0                                          -- paid orders
-      AND EXISTS (
-            SELECT 1
-            FROM warehouse w2
-            WHERE w2.w_warehouse_sk = cs.cs_warehouse_sk
-              AND w2.w_suite_number = 'Suite H'                      -- keep only warehouses with this suite number
-        )
+      ON ss.ss_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd
+      ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib
+      ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN promotion p
+      ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN inventory inv
+      ON d.d_date_sk = inv.inv_date_sk
+    LEFT JOIN catalog_returns cr
+      ON cr.cr_returned_date_sk = d.d_date_sk
+     AND cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
+     AND cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN reason r
+      ON cr.cr_reason_sk = r.r_reason_sk
+    LEFT JOIN ship_mode sm
+      ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE d.d_year = 1998
+      AND inv.inv_quantity_on_hand > 100
+      AND p.p_discount_active = 'Y'
     GROUP BY
-        cs.cs_item_sk,
-        cs.cs_warehouse_sk,
-        i.i_item_id,
-        i.i_product_name
-)
+      d.d_year,
+      CASE WHEN ib.ib_upper_bound > 50000 THEN 'High Income' ELSE 'Low Income' END,
+      sm.sm_ship_mode_id
+  ),
+
+  -- Subquery B: web sales perspective
+  web_sales_agg AS (
+    SELECT
+      d.d_year AS year,
+      CASE WHEN ib.ib_upper_bound > 50000 THEN 'High Income' ELSE 'Low Income' END AS income_category,
+      sm.sm_ship_mode_id AS ship_mode_id,
+      COUNT(DISTINCT ws.ws_order_number) AS orders,
+      SUM(ws.ws_net_paid) AS net_paid,
+      SUM(COALESCE(cr.cr_return_amount, 0)) AS return_amount,
+      SUM(inv.inv_quantity_on_hand) AS inventory_qty,
+      AVG(p.p_cost) AS avg_promo_cost,
+      MIN(d.d_date) AS min_date,
+      MAX(d.d_date) AS max_date
+    FROM web_sales ws
+    JOIN date_dim d
+      ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN time_dim t
+      ON ws.ws_sold_time_sk = t.t_time_sk
+    JOIN customer_demographics cd
+      ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd
+      ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib
+      ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN promotion p
+      ON ws.ws_promo_sk = p.p_promo_sk
+    JOIN inventory inv
+      ON d.d_date_sk = inv.inv_date_sk
+    JOIN web_site ws_site
+      ON ws.ws_web_site_sk = ws_site.web_site_sk
+    LEFT JOIN catalog_returns cr
+      ON cr.cr_returned_date_sk = d.d_date_sk
+     AND cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
+     AND cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN reason r
+      ON cr.cr_reason_sk = r.r_reason_sk
+    LEFT JOIN ship_mode sm
+      ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE d.d_year = 1998
+      AND ws_site.web_tax_percentage > 0.03
+      AND inv.inv_quantity_on_hand > 100
+      AND p.p_discount_active = 'Y'
+    GROUP BY
+      d.d_year,
+      CASE WHEN ib.ib_upper_bound > 50000 THEN 'High Income' ELSE 'Low Income' END,
+      sm.sm_ship_mode_id
+  )
+
 SELECT
-    sa.cs_warehouse_sk,
-    w.w_warehouse_name,
-    sa.i_item_id,
-    sa.i_product_name,
-    sa.total_cs_profit,
-    sa.total_cs_qty,
-    sa.cs_profit_rank,
-    ws.ws_net_profit        AS web_net_profit,
-    ws.ws_quantity          AS web_quantity,
-    r.r_reason_desc,
-    sr.sr_return_quantity,
-    DENSE_RANK() OVER (
-        PARTITION BY sa.cs_warehouse_sk
-        ORDER BY sr.sr_return_quantity DESC
-    )                        AS return_qty_rank
-FROM sales_agg sa
-JOIN warehouse w
-    ON w.w_warehouse_sk = sa.cs_warehouse_sk
-LEFT JOIN web_sales ws
-    ON ws.ws_item_sk = sa.cs_item_sk
-   AND ws.ws_warehouse_sk = sa.cs_warehouse_sk
-   AND ws.ws_quantity > 1                                          -- modest web‑sale quantity filter
-LEFT JOIN store_returns sr
-    ON sr.sr_item_sk = sa.cs_item_sk
-LEFT JOIN reason r
-    ON r.r_reason_sk = sr.sr_reason_sk
-WHERE w.w_county = 'Franklin Parish'                                 -- keep only warehouses in this county
-  AND sr.sr_return_tax > 2.00                                        -- filter returns with non‑trivial tax amount
-ORDER BY
-    sa.total_cs_profit DESC,
-    return_qty_rank ASC
+  year,
+  income_category,
+  ship_mode_id,
+  orders,
+  net_paid,
+  return_amount,
+  inventory_qty,
+  avg_promo_cost,
+  min_date,
+  max_date
+FROM (
+  SELECT * FROM store_sales_agg
+  UNION ALL
+  SELECT * FROM web_sales_agg
+) AS combined
+ORDER BY net_paid DESC
 LIMIT 100

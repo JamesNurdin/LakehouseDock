@@ -1,39 +1,45 @@
-WITH filtered_returns AS (
+WITH date_filtered AS (
+    SELECT d_date_sk
+    FROM date_dim
+    WHERE d_year = 2002
+),
+store_ret AS (
     SELECT
-        cr.cr_returned_date_sk,
-        cr.cr_net_loss,
-        cr.cr_call_center_sk,
-        cr.cr_reason_sk,
-        cr.cr_item_sk,
-        cr.cr_refunded_cdemo_sk
-    FROM catalog_returns cr
-    WHERE cr.cr_net_loss > 0
+        r.r_reason_desc AS reason_desc,
+        'Store' AS source,
+        SUM(sr.sr_net_loss) AS total_net_loss,
+        COUNT(*) AS return_cnt
+    FROM store_returns sr
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    JOIN date_filtered df ON sr.sr_returned_date_sk = df.d_date_sk
+    GROUP BY r.r_reason_desc
+),
+web_ret AS (
+    SELECT
+        r.r_reason_desc AS reason_desc,
+        'Web' AS source,
+        SUM(wr.wr_net_loss) AS total_net_loss,
+        COUNT(*) AS return_cnt
+    FROM web_returns wr
+    JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
+    JOIN date_filtered df ON wr.wr_returned_date_sk = df.d_date_sk
+    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    GROUP BY r.r_reason_desc
+),
+combined AS (
+    SELECT * FROM store_ret
+    UNION ALL
+    SELECT * FROM web_ret
 )
 SELECT
-    cc.cc_name,
-    r.r_reason_desc,
-    SUM(fr.cr_net_loss) AS total_net_loss,
-    COUNT(*) AS return_count,
-    AVG(fr.cr_net_loss) AS avg_net_loss,
-    CONCAT('CC_', CAST(cc.cc_call_center_sk AS VARCHAR)) AS cc_key
-FROM filtered_returns fr
-JOIN call_center cc
-    ON fr.cr_call_center_sk = cc.cc_call_center_sk
-JOIN item i
-    ON fr.cr_item_sk = i.i_item_sk
-JOIN reason r
-    ON fr.cr_reason_sk = r.r_reason_sk
-JOIN customer_demographics cd
-    ON fr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-WHERE regexp_like(i.i_item_desc, '(?i)portable|wireless')
-  AND r.r_reason_desc LIKE '%damage%'
-  AND cd.cd_dep_employed_count >= 2
-  AND cc.cc_class = 'large'
-  AND fr.cr_net_loss > (SELECT AVG(cr2.cr_net_loss) FROM catalog_returns cr2)
-GROUP BY
-    cc.cc_name,
-    r.r_reason_desc,
-    cc.cc_call_center_sk
-HAVING COUNT(DISTINCT i.i_item_id) > 5
-ORDER BY total_net_loss DESC
+    c.reason_desc,
+    c.source,
+    c.total_net_loss,
+    c.return_cnt,
+    CASE
+        WHEN c.total_net_loss > (SELECT AVG(total_net_loss) FROM combined) THEN 'Above Avg'
+        ELSE 'Below Avg'
+    END AS loss_category
+FROM combined c
+ORDER BY c.total_net_loss DESC
 LIMIT 100

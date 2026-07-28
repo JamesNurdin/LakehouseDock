@@ -1,57 +1,75 @@
-WITH cr_agg AS (
+WITH sr_agg AS (
     SELECT
-        cr.cr_returned_date_sk,
-        cr.cr_refunded_cdemo_sk,
-        cr.cr_refunded_addr_sk,
-        cr.cr_ship_mode_sk,
-        cr.cr_return_amount,
-        cr.cr_fee,
-        cr.cr_net_loss,
-        cd.cd_gender,
-        cd.cd_marital_status,
-        cd.cd_purchase_estimate,
-        ca.ca_state,
-        sm.sm_carrier,
-        sm.sm_contract
-    FROM catalog_returns cr
-    JOIN customer_demographics cd ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-    JOIN customer_address ca ON cr.cr_refunded_addr_sk = ca.ca_address_sk
-    JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-    WHERE cd.cd_purchase_estimate >= 8000
-      AND sm.sm_carrier = 'PRIVATECARRIER'
+        sr_ticket_number,
+        SUM(sr_return_amt)          AS total_return_amt,
+        SUM(sr_net_loss)           AS total_return_loss,
+        COUNT(*)                   AS return_cnt
+    FROM store_returns
+    WHERE sr_returned_date_sk IN (
+        SELECT d_date_sk FROM date_dim WHERE d_year = 2001
+    )
+    GROUP BY sr_ticket_number
 ),
-ws_ship AS (
+cr_agg AS (
     SELECT
-        ws.ws_order_number,
-        ws.ws_bill_cdemo_sk,
-        ws.ws_ext_sales_price,
-        ws.ws_net_profit,
-        ws.ws_ship_mode_sk
-    FROM web_sales ws
-    WHERE ws.ws_net_profit > 0
+        cr_order_number,
+        SUM(cr_return_amount)       AS total_return_amount,
+        SUM(cr_net_loss)            AS total_return_loss,
+        COUNT(*)                    AS return_cnt
+    FROM catalog_returns
+    WHERE cr_returned_date_sk IN (
+        SELECT d_date_sk FROM date_dim WHERE d_year = 2001
+    )
+    GROUP BY cr_order_number
 )
+SELECT *
+FROM (
+    SELECT
+        d.d_year                                      AS year,
+        i.i_category                                  AS category,
+        SUM(ss.ss_ext_sales_price)                  AS total_sales,
+        SUM(sr_agg.total_return_loss)               AS total_return_loss,
+        COUNT(DISTINCT ss.ss_ticket_number)         AS transaction_cnt,
+        CASE WHEN SUM(ss.ss_ext_sales_price) > 1000000 THEN 'HIGH' ELSE 'NORMAL' END AS sales_flag
+    FROM store_sales ss
+    JOIN sr_agg               ON ss.ss_ticket_number = sr_agg.sr_ticket_number
+    JOIN date_dim d           ON ss.ss_sold_date_sk   = d.d_date_sk
+    JOIN time_dim t           ON ss.ss_sold_time_sk   = t.t_time_sk
+    JOIN item i               ON ss.ss_item_sk        = i.i_item_sk
+    JOIN promotion p          ON ss.ss_promo_sk       = p.p_promo_sk
+    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN customer_address ca ON ss.ss_addr_sk        = ca.ca_address_sk
+    WHERE d.d_year = 2001
+      AND i.i_brand = 'Brand#12'
+      AND p.p_discount_active = 'Y'
+      AND t.t_hour BETWEEN 8 AND 18
+      AND hd.hd_income_band_sk IN (4, 15)
+      AND ca.ca_state = 'CA'
+    GROUP BY d.d_year, i.i_category
+) 
+UNION ALL
 SELECT
-    sr.sr_returned_date_sk,
-    sr.sr_customer_sk,
-    cd_sr.cd_gender,
-    ca_sr.ca_state,
-    ws_ship.ws_order_number,
-    ws_ship.ws_net_profit,
-    COALESCE(cr_agg.cr_return_amount, 0) AS return_amount,
-    COALESCE(cr_agg.cr_fee, 0) AS return_fee,
-    CASE WHEN COALESCE(cr_agg.cr_net_loss, 0) > 50 THEN 'High' ELSE 'Low' END AS net_loss_category,
-    ROW_NUMBER() OVER (
-        PARTITION BY cd_sr.cd_gender
-        ORDER BY (COALESCE(cr_agg.cr_return_amount, 0) + sr.sr_return_amt + ws_ship.ws_ext_sales_price) DESC
-    ) AS gender_rank
-FROM store_returns sr
-JOIN customer_demographics cd_sr ON sr.sr_cdemo_sk = cd_sr.cd_demo_sk
-JOIN customer_address ca_sr ON sr.sr_addr_sk = ca_sr.ca_address_sk
-LEFT JOIN cr_agg ON cr_agg.cr_refunded_cdemo_sk = cd_sr.cd_demo_sk
-LEFT JOIN ws_ship ON ws_ship.ws_bill_cdemo_sk = cd_sr.cd_demo_sk
-JOIN ship_mode sm_ws ON ws_ship.ws_ship_mode_sk = sm_ws.sm_ship_mode_sk
-WHERE sr.sr_return_quantity > 1
-  AND cd_sr.cd_marital_status = 'M'
-  AND ca_sr.ca_state IN ('CA', 'NY')
-  AND sm_ws.sm_carrier = 'ALLIANCE'
+    d.d_year                                      AS year,
+    i.i_category                                  AS category,
+    SUM(cr_agg.total_return_amount)              AS total_sales,
+    SUM(cr_agg.total_return_loss)                AS total_return_loss,
+    SUM(cr_agg.return_cnt)                       AS transaction_cnt,
+    CASE WHEN SUM(cr_agg.total_return_amount) > 500000 THEN 'HIGH' ELSE 'NORMAL' END AS sales_flag
+FROM cr_agg
+JOIN catalog_returns cr       ON cr.cr_order_number    = cr_agg.cr_order_number
+JOIN date_dim d               ON cr.cr_returned_date_sk = d.d_date_sk
+JOIN time_dim t               ON cr.cr_returned_time_sk = t.t_time_sk
+JOIN item i                   ON cr.cr_item_sk          = i.i_item_sk
+JOIN call_center cc           ON cr.cr_call_center_sk   = cc.cc_call_center_sk
+JOIN warehouse w              ON cr.cr_warehouse_sk     = w.w_warehouse_sk
+JOIN household_demographics hd ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
+JOIN customer_address ca      ON cr.cr_refunded_addr_sk = ca.ca_address_sk
+JOIN reason r                 ON cr.cr_reason_sk        = r.r_reason_sk
+WHERE d.d_year = 2001
+  AND r.r_reason_desc = 'Package was damaged'
+  AND w.w_state = 'CA'
+  AND hd.hd_vehicle_count >= 0
+  AND ca.ca_country = 'United States'
+GROUP BY d.d_year, i.i_category
+ORDER BY year DESC, total_sales DESC
 LIMIT 100

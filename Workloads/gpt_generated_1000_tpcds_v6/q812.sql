@@ -1,59 +1,48 @@
-WITH filtered_returns AS (
-    SELECT
-        cr.cr_warehouse_sk,
-        cr.cr_return_amount,
-        cr.cr_return_quantity,
-        cr.cr_store_credit,
-        cr.cr_return_tax,
-        cr.cr_order_number,
-        cr.cr_refunded_cdemo_sk,
-        cr.cr_refunded_hdemo_sk,
-        cr.cr_refunded_addr_sk
-    FROM
-        catalog_returns cr
-    WHERE
-        cr.cr_return_amount > 100
-        AND cr.cr_return_quantity >= 2
-        AND cr.cr_store_credit BETWEEN 10 AND 200
-        AND cr.cr_return_tax IS NOT NULL
-        AND cr.cr_return_quantity IS NOT NULL
-        AND cr.cr_return_amount IS NOT NULL
-) 
+WITH sales_agg AS (
+   SELECT
+       c.c_customer_id,
+       c.c_first_name,
+       c.c_last_name,
+       CASE
+           WHEN hd.hd_buy_potential = '0-500' THEN 'Low'
+           WHEN hd.hd_buy_potential = '501-1000' THEN 'Medium'
+           ELSE 'High'
+       END AS buy_potential_category,
+       SUM(cs.cs_ext_sales_price) AS total_sales,
+       SUM(cs.cs_net_profit) AS total_profit,
+       COUNT(*) AS transaction_count
+   FROM catalog_sales cs
+   LEFT JOIN household_demographics hd
+       ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+   LEFT JOIN customer c
+       ON cs.cs_bill_customer_sk = c.c_customer_sk
+   WHERE cs.cs_ext_wholesale_cost > 1500.00
+     AND cs.cs_ext_tax < 50.00
+     AND cs.cs_quantity > 1
+     AND c.c_birth_month IN (6, 12)
+     AND c.c_birth_year BETWEEN 1960 AND 1985
+     AND hd.hd_vehicle_count >= 1
+     AND hd.hd_buy_potential NOT LIKE 'Unknown'
+   GROUP BY
+       c.c_customer_id,
+       c.c_first_name,
+       c.c_last_name,
+       CASE
+           WHEN hd.hd_buy_potential = '0-500' THEN 'Low'
+           WHEN hd.hd_buy_potential = '501-1000' THEN 'Medium'
+           ELSE 'High'
+       END
+)
 SELECT
-    w.w_warehouse_name,
-    w.w_state AS warehouse_state,
-    cd.cd_education_status,
-    COALESCE(ca.ca_state, 'UNKNOWN') AS customer_state,
-    hd.hd_buy_potential,
-    SUM(fr.cr_return_amount) AS total_return_amount,
-    AVG(fr.cr_return_tax) AS avg_return_tax,
-    COUNT(DISTINCT fr.cr_order_number) AS distinct_orders,
-    MIN(fr.cr_return_quantity) AS min_quantity,
-    MAX(fr.cr_return_quantity) AS max_quantity
-FROM
-    filtered_returns fr
-    INNER JOIN warehouse w
-        ON fr.cr_warehouse_sk = w.w_warehouse_sk
-    INNER JOIN customer_demographics cd
-        ON fr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-    LEFT OUTER JOIN customer_address ca
-        ON fr.cr_refunded_addr_sk = ca.ca_address_sk
-    INNER JOIN household_demographics hd
-        ON fr.cr_refunded_hdemo_sk = hd.hd_demo_sk
-WHERE
-    cd.cd_education_status IN ('4 yr Degree', 'Advanced Degree')
-    AND ca.ca_state = 'CA'
-    AND w.w_state = 'TX'
-    AND hd.hd_income_band_sk IN (3, 4, 5)
-GROUP BY
-    w.w_warehouse_name,
-    w.w_state,
-    cd.cd_education_status,
-    COALESCE(ca.ca_state, 'UNKNOWN'),
-    hd.hd_buy_potential
-HAVING
-    SUM(fr.cr_return_amount) > 5000
-    AND COUNT(DISTINCT fr.cr_order_number) >= 5
-ORDER BY
-    total_return_amount DESC
+    s.c_customer_id,
+    s.c_first_name,
+    s.c_last_name,
+    s.buy_potential_category,
+    s.total_sales,
+    s.total_profit,
+    s.transaction_count,
+    ROW_NUMBER() OVER (ORDER BY s.total_sales DESC) AS sales_rank,
+    RANK() OVER (PARTITION BY s.buy_potential_category ORDER BY s.total_profit DESC) AS profit_rank_within_category
+FROM sales_agg s
+ORDER BY s.total_sales DESC
 LIMIT 100

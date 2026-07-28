@@ -1,54 +1,62 @@
-WITH agg_returns AS (
+/* goal: Compute sales and profit metrics by warehouse, ship mode and customer state, include subtotals, profit category, distinct customers, and a running total of sales per warehouse */
+WITH base AS (
     SELECT
-        sr_item_sk,
-        sr_store_sk,
-        SUM(sr_return_quantity) AS total_quantity,
-        SUM(sr_return_amt) AS total_return_amt,
-        COUNT(*) AS return_cnt
-    FROM store_returns
-    WHERE sr_return_quantity >= 1
-      AND sr_return_amt > 0
-      AND sr_return_tax >= 0
-      AND sr_return_ship_cost <= 100
-      AND sr_refunded_cash IS NOT NULL
-    GROUP BY sr_item_sk, sr_store_sk
+        cs.cs_ship_date_sk,
+        cs.cs_quantity,
+        cs.cs_list_price,
+        cs.cs_ext_sales_price,
+        cs.cs_net_profit,
+        cs.cs_bill_addr_sk,
+        ca.ca_state,
+        sm.sm_type,
+        sm.sm_contract,
+        w.w_warehouse_name,
+        w.w_country
+    FROM catalog_sales cs
+    JOIN customer_address ca
+      ON cs.cs_bill_addr_sk = ca.ca_address_sk
+    JOIN ship_mode sm
+      ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN warehouse w
+      ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    WHERE cs.cs_ship_date_sk IN (2450830, 2450875)
+      AND cs.cs_list_price >= 80
+      AND sm.sm_contract = 'OrDuVy2H'
+      AND w.w_country = 'United States'
+),
+agg AS (
+    SELECT
+        w_warehouse_name,
+        sm_type,
+        ca_state,
+        SUM(cs_net_profit) AS sum_net_profit,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(cs_ext_sales_price) AS total_sales,
+        AVG(cs_list_price) AS avg_list_price,
+        COUNT(DISTINCT cs_bill_addr_sk) AS distinct_customers,
+        MIN(cs_ship_date_sk) AS first_ship_date_sk
+    FROM base
+    GROUP BY GROUPING SETS (
+        (w_warehouse_name, sm_type, ca_state),
+        (w_warehouse_name, sm_type),
+        (w_warehouse_name),
+        ()
+    )
 )
 SELECT
-    i.i_item_id,
-    i.i_brand,
-    i.i_category_id,
-    s.s_store_name,
-    s.s_market_id,
-    a.total_quantity,
-    a.total_return_amt,
-    a.return_cnt,
-    CASE
-        WHEN a.total_return_amt > 2000 THEN 'HIGH'
-        WHEN a.total_return_amt > 500 THEN 'MEDIUM'
-        ELSE 'LOW'
-    END AS return_level,
-    ROUND(a.total_return_amt / NULLIF(a.total_quantity, 0), 2) AS avg_return_per_qty,
-    (
-        SELECT AVG(sr2.sr_return_amt)
-        FROM store_returns sr2
-        WHERE sr2.sr_item_sk = i.i_item_sk
-    ) AS avg_item_return_amt,
-    RANK() OVER (PARTITION BY s.s_market_id ORDER BY a.total_return_amt DESC) AS market_return_rank
-FROM agg_returns a
-JOIN item i
-    ON a.sr_item_sk = i.i_item_sk
-JOIN store s
-    ON a.sr_store_sk = s.s_store_sk
-WHERE i.i_category_id IN (2, 6, 7)
-  AND i.i_brand LIKE 'edu %'
-  AND s.s_market_id IN (1, 2, 8)
-  AND s.s_tax_percentage > 0.05
-  AND a.total_quantity >= 10
-  AND EXISTS (
-        SELECT 1
-        FROM store_returns sr3
-        WHERE sr3.sr_item_sk = i.i_item_sk
-          AND sr3.sr_refunded_cash > 100
-      )
-ORDER BY s.s_market_id, market_return_rank
+    w_warehouse_name,
+    sm_type,
+    ca_state,
+    CASE WHEN sum_net_profit > 0 THEN 'Positive' ELSE 'Negative' END AS profit_category,
+    total_quantity,
+    total_sales,
+    avg_list_price,
+    distinct_customers,
+    SUM(total_sales) OVER (
+        PARTITION BY w_warehouse_name
+        ORDER BY first_ship_date_sk
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS running_sales
+FROM agg
+ORDER BY w_warehouse_name, sm_type, ca_state
 LIMIT 100

@@ -1,61 +1,55 @@
-WITH sales_base AS (
+WITH agg AS (
     SELECT
-        ss.ss_sold_date_sk,
-        ss.ss_sold_time_sk,
-        ss.ss_item_sk,
-        ss.ss_hdemo_sk,
-        ss.ss_promo_sk,
-        ss.ss_quantity,
-        ss.ss_ext_sales_price,
-        ss.ss_ext_discount_amt,
-        ss.ss_net_paid,
         d.d_year,
         i.i_category,
-        i.i_class,
-        hd.hd_income_band_sk,
-        p.p_discount_active,
-        t.t_hour,
-        t.t_meal_time
-    FROM store_sales ss
+        cd.cd_gender,
+        hd.hd_buy_potential,
+        COUNT(DISTINCT ws.ws_order_number) AS orders,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
     JOIN date_dim d
-        ON ss.ss_sold_date_sk = d.d_date_sk
+        ON ws.ws_sold_date_sk = d.d_date_sk
     JOIN time_dim t
-        ON ss.ss_sold_time_sk = t.t_time_sk
+        ON ws.ws_sold_time_sk = t.t_time_sk
     JOIN item i
-        ON ss.ss_item_sk = i.i_item_sk
+        ON ws.ws_item_sk = i.i_item_sk
+    JOIN customer c
+        ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_address ca
+        ON ws.ws_bill_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd
+        ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
     JOIN household_demographics hd
-        ON ss.ss_hdemo_sk = hd.hd_demo_sk
+        ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib
+        ON hd.hd_income_band_sk = ib.ib_income_band_sk
     JOIN promotion p
-        ON ss.ss_promo_sk = p.p_promo_sk
-    WHERE d.d_year = 2001
-      AND i.i_class IN ('hockey', 'pop')
-      AND ss.ss_quantity > 1
-      AND hd.hd_income_band_sk BETWEEN 3 AND 5
-      AND p.p_discount_active = 'Y'
+        ON ws.ws_promo_sk = p.p_promo_sk
+    JOIN store s
+        ON s.s_closed_date_sk = d.d_date_sk
+    LEFT JOIN catalog_returns cr
+        ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN inventory inv
+        ON inv.inv_date_sk = d.d_date_sk
+        AND inv.inv_item_sk = i.i_item_sk
+    WHERE d.d_year BETWEEN 2001 AND 2002
+      AND t.t_shift = 'first'
+      AND ib.ib_lower_bound >= 50001
+    GROUP BY d.d_year, i.i_category, cd.cd_gender, hd.hd_buy_potential
+    HAVING SUM(ws.ws_net_profit) > 10000
 )
 SELECT
-    sb.d_year,
-    sb.i_category,
-    sb.i_class,
-    COUNT(*) AS transaction_cnt,
-    SUM(sb.ss_ext_sales_price) AS total_sales,
-    SUM(sb.ss_ext_discount_amt) AS total_discount,
-    CASE
-        WHEN SUM(sb.ss_ext_discount_amt) / NULLIF(SUM(sb.ss_ext_sales_price), 0) > 0.10 THEN 'High Discount'
-        ELSE 'Low Discount'
-    END AS discount_level,
-    COALESCE(wp.wp_type, 'NoPage') AS page_type,
-    RANK() OVER (PARTITION BY sb.d_year ORDER BY SUM(sb.ss_ext_sales_price) DESC) AS sales_rank
-FROM sales_base sb
-LEFT JOIN web_page wp
-    ON sb.ss_sold_date_sk = wp.wp_creation_date_sk
-JOIN web_site ws
-    ON ws.web_open_date_sk = sb.ss_sold_date_sk
-GROUP BY
-    sb.d_year,
-    sb.i_category,
-    sb.i_class,
-    wp.wp_type
-HAVING SUM(sb.ss_ext_sales_price) > 10000
-ORDER BY sb.d_year, sales_rank
+    agg.d_year,
+    agg.i_category,
+    agg.cd_gender,
+    agg.hd_buy_potential,
+    agg.orders,
+    agg.total_profit,
+    AVG(agg.total_profit) OVER (
+        PARTITION BY agg.d_year
+        ORDER BY agg.i_category
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS cumulative_avg_profit
+FROM agg
+ORDER BY agg.d_year DESC, agg.total_profit DESC
 LIMIT 100

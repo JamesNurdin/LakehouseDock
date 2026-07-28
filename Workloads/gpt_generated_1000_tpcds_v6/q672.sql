@@ -1,59 +1,48 @@
-WITH customer_sales AS (
+WITH catalog_sales_agg AS (
     SELECT
-        c.c_customer_sk,
-        c.c_customer_id,
-        d.d_year,
-        SUM(cs.cs_net_profit) AS catalog_profit,
-        SUM(ss.ss_net_profit) AS store_profit,
-        SUM(ws.ws_net_profit) AS web_profit,
-        COUNT(DISTINCT cs.cs_order_number) AS catalog_orders,
-        COUNT(DISTINCT ss.ss_ticket_number) AS store_orders,
-        COUNT(DISTINCT ws.ws_order_number) AS web_orders,
-        MIN(ws.ws_web_site_sk) AS web_site_sk
-    FROM
-        customer c
-        JOIN catalog_sales cs ON cs.cs_bill_customer_sk = c.c_customer_sk
-        JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
-        JOIN store_sales ss ON ss.ss_customer_sk = c.c_customer_sk
-            AND ss.ss_sold_date_sk = d.d_date_sk
-        JOIN web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
-            AND ws.ws_sold_date_sk = d.d_date_sk
-    WHERE
-        c.c_first_sales_date_sk = 2452167
-        AND d.d_year = 2000
-        AND d.d_dow IN (1, 2, 3)
-    GROUP BY
-        c.c_customer_sk,
-        c.c_customer_id,
-        d.d_year
+        i.i_item_sk AS item_sk,
+        i.i_item_id AS item_id,
+        i.i_product_name AS product_name,
+        SUM(cs.cs_ext_sales_price) AS total_sales
+    FROM catalog_sales cs
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
+    LEFT JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    WHERE td.t_hour BETWEEN 9 AND 17
+      AND i.i_current_price > 20
+      AND (p.p_channel_radio = 'N' OR p.p_channel_radio IS NULL)
+    GROUP BY i.i_item_sk, i.i_item_id, i.i_product_name
+),
+web_sales_agg AS (
+    SELECT
+        i.i_item_sk AS item_sk,
+        i.i_item_id AS item_id,
+        i.i_product_name AS product_name,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN time_dim td ON ws.ws_sold_time_sk = td.t_time_sk
+    LEFT JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE td.t_hour BETWEEN 9 AND 17
+      AND i.i_current_price > 20
+      AND (p.p_channel_radio = 'N' OR p.p_channel_radio IS NULL)
+    GROUP BY i.i_item_sk, i.i_item_id, i.i_product_name
+),
+combined_sales AS (
+    SELECT * FROM catalog_sales_agg
+    UNION ALL
+    SELECT * FROM web_sales_agg
 )
 SELECT
-    cs.c_customer_id,
-    cs.d_year,
-    cs.catalog_profit,
-    cs.store_profit,
-    cs.web_profit,
-    (cs.catalog_profit + cs.store_profit + cs.web_profit) AS total_profit,
-    CASE
-        WHEN (cs.catalog_profit + cs.store_profit + cs.web_profit) > 10000 THEN 'High'
-        WHEN (cs.catalog_profit + cs.store_profit + cs.web_profit) > 5000 THEN 'Medium'
-        ELSE 'Low'
-    END AS profit_category,
-    wsit.web_name,
-    RANK() OVER (PARTITION BY cs.c_customer_id ORDER BY (cs.catalog_profit + cs.store_profit + cs.web_profit) DESC) AS profit_rank,
-    (
-        SELECT AVG(t.total_profit)
-        FROM (
-            SELECT SUM(cs_inner.cs_net_profit) AS total_profit
-            FROM catalog_sales cs_inner
-            GROUP BY cs_inner.cs_bill_customer_sk
-        ) t
-    ) AS avg_customer_profit
-FROM
-    customer_sales cs
-    JOIN web_site wsit ON wsit.web_site_sk = cs.web_site_sk
-WHERE
-    wsit.web_class = 'Technology'
-ORDER BY
-    total_profit DESC
+    cs.item_sk,
+    cs.item_id,
+    cs.product_name,
+    cs.total_sales
+FROM combined_sales cs
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM store_returns sr
+    WHERE sr.sr_item_sk = cs.item_sk
+)
+ORDER BY cs.total_sales DESC
 LIMIT 100

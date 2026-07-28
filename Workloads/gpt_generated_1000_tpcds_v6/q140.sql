@@ -1,48 +1,64 @@
-WITH joined_data AS (
+WITH filtered AS (
     SELECT
-        cs.cs_sold_date_sk AS cs_sold_date_sk,
-        cs.cs_order_number AS cs_order_number,
-        cs.cs_net_paid AS cs_net_paid,
-        cr.cr_net_loss AS cr_net_loss,
-        i.i_current_price AS i_current_price,
-        cd.cd_gender AS cd_gender,
-        cd.cd_education_status AS cd_education_status,
-        cd.cd_dep_employed_count AS cd_dep_employed_count,
-        w.w_state AS w_state,
-        p.p_discount_active AS p_discount_active
-    FROM catalog_sales cs
-    JOIN catalog_returns cr
-        ON cr.cr_order_number = cs.cs_order_number
-    JOIN customer c
-        ON cs.cs_bill_customer_sk = c.c_customer_sk
-    JOIN customer_demographics cd
-        ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
-    JOIN warehouse w
-        ON cs.cs_warehouse_sk = w.w_warehouse_sk
-    JOIN item i
-        ON cs.cs_item_sk = i.i_item_sk
-    JOIN promotion p
-        ON cs.cs_promo_sk = p.p_promo_sk
-    JOIN reason r
-        ON cr.cr_reason_sk = r.r_reason_sk
-    JOIN inventory inv
-        ON i.i_item_sk = inv.inv_item_sk
-           AND w.w_warehouse_sk = inv.inv_warehouse_sk
-    WHERE cd.cd_education_status = '4 yr Degree'
-      AND cd.cd_dep_employed_count >= 3
-      AND i.i_brand = 'BrandA'
-      AND w.w_state = 'CA'
-      AND p.p_discount_active = 'Y'
+        sr.sr_returned_date_sk,
+        sr.sr_item_sk,
+        sr.sr_addr_sk,
+        sr.sr_return_quantity,
+        sr.sr_return_amt,
+        sr.sr_return_ship_cost,
+        sr.sr_cdemo_sk,
+        i.i_item_sk,
+        i.i_category,
+        i.i_category_id,
+        i.i_brand,
+        i.i_manufact_id,
+        i.i_container,
+        ca.ca_address_sk,
+        ca.ca_state,
+        ca.ca_location_type,
+        ca.ca_gmt_offset,
+        inv.inv_quantity_on_hand
+    FROM tpcds.store_returns AS sr
+    JOIN tpcds.item AS i
+        ON sr.sr_item_sk = i.i_item_sk
+    JOIN tpcds.customer_address AS ca
+        ON sr.sr_addr_sk = ca.ca_address_sk
+    JOIN tpcds.inventory AS inv
+        ON inv.inv_item_sk = i.i_item_sk
+    WHERE i.i_category_id IN (4, 6, 8)                                   -- predicate 1
+      AND i.i_manufact_id = 264                                          -- predicate 2
+      AND i.i_container = 'Unknown'                                      -- predicate 3
+      AND ca.ca_location_type = 'apartment'                             -- predicate 4
+      AND ca.ca_gmt_offset BETWEEN -8.00 AND -5.00                      -- predicate 5
+      AND sr.sr_return_ship_cost > 0                                    -- predicate 6
+      AND sr.sr_cdemo_sk > 1000000                                      -- predicate 7
+      AND inv.inv_quantity_on_hand > 0                                   -- predicate 8
+),
+agg AS (
+    SELECT
+        i_category,
+        i_brand,
+        ca_state,
+        SUM(sr_return_amt) AS total_return_amount,
+        AVG(sr_return_ship_cost) AS avg_ship_cost,
+        COUNT(*) AS return_cnt,
+        MAX(inv_quantity_on_hand) AS max_qty_on_hand
+    FROM filtered
+    GROUP BY i_category, i_brand, ca_state
 )
 SELECT
-    w_state,
-    cd_gender,
-    COUNT(DISTINCT cs_order_number) AS distinct_orders,
-    SUM(cs_net_paid) AS total_net_paid,
-    SUM(cr_net_loss) AS total_return_loss,
-    AVG(i_current_price) AS avg_item_price,
-    MIN(cs_sold_date_sk) AS earliest_sold_date_sk
-FROM joined_data
-GROUP BY ROLLUP (w_state, cd_gender)
-HAVING SUM(cs_net_paid) > 100000
-ORDER BY w_state ASC NULLS LAST, cd_gender ASC NULLS LAST
+    agg.i_category,
+    agg.i_brand,
+    agg.ca_state,
+    agg.total_return_amount,
+    agg.avg_ship_cost,
+    agg.return_cnt,
+    agg.max_qty_on_hand,
+    ROW_NUMBER() OVER (PARTITION BY agg.i_category ORDER BY agg.total_return_amount DESC) AS category_brand_rank,
+    CASE
+        WHEN agg.total_return_amount > 50000 THEN 'HIGH'
+        ELSE 'NORMAL'
+    END AS return_level,
+    (SELECT COUNT(*) FROM filtered f2 WHERE f2.ca_state = agg.ca_state) AS state_return_count
+FROM agg
+ORDER BY agg.i_category, category_brand_rank

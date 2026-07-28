@@ -1,12 +1,8 @@
-SELECT
-    cc_call_center_id,
-    cc_name,
-    cc_city,
-    cc_state,
-    cc_sq_ft,
-    cc_gmt_offset
-FROM tpcds.call_center
-WHERE cc_state = 'CA'
-  AND cc_gmt_offset = -8.00
-  AND cc_sq_ft > 1000000
-LIMIT 100
+SELECT cr_order_number,
+       cr_return_amount,
+       cr_refunded_cash,
+       cr_return_quantity
+FROM catalog_returns
+WHERE cr_refunded_cash > 1000
+  AND cr_return_quantity = 1
+ORDER BY cr_refunded_cash DESC

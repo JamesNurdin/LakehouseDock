@@ -1,53 +1,46 @@
-/*
-Goal: Compute per‑call‑center and per‑promotion sales performance by combining catalog and web sales, then derive overall metrics such as average total sales and total profit, filtering to only high‑profit groups. The query demonstrates multi‑table joins, a CTE with aggregation, a scalar subquery, HAVING, and ordering.
-*/
-WITH sales_agg AS (
+WITH base AS (
     SELECT
-        cc.cc_call_center_id,
-        p.p_promo_id,
-        sm.sm_type,
-        td.t_hour,
-        SUM(cs.cs_ext_sales_price) AS catalog_sales_amount,
-        SUM(cs.cs_net_profit)       AS catalog_profit,
-        SUM(ws.ws_ext_sales_price) AS web_sales_amount,
-        SUM(ws.ws_net_profit)       AS web_profit
-    FROM catalog_sales cs
-    JOIN call_center cc
-        ON cs.cs_call_center_sk = cc.cc_call_center_sk
-    JOIN promotion p
-        ON cs.cs_promo_sk = p.p_promo_sk
-    JOIN ship_mode sm
-        ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN time_dim td
-        ON cs.cs_sold_time_sk = td.t_time_sk
-    JOIN web_sales ws
-        ON ws.ws_sold_time_sk = td.t_time_sk
-        AND ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-        AND ws.ws_promo_sk = p.p_promo_sk
-    WHERE cc.cc_zip IN ('33951', '41933')
-      AND cc.cc_sq_ft > 0
-      AND td.t_second IN (5, 13)
-      AND p.p_response_target = 1
-      AND sm.sm_type = 'AIR'
-    GROUP BY
-        cc.cc_call_center_id,
-        p.p_promo_id,
-        sm.sm_type,
-        td.t_hour
+        ws_site.web_name,
+        cp.cp_department,
+        cd_bill.cd_gender,
+        d_sold.d_year,
+        d_sold.d_fy_quarter_seq,
+        ws.ws_order_number,
+        ws.ws_ext_sales_price,
+        ws.ws_net_profit,
+        inv.inv_quantity_on_hand
+    FROM tpcds.web_sales ws
+    JOIN tpcds.date_dim d_sold
+        ON ws.ws_sold_date_sk = d_sold.d_date_sk
+    JOIN tpcds.customer_demographics cd_bill
+        ON ws.ws_bill_cdemo_sk = cd_bill.cd_demo_sk
+    JOIN tpcds.web_site ws_site
+        ON ws.ws_web_site_sk = ws_site.web_site_sk
+    JOIN tpcds.catalog_page cp
+        ON cp.cp_start_date_sk = d_sold.d_date_sk
+    JOIN tpcds.inventory inv
+        ON inv.inv_date_sk = d_sold.d_date_sk
+    WHERE d_sold.d_year = 2000
+      AND d_sold.d_fy_quarter_seq = 8
+      AND cd_bill.cd_gender = 'M'
+      AND cp.cp_department = 'Electronics'
+      AND inv.inv_quantity_on_hand > 500
+      AND ws.ws_net_profit > 0
 )
 SELECT
-    sa.cc_call_center_id,
-    sa.p_promo_id,
-    AVG(sa.catalog_sales_amount + sa.web_sales_amount) AS avg_total_sales,
-    SUM(sa.catalog_profit + sa.web_profit)               AS total_profit,
-    (
-        SELECT SUM(cs_ext_sales_price)
-        FROM catalog_sales
-    )                                                    AS overall_catalog_sales
-FROM sales_agg sa
-GROUP BY
-    sa.cc_call_center_id,
-    sa.p_promo_id
-HAVING SUM(sa.catalog_profit + sa.web_profit) > 10000
-ORDER BY total_profit DESC
+    web_name,
+    cp_department,
+    cd_gender,
+    d_year,
+    d_fy_quarter_seq,
+    COUNT(DISTINCT ws_order_number) AS orders,
+    SUM(ws_ext_sales_price) AS total_sales,
+    AVG(ws_net_profit) AS avg_profit,
+    MIN(ws_ext_sales_price) AS min_sale,
+    MAX(ws_ext_sales_price) AS max_sale,
+    SUM(inv_quantity_on_hand) AS total_inventory_qty,
+    SUM(SUM(ws_ext_sales_price)) OVER (PARTITION BY web_name) AS site_total_sales
+FROM base
+GROUP BY web_name, cp_department, cd_gender, d_year, d_fy_quarter_seq
+ORDER BY total_sales DESC
 LIMIT 100

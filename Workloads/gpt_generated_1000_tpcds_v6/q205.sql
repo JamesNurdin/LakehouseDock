@@ -1,37 +1,41 @@
-WITH promo_sales AS (
+WITH filtered_returns AS (
     SELECT
-        p.p_promo_id,
-        p.p_promo_name,
-        p.p_channel_details,
-        ws.ws_promo_sk,
-        ws.ws_net_profit,
-        ws.ws_bill_customer_sk,
-        c.c_email_address
-    FROM web_sales ws
-    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
-    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
-    WHERE regexp_like(p.p_channel_details, '(?i)family')
-      AND p.p_promo_name LIKE '%Discount%'
-      AND regexp_like(c.c_email_address, '@[A-Za-z0-9.-]+\\.com$')
+        sr.sr_store_sk,
+        sr.sr_returned_date_sk,
+        sr.sr_return_amt,
+        sr.sr_return_tax,
+        d.d_quarter_name,
+        d.d_fy_week_seq,
+        d.d_day_name,
+        (d.d_quarter_name || '_' || CAST(d.d_fy_week_seq AS varchar)) AS period_key
+    FROM store_returns sr
+    JOIN date_dim d
+      ON sr.sr_returned_date_sk = d.d_date_sk
+    WHERE regexp_like(d.d_quarter_name, '^190[0-9]Q[12]$')
+      AND d.d_day_name LIKE '%day'
+),
+overall_avg AS (
+    SELECT AVG(sr_return_amt) AS overall_avg_return_amt
+    FROM store_returns
 )
 SELECT
-    ps.p_promo_id,
-    ps.p_promo_name,
-    regexp_extract(ps.p_channel_details, '(family|young|old)', 1) AS extracted_keyword,
-    SUM(ps.ws_net_profit) AS total_profit,
-    COUNT(DISTINCT ps.ws_bill_customer_sk) AS unique_customers,
-    (SELECT AVG(ws2.ws_net_profit) FROM web_sales ws2) AS avg_profit_all
-FROM promo_sales ps
+    fr.sr_store_sk,
+    fr.period_key,
+    COUNT(DISTINCT fr.sr_returned_date_sk) AS distinct_return_days,
+    AVG(fr.sr_return_amt) AS avg_return_amt,
+    SUM(fr.sr_return_tax) AS total_return_tax,
+    CASE
+        WHEN AVG(fr.sr_return_amt) > oa.overall_avg_return_amt THEN 'Above Avg'
+        ELSE 'Below Avg'
+    END AS performance_category
+FROM filtered_returns fr
+CROSS JOIN overall_avg oa
 WHERE EXISTS (
     SELECT 1
-    FROM web_sales ws3
-    WHERE ws3.ws_promo_sk = ps.ws_promo_sk
-      AND ws3.ws_quantity > 5
+    FROM store_returns sr2
+    WHERE sr2.sr_store_sk = fr.sr_store_sk
+      AND sr2.sr_return_tax > 50.00
 )
-GROUP BY
-    ps.p_promo_id,
-    ps.p_promo_name,
-    regexp_extract(ps.p_channel_details, '(family|young|old)', 1)
-HAVING SUM(ps.ws_net_profit) > 10000
-ORDER BY total_profit DESC
+GROUP BY fr.sr_store_sk, fr.period_key, oa.overall_avg_return_amt
+ORDER BY avg_return_amt DESC
 LIMIT 100

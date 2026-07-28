@@ -1,52 +1,59 @@
-WITH base AS (
+/*
+Goal: Calculate total return amount and total web sales amount by store, shipping carrier, and warehouse city for customers in California who have at least three employed dependents. The query filters to high‑value web sales (list price > 50) and returns with significant tax (> 10). It joins all seven selected TPC‑DS tables using the permitted join keys and aggregates key measures.
+*/
+WITH cust_demo AS (
     SELECT
-        cc.cc_call_center_sk,
-        cc.cc_name,
-        cc.cc_company,
-        cc.cc_state,
-        cc.cc_county,
-        cr.cr_return_quantity,
-        cr.cr_return_amount,
-        cr.cr_return_amt_inc_tax,
-        cr.cr_return_tax,
-        cr.cr_fee,
-        cr.cr_return_ship_cost,
-        cr.cr_refunded_cash,
-        cr.cr_net_loss,
-        ca_ret.ca_city AS returning_city,
-        ca_ret.ca_state AS returning_state,
-        ca_ret.ca_country,
-        ca_ret.ca_street_type
-    FROM catalog_returns cr
-    INNER JOIN call_center cc
-        ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    INNER JOIN customer_address ca_ret
-        ON cr.cr_returning_addr_sk = ca_ret.ca_address_sk
-    WHERE cc.cc_state = 'CA'
-      AND cc.cc_company IN (1, 2, 3)
-      AND cc.cc_county LIKE '%County'
-      AND cr.cr_return_amount > 100
-      AND ca_ret.ca_country = 'United States'
-      AND ca_ret.ca_street_type = 'Drive'
+        c.c_customer_sk,
+        cd.cd_demo_sk,
+        cd.cd_dep_employed_count
+    FROM tpcds.customer c
+    JOIN tpcds.customer_demographics cd
+        ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+store_ret AS (
+    SELECT
+        sr.sr_customer_sk,
+        sr.sr_store_sk,
+        sr.sr_return_amt,
+        sr.sr_return_tax,
+        sr.sr_return_ship_cost
+    FROM tpcds.store_returns sr
+    WHERE sr.sr_return_tax > 10.00
+),
+web AS (
+    SELECT
+        ws.ws_bill_customer_sk,
+        ws.ws_ship_mode_sk,
+        ws.ws_warehouse_sk,
+        ws.ws_list_price,
+        ws.ws_net_paid,
+        ws.ws_ext_discount_amt
+    FROM tpcds.web_sales ws
+    WHERE ws.ws_list_price > 50.00
 )
 SELECT
-    b.cc_name,
-    b.cc_company,
-    b.cc_state,
-    b.returning_city,
-    b.returning_state,
-    b.cr_return_quantity,
-    b.cr_return_amount,
-    b.cr_return_amt_inc_tax,
-    CASE
-        WHEN b.cr_return_amount > avg_tbl.avg_return THEN 'Above Avg'
-        ELSE 'Below Avg'
-    END AS amount_category,
-    RANK() OVER (PARTITION BY b.cc_company ORDER BY b.cr_return_amount DESC) AS amount_rank,
-    ROW_NUMBER() OVER (PARTITION BY b.cc_call_center_sk ORDER BY b.cr_return_amt_inc_tax DESC) AS rn_within_center
-FROM base b
-CROSS JOIN (
-    SELECT AVG(cr_return_amount) AS avg_return FROM catalog_returns
-) avg_tbl
-ORDER BY amount_rank, b.cr_return_amount DESC
+    s.s_store_name,
+    sm.sm_carrier,
+    w.w_city,
+    COUNT(DISTINCT cd.c_customer_sk)                     AS distinct_customers,
+    SUM(sr.sr_return_amt)                               AS total_return_amount,
+    SUM(ws.ws_net_paid)                                 AS total_sales_amount,
+    AVG(ws.ws_ext_discount_amt)                         AS avg_discount,
+    MIN(sr.sr_return_tax)                               AS min_return_tax,
+    MAX(ws.ws_list_price)                               AS max_list_price
+FROM cust_demo cd
+JOIN store_ret sr
+    ON sr.sr_customer_sk = cd.c_customer_sk
+JOIN web ws
+    ON ws.ws_bill_customer_sk = cd.c_customer_sk
+JOIN tpcds.store s
+    ON sr.sr_store_sk = s.s_store_sk
+JOIN tpcds.ship_mode sm
+    ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN tpcds.warehouse w
+    ON ws.ws_warehouse_sk = w.w_warehouse_sk
+WHERE cd.cd_dep_employed_count >= 3
+  AND s.s_state = 'CA'
+GROUP BY s.s_store_name, sm.sm_carrier, w.w_city
+ORDER BY total_sales_amount DESC
 LIMIT 100

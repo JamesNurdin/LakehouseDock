@@ -1,41 +1,38 @@
-WITH store_agg AS (
-    SELECT
-        i.i_item_id AS item_id,
-        i.i_product_name AS product_name,
-        i.i_class AS item_class,
-        SUM(ss.ss_ext_sales_price) AS sales_amount,
-        'store' AS sales_channel
-    FROM store_sales ss
-    JOIN item i ON ss.ss_item_sk = i.i_item_sk
-    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
-    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
-    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    WHERE i.i_class = 'shirts'
-      AND p.p_discount_active = 'Y'
-      AND c.c_birth_month = 11
-    GROUP BY i.i_item_id, i.i_product_name, i.i_class
-),
-web_agg AS (
-    SELECT
-        i.i_item_id AS item_id,
-        i.i_product_name AS product_name,
-        i.i_class AS item_class,
-        SUM(ws.ws_ext_sales_price) AS sales_amount,
-        'web' AS sales_channel
-    FROM web_sales ws
-    JOIN item i ON ws.ws_item_sk = i.i_item_sk
-    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
-    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
-    JOIN household_demographics hd ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-    WHERE i.i_class = 'shirts'
-      AND p.p_discount_active = 'Y'
-      AND c.c_birth_month = 11
-    GROUP BY i.i_item_id, i.i_product_name, i.i_class
+WITH united AS (
+    SELECT d.d_date AS return_date,
+           r.r_reason_desc AS reason,
+           SUM(sr.sr_net_loss) AS total_net_loss,
+           'store' AS return_source
+    FROM store_returns sr
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    WHERE sr.sr_net_loss > 0
+    GROUP BY d.d_date, r.r_reason_desc
+
+    UNION ALL
+
+    SELECT d.d_date AS return_date,
+           r.r_reason_desc AS reason,
+           SUM(cr.cr_net_loss) AS total_net_loss,
+           'catalog' AS return_source
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+    WHERE cr.cr_net_loss > 0
+    GROUP BY d.d_date, r.r_reason_desc
 )
-SELECT *
-FROM store_agg
-UNION ALL
-SELECT *
-FROM web_agg
-ORDER BY sales_amount DESC
+SELECT u.return_date,
+       u.reason,
+       u.total_net_loss,
+       u.return_source
+FROM united u
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM web_returns wr
+    JOIN date_dim d2 ON wr.wr_returned_date_sk = d2.d_date_sk
+    JOIN reason r2 ON wr.wr_reason_sk = r2.r_reason_sk
+    WHERE d2.d_date = u.return_date
+      AND r2.r_reason_desc = u.reason
+)
+ORDER BY u.return_date DESC, u.total_net_loss DESC
 LIMIT 100

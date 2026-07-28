@@ -1,43 +1,60 @@
-WITH agg AS (
-    SELECT
-        d_ret.d_year,
-        sm.sm_type,
-        SUM(cr.cr_return_amount) AS total_return_amount,
-        SUM(cr.cr_net_loss) AS total_net_loss,
-        COUNT(*) AS cnt_returns
-    FROM catalog_returns cr
-    JOIN ship_mode sm
-        ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN date_dim d_ret
-        ON cr.cr_returned_date_sk = d_ret.d_date_sk
-    JOIN store_returns sr
-        ON sr.sr_returned_date_sk = d_ret.d_date_sk
-    JOIN web_page wp
-        ON wp.wp_type = 'article'
-    JOIN date_dim d_create
-        ON wp.wp_creation_date_sk = d_create.d_date_sk
-    JOIN date_dim d_access
-        ON wp.wp_access_date_sk = d_access.d_date_sk
-    WHERE cr.cr_return_tax > 10
-      AND cr.cr_return_amount > 50
-      AND sm.sm_code IN ('AIR', 'SEA')
-      AND d_ret.d_year BETWEEN 1999 AND 2001
-      AND sr.sr_return_quantity > 1
-      AND d_ret.d_current_year = 'N'
-    GROUP BY GROUPING SETS ((d_ret.d_year, sm.sm_type), (d_ret.d_year), ())
-    HAVING SUM(cr.cr_net_loss) > 1000
+WITH joined_data AS (
+   SELECT
+       td.t_hour,
+       s.s_state,
+       cd.cd_gender,
+       hd.hd_buy_potential,
+       c.c_customer_sk,
+       ss.ss_net_paid,
+       ss.ss_net_profit,
+       ss.ss_quantity,
+       cs.cs_net_paid,
+       cs.cs_net_profit,
+       ws.ws_net_paid,
+       ws.ws_net_profit,
+       cr.cr_net_loss,
+       cr.cr_return_quantity,
+       wr.wr_net_loss,
+       wr.wr_return_quantity
+   FROM time_dim td
+   JOIN store_sales ss ON ss.ss_sold_time_sk = td.t_time_sk
+   JOIN store s ON s.s_store_sk = ss.ss_store_sk
+   JOIN customer c ON c.c_customer_sk = ss.ss_customer_sk
+   JOIN customer_demographics cd ON cd.cd_demo_sk = ss.ss_cdemo_sk
+   JOIN household_demographics hd ON hd.hd_demo_sk = ss.ss_hdemo_sk
+   JOIN customer_address ca ON ca.ca_address_sk = ss.ss_addr_sk
+   JOIN catalog_sales cs ON cs.cs_sold_time_sk = td.t_time_sk
+   JOIN catalog_returns cr ON cr.cr_returned_time_sk = td.t_time_sk
+       AND cr.cr_item_sk = cs.cs_item_sk
+   JOIN web_sales ws ON ws.ws_sold_time_sk = td.t_time_sk
+   JOIN web_returns wr ON wr.wr_returned_time_sk = td.t_time_sk
+       AND wr.wr_item_sk = ws.ws_item_sk
+   JOIN income_band ib ON ib.ib_income_band_sk = hd.hd_income_band_sk
+   WHERE td.t_hour BETWEEN 9 AND 17
+     AND s.s_state = 'CA'
+     AND cd.cd_gender = 'M'
+     AND ib.ib_upper_bound >= 60000
+     AND hd.hd_buy_potential = '1001-5000'
 )
 SELECT
-    d_year,
-    sm_type,
-    total_return_amount,
-    total_net_loss,
-    cnt_returns,
-    RANK() OVER (PARTITION BY d_year ORDER BY total_net_loss DESC) AS net_loss_rank,
-    CASE
-        WHEN total_net_loss > (SELECT AVG(cr_net_loss) FROM catalog_returns) THEN 'ABOVE_AVG'
-        ELSE 'BELOW_AVG'
-    END AS net_loss_vs_avg
-FROM agg
-ORDER BY d_year, net_loss_rank
+    t_hour,
+    s_state,
+    cd_gender,
+    hd_buy_potential,
+    COUNT(DISTINCT c_customer_sk) AS unique_customers,
+    SUM(ss_net_paid) AS total_store_sales,
+    SUM(cs_net_paid) AS total_catalog_sales,
+    SUM(ws_net_paid) AS total_web_sales,
+    SUM(cr_net_loss) AS total_catalog_returns_loss,
+    SUM(wr_net_loss) AS total_web_returns_loss,
+    SUM(CASE WHEN cr_net_loss > 0 THEN cr_net_loss ELSE 0 END) AS catalog_positive_loss,
+    AVG(ss_quantity) AS avg_store_quantity,
+    COUNT(*) AS total_records
+FROM joined_data
+GROUP BY
+    t_hour,
+    s_state,
+    cd_gender,
+    hd_buy_potential
+ORDER BY total_store_sales DESC
 LIMIT 100

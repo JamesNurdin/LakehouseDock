@@ -1,38 +1,43 @@
-WITH filtered_pages AS (
+WITH filtered_items AS (
     SELECT
-        cp_catalog_page_sk,
-        cp_catalog_number,
-        regexp_extract(cp_description, '(\\w+)', 1) AS first_word,
-        cp_description
-    FROM catalog_page
-    WHERE cp_description LIKE '%sale%'
-      AND regexp_like(cp_description, '^.*[0-9]{4}.*$')
+        i_item_sk,
+        i_item_desc,
+        i_category,
+        REGEXP_EXTRACT(i_item_desc, '(\\w+)', 1) AS first_word
+    FROM tpcds.item
+    WHERE REGEXP_LIKE(i_item_desc, '(?i)blue')
+      AND i_item_desc LIKE '%large%'
+),
+catalog_agg AS (
+    SELECT
+        d.d_year AS year,
+        sm.sm_carrier AS carrier,
+        SUM(cs.cs_net_paid) AS total_sales,
+        COUNT(*) AS txn_count,
+        CONCAT(CAST(d.d_year AS VARCHAR), '-', sm.sm_carrier) AS year_carrier_key,
+        MIN(first_word) AS sample_first_word
+    FROM tpcds.catalog_sales cs
+    INNER JOIN filtered_items fi ON cs.cs_item_sk = fi.i_item_sk
+    INNER JOIN tpcds.date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    INNER JOIN tpcds.ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY d.d_year, sm.sm_carrier
+),
+web_agg AS (
+    SELECT
+        d.d_year AS year,
+        sm.sm_carrier AS carrier,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(*) AS txn_count,
+        CONCAT(CAST(d.d_year AS VARCHAR), '-', sm.sm_carrier) AS year_carrier_key,
+        MIN(first_word) AS sample_first_word
+    FROM tpcds.web_sales ws
+    INNER JOIN filtered_items fi ON ws.ws_item_sk = fi.i_item_sk
+    INNER JOIN tpcds.date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    INNER JOIN tpcds.ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY d.d_year, sm.sm_carrier
 )
-SELECT
-    cc.cc_call_center_id,
-    cc.cc_name,
-    concat(cc.cc_city, ', ', cc.cc_state) AS location,
-    filtered_pages.first_word,
-    sum(cs.cs_net_profit) AS total_net_profit,
-    count(DISTINCT cs.cs_order_number) AS distinct_orders,
-    max(d.d_year) AS latest_year
-FROM catalog_sales cs
-JOIN call_center cc
-  ON cs.cs_call_center_sk = cc.cc_call_center_sk
-JOIN date_dim d
-  ON cs.cs_sold_date_sk = d.d_date_sk
-JOIN filtered_pages
-  ON cs.cs_catalog_page_sk = filtered_pages.cp_catalog_page_sk
-WHERE cc.cc_hours LIKE '8AM-%'
-  AND regexp_like(cc.cc_street_type, '^(Boulevard|Rd|Way)$')
-  AND d.d_year BETWEEN 2000 AND 2002
-GROUP BY
-    cc.cc_call_center_id,
-    cc.cc_name,
-    cc.cc_city,
-    cc.cc_state,
-    filtered_pages.first_word,
-    cc.cc_hours
-HAVING sum(cs.cs_net_profit) > 10000
-ORDER BY total_net_profit DESC
+SELECT * FROM catalog_agg
+UNION ALL
+SELECT * FROM web_agg
+ORDER BY year, carrier
 LIMIT 100

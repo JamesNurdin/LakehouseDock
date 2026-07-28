@@ -1,48 +1,35 @@
-WITH avg_vehicle AS (
-   SELECT ib.ib_income_band_sk,
-          ib.ib_lower_bound,
-          ib.ib_upper_bound,
-          AVG(hd.hd_vehicle_count) AS avg_vehicle_cnt
-   FROM household_demographics hd
-   JOIN income_band ib
-     ON hd.hd_income_band_sk = ib.ib_income_band_sk
-   WHERE hd.hd_dep_count <= 3
-     AND hd.hd_vehicle_count >= 0
-   GROUP BY ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+WITH catalog_agg AS (
+    SELECT i.i_item_id,
+           i.i_category,
+           SUM(cs.cs_net_paid) AS total_sales,
+           'catalog' AS channel
+    FROM tpcds.catalog_sales cs
+    JOIN tpcds.item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN tpcds.ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN tpcds.promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    WHERE cs.cs_sold_date_sk BETWEEN 2451010 AND 2451200
+      AND sm.sm_carrier = 'FEDEX'
+      AND p.p_discount_active = 'N'
+    GROUP BY i.i_item_id, i.i_category
 ),
-high_potential AS (
-   SELECT ib.ib_income_band_sk,
-          ib.ib_lower_bound,
-          ib.ib_upper_bound,
-          COUNT(*) AS high_potential_cnt
-   FROM household_demographics hd
-   JOIN income_band ib
-     ON hd.hd_income_band_sk = ib.ib_income_band_sk
-   WHERE hd.hd_buy_potential = 'HIGH'
-   GROUP BY ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
-),
-unioned AS (
-   SELECT av.ib_lower_bound,
-          av.ib_upper_bound,
-          'AVG_VEHICLE' AS metric,
-          CAST(av.avg_vehicle_cnt AS double) AS metric_value
-   FROM avg_vehicle av
-   UNION ALL
-   SELECT hp.ib_lower_bound,
-          hp.ib_upper_bound,
-          'HIGH_POTENTIAL_COUNT' AS metric,
-          CAST(hp.high_potential_cnt AS double) AS metric_value
-   FROM high_potential hp
+web_agg AS (
+    SELECT i.i_item_id,
+           i.i_category,
+           SUM(ws.ws_net_paid) AS total_sales,
+           'web' AS channel
+    FROM tpcds.web_sales ws
+    JOIN tpcds.item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN tpcds.ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN tpcds.promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE ws.ws_sold_date_sk BETWEEN 2451010 AND 2451200
+      AND sm.sm_carrier = 'FEDEX'
+      AND p.p_discount_active = 'N'
+    GROUP BY i.i_item_id, i.i_category
 )
-SELECT DISTINCT
-    u.ib_lower_bound,
-    u.ib_upper_bound,
-    u.metric,
-    u.metric_value,
-    (SELECT AVG(hd3.hd_vehicle_count)
-       FROM household_demographics hd3
-       WHERE hd3.hd_vehicle_count >= 0) AS global_avg_vehicle
-FROM unioned u
-WHERE u.metric_value IS NOT NULL
-ORDER BY u.ib_lower_bound, u.metric
+SELECT *
+FROM catalog_agg
+UNION ALL
+SELECT *
+FROM web_agg
+ORDER BY total_sales DESC
 LIMIT 100

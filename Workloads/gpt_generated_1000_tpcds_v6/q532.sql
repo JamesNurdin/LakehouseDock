@@ -1,68 +1,51 @@
-WITH joined_data AS (
+WITH sales_agg AS (
     SELECT
-        cp.cp_catalog_number,
-        cp.cp_type,
-        i.i_brand,
-        i.i_category,
-        d.d_year,
-        d.d_date,
-        hd.hd_buy_potential,
-        hd.hd_income_band_sk,
-        r.r_reason_desc,
-        cs.cs_ext_sales_price,
-        cs.cs_net_profit,
-        cs.cs_order_number,
-        sr.sr_return_amt,
-        ws.ws_net_paid
+        s.s_store_sk,
+        s.s_store_name,
+        d_sold.d_year,
+        d_sold.d_month_seq,
+        SUM(cs.cs_net_profit)                      AS total_net_profit,
+        SUM(cs.cs_quantity)                        AS total_quantity,
+        COUNT(DISTINCT cs.cs_order_number)         AS order_cnt
     FROM catalog_sales cs
-    JOIN date_dim d
-        ON cs.cs_sold_date_sk = d.d_date_sk
-    JOIN catalog_page cp
-        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN item i
-        ON cs.cs_item_sk = i.i_item_sk
-    JOIN household_demographics hd
-        ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-    LEFT JOIN store_returns sr
-        ON sr.sr_returned_date_sk = cs.cs_sold_date_sk
-    LEFT JOIN reason r
-        ON sr.sr_reason_sk = r.r_reason_sk
-    LEFT JOIN web_sales ws
-        ON ws.ws_sold_date_sk = cs.cs_sold_date_sk
-        AND ws.ws_item_sk = cs.cs_item_sk
-    WHERE d.d_date BETWEEN DATE '1998-01-01' AND DATE '1998-12-31'
-      AND cp.cp_type = 'monthly'
-      AND i.i_brand = 'Brand#23'
-      AND hd.hd_income_band_sk = 5
-      AND r.r_reason_desc = 'Package was damaged'
-),
-aggregated AS (
-    SELECT
-        cp_catalog_number,
-        i_brand,
-        d_year,
-        hd_buy_potential,
-        SUM(cs_ext_sales_price) AS total_sales,
-        AVG(cs_net_profit) AS avg_profit,
-        COUNT(DISTINCT cs_order_number) AS order_cnt,
-        SUM(sr_return_amt) AS total_returns,
-        SUM(ws_net_paid) AS total_web_sales,
-        ROW_NUMBER() OVER (PARTITION BY d_year ORDER BY SUM(cs_ext_sales_price) DESC) AS sales_rank
-    FROM joined_data
-    GROUP BY cp_catalog_number, i_brand, d_year, hd_buy_potential
-    HAVING SUM(cs_ext_sales_price) > 100000
+    JOIN date_dim d_sold
+      ON cs.cs_sold_date_sk = d_sold.d_date_sk
+    JOIN time_dim t
+      ON cs.cs_sold_time_sk = t.t_time_sk
+    JOIN call_center cc
+      ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN store s
+      ON s.s_closed_date_sk = d_sold.d_date_sk
+    JOIN inventory i
+      ON i.inv_date_sk = d_sold.d_date_sk
+    JOIN web_site w
+      ON w.web_open_date_sk = d_sold.d_date_sk
+    WHERE d_sold.d_year = 2001                                 -- filter 1: specific year
+      AND s.s_country = 'United States'                       -- filter 2: store country
+      AND i.inv_quantity_on_hand > 0                          -- filter 3: inventory on hand
+      AND t.t_hour >= 9                                        -- filter 4: business hours
+    GROUP BY s.s_store_sk, s.s_store_name, d_sold.d_year, d_sold.d_month_seq
 )
 SELECT
-    cp_catalog_number,
-    i_brand,
-    d_year,
-    hd_buy_potential,
-    total_sales,
-    avg_profit,
-    order_cnt,
-    total_returns,
-    total_web_sales,
-    sales_rank
-FROM aggregated
-ORDER BY total_sales DESC
-LIMIT 100
+    sa.s_store_name,
+    sa.d_year,
+    sa.d_month_seq,
+    sa.total_net_profit,
+    sa.total_quantity,
+    sa.order_cnt,
+    RANK() OVER (PARTITION BY sa.d_year, sa.d_month_seq ORDER BY sa.total_net_profit DESC) AS profit_rank,
+    SUM(sa.total_net_profit) OVER (PARTITION BY sa.d_year ORDER BY sa.d_month_seq ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_year_profit,
+    (SELECT AVG(cs2.cs_net_profit)
+       FROM catalog_sales cs2
+       JOIN date_dim d2 ON cs2.cs_sold_date_sk = d2.d_date_sk
+      WHERE d2.d_year = sa.d_year)                             AS year_avg_profit
+FROM sales_agg sa
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM store s_ex
+    JOIN date_dim d_ex ON s_ex.s_closed_date_sk = d_ex.d_date_sk
+    JOIN inventory i_ex ON i_ex.inv_date_sk = d_ex.d_date_sk
+    WHERE s_ex.s_store_sk = sa.s_store_sk
+      AND i_ex.inv_quantity_on_hand = 0
+)
+ORDER BY sa.d_year, sa.d_month_seq, profit_rank

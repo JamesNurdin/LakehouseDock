@@ -1,56 +1,43 @@
-WITH combined AS (
+WITH base AS (
     SELECT
-        s.s_store_id AS store_id,
-        s.s_state AS state,
-        r.r_reason_desc AS reason_desc,
-        SUM(sr.sr_net_loss) AS store_net_loss,
-        SUM(cr.cr_net_loss) AS catalog_net_loss,
-        SUM(wr.wr_net_loss) AS web_net_loss,
-        COUNT(*) AS total_returns,
-        CASE
-            WHEN (SUM(sr.sr_net_loss) + SUM(cr.cr_net_loss) + SUM(wr.wr_net_loss)) > 0 THEN 'Loss'
-            ELSE 'NoLoss'
-        END AS loss_flag
-    FROM store_returns sr
-    JOIN time_dim td
-        ON sr.sr_return_time_sk = td.t_time_sk
-    JOIN customer c
-        ON sr.sr_customer_sk = c.c_customer_sk
-    JOIN customer_demographics cd
-        ON sr.sr_cdemo_sk = cd.cd_demo_sk
-    JOIN customer_address ca
-        ON sr.sr_addr_sk = ca.ca_address_sk
-    JOIN store s
-        ON sr.sr_store_sk = s.s_store_sk
-    JOIN reason r
-        ON sr.sr_reason_sk = r.r_reason_sk
-    JOIN catalog_returns cr
-        ON cr.cr_returned_time_sk = td.t_time_sk
-        AND cr.cr_refunded_customer_sk = c.c_customer_sk
-        AND cr.cr_refunded_addr_sk = ca.ca_address_sk
-    JOIN web_returns wr
-        ON wr.wr_returned_time_sk = td.t_time_sk
-        AND wr.wr_refunded_customer_sk = c.c_customer_sk
-        AND wr.wr_refunded_addr_sk = ca.ca_address_sk
-    WHERE td.t_hour BETWEEN 8 AND 17
-      AND s.s_state = 'CA'
-      AND ca.ca_county IN ('Mifflin County', 'York County')
-      AND r.r_reason_desc LIKE '%damaged%'
-      AND sr.sr_refunded_cash > 100
-      AND cr.cr_return_amount > 50
-      AND wr.wr_return_quantity > 1
-      AND cd.cd_dep_count <= 2
-    GROUP BY s.s_store_id, s.s_state, r.r_reason_desc
+        cr.cr_return_quantity,
+        cr.cr_return_amount,
+        cr.cr_net_loss,
+        d.d_year,
+        i.i_category,
+        i.i_manufact,
+        sm.sm_carrier
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE d.d_year = 2001
+      AND i.i_category_id IN (1, 5, 8)
+      AND i.i_manufact_id = 338
+      AND sm.sm_carrier = 'GREAT EASTERN'
+      AND d.d_current_month = 'Y'
+      AND cr.cr_return_amount > 10
+      AND NOT EXISTS (
+          SELECT 1
+          FROM catalog_returns cr2
+          WHERE cr2.cr_order_number = cr.cr_order_number
+            AND cr2.cr_net_loss = 0
+      )
 )
 SELECT
-    store_id,
-    state,
-    AVG(store_net_loss + catalog_net_loss + web_net_loss) AS avg_total_net_loss,
-    SUM(total_returns) AS total_return_events,
-    COUNT(DISTINCT reason_desc) AS distinct_reasons,
-    MAX(CASE WHEN loss_flag = 'Loss' THEN 1 ELSE 0 END) AS any_loss_flag
-FROM combined
-GROUP BY store_id, state
-HAVING AVG(store_net_loss + catalog_net_loss + web_net_loss) > 200
-ORDER BY avg_total_net_loss DESC
+    COALESCE(i_category, 'ALL') AS category,
+    COALESCE(i_manufact, 'ALL') AS manufacturer,
+    COALESCE(CAST(d_year AS VARCHAR), 'ALL') AS year,
+    CASE WHEN SUM(cr_net_loss) > 1000 THEN 'HIGH' ELSE 'LOW' END AS loss_level,
+    COUNT(*) AS return_cnt,
+    SUM(cr_return_amount) AS total_return_amount,
+    AVG(cr_return_quantity) AS avg_quantity
+FROM base
+GROUP BY GROUPING SETS (
+    (i_category, i_manufact, d_year),
+    (i_category, i_manufact),
+    (i_category),
+    ()
+)
+ORDER BY category, manufacturer, year, loss_level DESC
 LIMIT 100

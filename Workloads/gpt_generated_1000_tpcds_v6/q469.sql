@@ -1,49 +1,71 @@
-WITH filtered AS (
+WITH filtered_returns AS (
     SELECT
-        cd.cd_demo_sk,
-        cd.cd_credit_rating,
-        cd.cd_purchase_estimate,
-        cd.cd_dep_count,
-        cc.cc_state,
-        p.p_discount_active,
-        cs.cs_net_paid,
-        ss.ss_net_paid,
-        ws.ws_net_paid,
-        cs.cs_quantity,
-        ss.ss_quantity,
-        ws.ws_quantity
-    FROM tpcds.customer_demographics cd
-    JOIN tpcds.store_sales ss
-        ON ss.ss_cdemo_sk = cd.cd_demo_sk
-    JOIN tpcds.catalog_sales cs
-        ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
-    JOIN tpcds.web_sales ws
-        ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-    JOIN tpcds.promotion p
-        ON p.p_promo_sk = cs.cs_promo_sk
-    JOIN tpcds.call_center cc
-        ON cc.cc_call_center_sk = cs.cs_call_center_sk
-    WHERE cd.cd_credit_rating = 'High Risk'
-      AND cd.cd_dep_count <= 2
-      AND cc.cc_state = 'CA'
-      AND p.p_discount_active = 'Y'
-      AND cs.cs_quantity > 5
+        cr.cr_returned_date_sk,
+        cr.cr_returned_time_sk,
+        cr.cr_item_sk,
+        cr.cr_refunded_customer_sk,
+        cr.cr_refunded_cdemo_sk,
+        cr.cr_refunded_hdemo_sk,
+        cr.cr_refunded_addr_sk,
+        cr.cr_returning_customer_sk,
+        cr.cr_returning_cdemo_sk,
+        cr.cr_returning_hdemo_sk,
+        cr.cr_returning_addr_sk,
+        cr.cr_call_center_sk,
+        cr.cr_catalog_page_sk,
+        cr.cr_ship_mode_sk,
+        cr.cr_warehouse_sk,
+        cr.cr_reason_sk,
+        cr.cr_order_number,
+        cr.cr_return_quantity,
+        cr.cr_return_amount,
+        cr.cr_return_tax,
+        cr.cr_return_amt_inc_tax,
+        cr.cr_fee,
+        cr.cr_return_ship_cost,
+        cr.cr_refunded_cash,
+        cr.cr_reversed_charge,
+        cr.cr_store_credit,
+        cr.cr_net_loss
+    FROM tpcds.catalog_returns AS cr
+    WHERE cr.cr_store_credit > 50
+      AND cr.cr_refunded_cash < 4000
+      AND cr.cr_return_amount > 0
+),
+joined AS (
+    SELECT
+        fr.cr_returned_date_sk,
+        fr.cr_returned_time_sk,
+        fr.cr_item_sk,
+        fr.cr_return_quantity,
+        fr.cr_return_amount,
+        fr.cr_refunded_cash,
+        fr.cr_store_credit,
+        ca_refunded.ca_state AS refunded_state,
+        ca_refunded.ca_county AS refunded_county,
+        ca_returning.ca_street_type AS returning_street_type
+    FROM filtered_returns AS fr
+    JOIN tpcds.customer_address AS ca_refunded
+        ON fr.cr_refunded_addr_sk = ca_refunded.ca_address_sk
+    JOIN tpcds.customer_address AS ca_returning
+        ON fr.cr_returning_addr_sk = ca_returning.ca_address_sk
+    WHERE ca_refunded.ca_state = 'CA'
+      AND ca_refunded.ca_county = 'York County'
+      AND ca_returning.ca_street_type = 'Lane'
 )
 SELECT
-    cd_credit_rating,
-    cd_purchase_estimate,
-    cc_state,
-    CASE WHEN cd_credit_rating = 'High Risk' THEN 'Risky' ELSE 'Other' END AS risk_category,
-    COUNT(DISTINCT cd_demo_sk) AS demo_count,
-    SUM(cs_net_paid + ss_net_paid + ws_net_paid) AS total_net_paid,
-    AVG(cs_quantity + ss_quantity + ws_quantity) AS avg_quantity,
-    MIN(cs_net_paid) AS min_catalog_net,
-    MAX(ws_net_paid) AS max_web_net
-FROM filtered
+    refunded_state,
+    refunded_county,
+    returning_street_type,
+    COUNT(*) AS returns_cnt,
+    SUM(cr_return_amount) AS total_return_amount,
+    AVG(cr_refunded_cash) AS avg_refunded_cash,
+    MAX(cr_return_quantity) AS max_return_quantity,
+    MIN(cr_return_quantity) AS min_return_quantity
+FROM joined
 GROUP BY
-    cd_credit_rating,
-    cd_purchase_estimate,
-    cc_state,
-    CASE WHEN cd_credit_rating = 'High Risk' THEN 'Risky' ELSE 'Other' END
-ORDER BY total_net_paid DESC
+    refunded_state,
+    refunded_county,
+    returning_street_type
+ORDER BY total_return_amount DESC
 LIMIT 100

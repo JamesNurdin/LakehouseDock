@@ -1,80 +1,91 @@
-WITH
-  ss_agg AS (
+/*
+Goal: Identify the top revenue contributors across call centers and stores, categorising net amount levels, while excluding orders that have a catalogue return. The query joins all 15 TPC‑DS tables, applies multiple filters, uses a UNION ALL of two sub‑queries, a NOT EXISTS anti‑join, a CASE expression, a ROLLUP aggregation and window‑function ranking, and returns the first 100 rows.
+*/
+WITH catalog_data AS (
     SELECT
-      s.s_state,
-      ib.ib_upper_bound,
-      p.p_channel_event,
-      SUM(ss.ss_ext_sales_price)               AS store_sales_amount,
-      SUM(ss.ss_net_profit)                    AS store_profit,
-      COUNT(DISTINCT ss.ss_ticket_number)      AS store_txn_cnt
-    FROM store_sales ss
-    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
-    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
-    JOIN store s ON ss.ss_store_sk = s.s_store_sk
-    WHERE s.s_state = 'CA'
-      AND ca.ca_state = 'CA'
-      AND p.p_start_date_sk BETWEEN 2450118 AND 2450360
-      AND ib.ib_lower_bound >= 30000
-      AND ss.ss_sold_date_sk BETWEEN 2451200 AND 2451300
-      AND hd.hd_vehicle_count >= 1
-      AND hd.hd_dep_count <= 5
-    GROUP BY s.s_state, ib.ib_upper_bound, p.p_channel_event
-  ),
-  ws_agg AS (
+        cs.cs_sold_date_sk                AS date_sk,
+        cs.cs_order_number                AS order_number,
+        cs.cs_net_paid                    AS net_paid,
+        CAST(NULL AS decimal(7,2))        AS net_loss,
+        sm.sm_type                        AS ship_mode_type,
+        cc.cc_name                        AS call_center_name,
+        CAST(NULL AS varchar)             AS store_id,
+        CAST(NULL AS varchar)             AS reason_desc
+    FROM catalog_sales cs
+    JOIN catalog_page cp               ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN call_center cc                ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN ship_mode sm                  ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN warehouse w                  ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    JOIN customer c                    ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd      ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd    ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib                ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN time_dim td                   ON cs.cs_sold_time_sk = td.t_time_sk
+    WHERE cs.cs_quantity > 1
+      AND cs.cs_net_paid > 100
+      AND cc.cc_state = 'CA'
+      AND sm.sm_code = 'AIR'
+),
+store_data AS (
     SELECT
-      ib.ib_upper_bound,
-      p.p_channel_event,
-      SUM(ws.ws_ext_sales_price)               AS web_sales_amount,
-      SUM(ws.ws_net_profit)                    AS web_profit,
-      COUNT(DISTINCT ws.ws_order_number)       AS web_order_cnt
-    FROM web_sales ws
-    JOIN household_demographics hd ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    JOIN customer_address ca ON ws.ws_bill_addr_sk = ca.ca_address_sk
-    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
-    WHERE ws.ws_sold_date_sk BETWEEN 2451200 AND 2451300
-      AND p.p_start_date_sk BETWEEN 2450118 AND 2450360
-      AND ib.ib_lower_bound >= 30000
-      AND hd.hd_vehicle_count >= 1
-      AND hd.hd_dep_count <= 5
-    GROUP BY ib.ib_upper_bound, p.p_channel_event
-  )
+        sr.sr_returned_date_sk           AS date_sk,
+        sr.sr_ticket_number              AS order_number,
+        CAST(NULL AS decimal(7,2))       AS net_paid,
+        sr.sr_net_loss                   AS net_loss,
+        CAST(NULL AS varchar)            AS ship_mode_type,
+        CAST(NULL AS varchar)            AS call_center_name,
+        s.s_store_id                     AS store_id,
+        r.r_reason_desc                  AS reason_desc
+    FROM store_returns sr
+    JOIN time_dim td                      ON sr.sr_return_time_sk = td.t_time_sk
+    JOIN customer c                       ON sr.sr_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd         ON sr.sr_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd       ON sr.sr_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib                   ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN customer_address ca              ON sr.sr_addr_sk = ca.ca_address_sk
+    JOIN store s                          ON sr.sr_store_sk = s.s_store_sk
+    JOIN reason r                         ON sr.sr_reason_sk = r.r_reason_sk
+    WHERE sr.sr_return_quantity > 0
+      AND sr.sr_net_loss > 0
+      AND s.s_state = 'TX'
+      AND r.r_reason_desc LIKE '%damage%'
+),
+combined AS (
+    SELECT * FROM catalog_data
+    UNION ALL
+    SELECT * FROM store_data
+),
+pre_agg AS (
+    SELECT
+        date_sk,
+        order_number,
+        COALESCE(net_paid, 0) - COALESCE(net_loss, 0)                AS net_amount,
+        CASE
+            WHEN COALESCE(net_paid, 0) - COALESCE(net_loss, 0) > 1000 THEN 'HIGH'
+            WHEN COALESCE(net_paid, 0) - COALESCE(net_loss, 0) > 0    THEN 'MEDIUM'
+            ELSE 'LOW'
+        END                                                          AS amount_category,
+        ship_mode_type,
+        call_center_name,
+        store_id,
+        reason_desc
+    FROM combined
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM catalog_returns cr
+        WHERE cr.cr_order_number = combined.order_number
+    )
+)
 SELECT
-  store_state,
-  income_upper,
-  promo_channel,
-  SUM(store_sales_amount) AS store_sales_amount,
-  SUM(web_sales_amount)   AS web_sales_amount,
-  SUM(total_profit)       AS total_profit,
-  SUM(store_txn_cnt)      AS store_txn_cnt,
-  SUM(web_order_cnt)      AS web_order_cnt
-FROM (
-  SELECT
-    ss.s_state                     AS store_state,
-    ss.ib_upper_bound              AS income_upper,
-    ss.p_channel_event             AS promo_channel,
-    ss.store_sales_amount,
-    CAST(NULL AS double)           AS web_sales_amount,
-    ss.store_profit                AS total_profit,
-    ss.store_txn_cnt,
-    CAST(NULL AS bigint)           AS web_order_cnt
-  FROM ss_agg ss
-
-  UNION ALL
-
-  SELECT
-    CAST(NULL AS varchar)          AS store_state,
-    ws.ib_upper_bound,
-    ws.p_channel_event,
-    CAST(NULL AS double)           AS store_sales_amount,
-    ws.web_sales_amount,
-    ws.web_profit                  AS total_profit,
-    CAST(NULL AS bigint)           AS store_txn_cnt,
-    ws.web_order_cnt
-  FROM ws_agg ws
-) t
-GROUP BY ROLLUP (store_state, income_upper, promo_channel)
-ORDER BY store_state, income_upper, promo_channel
+    call_center_name,
+    store_id,
+    amount_category,
+    ship_mode_type,
+    SUM(net_amount)                                     AS total_net_amount,
+    ROW_NUMBER() OVER (PARTITION BY call_center_name ORDER BY SUM(net_amount) DESC) AS rn,
+    RANK()       OVER (PARTITION BY amount_category   ORDER BY SUM(net_amount) DESC) AS amt_rank
+FROM pre_agg
+GROUP BY ROLLUP (call_center_name, store_id, amount_category, ship_mode_type)
+HAVING SUM(net_amount) > 0
+ORDER BY total_net_amount DESC
 LIMIT 100

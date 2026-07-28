@@ -1,64 +1,109 @@
-/*
-Goal: Produce a sales‑and‑returns performance snapshot per hour, gender and catalog department, aggregating store sales profit, catalog return loss and web return loss. The query joins all seven selected tables, re‑uses the ITEM and CUSTOMER_DEMOGRAPHICS tables under multiple aliases, and includes a LEFT OUTER JOIN to Web_Returns so that store‑sales rows are kept even when no web return exists.
-*/
+WITH distinct_pages AS (
+    SELECT DISTINCT wp_web_page_sk, wp_url
+    FROM web_page
+    WHERE wp_link_count > 5
+),
+sales_data AS (
+    SELECT
+        i.i_category,
+        td.t_hour,
+        SUM(cs.cs_net_paid) AS total_net_paid,
+        SUM(cs.cs_ext_discount_amt) AS total_discount,
+        COUNT(*) AS sales_txn_cnt,
+        'catalog' AS sales_source
+    FROM catalog_sales cs
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
+    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+    WHERE cs.cs_list_price > 100
+      AND cs.cs_quantity >= 2
+      AND c.c_birth_year >= 1960
+      AND cd.cd_gender = 'M'
+    GROUP BY i.i_category, td.t_hour
+
+    UNION ALL
+
+    SELECT
+        i.i_category,
+        td.t_hour,
+        SUM(ss.ss_net_paid) AS total_net_paid,
+        SUM(ss.ss_ext_discount_amt) AS total_discount,
+        COUNT(*) AS sales_txn_cnt,
+        'store' AS sales_source
+    FROM store_sales ss
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN time_dim td ON ss.ss_sold_time_sk = td.t_time_sk
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
+    WHERE ss.ss_sales_price > 150
+      AND ss.ss_quantity >= 1
+      AND c.c_birth_year >= 1960
+      AND cd.cd_marital_status = 'M'
+    GROUP BY i.i_category, td.t_hour
+
+    UNION ALL
+
+    SELECT
+        i.i_category,
+        td.t_hour,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        COUNT(*) AS sales_txn_cnt,
+        'web' AS sales_source
+    FROM web_sales ws
+    LEFT JOIN distinct_pages dp ON ws.ws_web_page_sk = dp.wp_web_page_sk
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN time_dim td ON ws.ws_sold_time_sk = td.t_time_sk
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+    WHERE ws.ws_sales_price > 120
+      AND ws.ws_quantity >= 1
+      AND c.c_birth_year >= 1960
+      AND cd.cd_education_status = 'College'
+    GROUP BY i.i_category, td.t_hour
+),
+returns_agg AS (
+    SELECT
+        i.i_category,
+        td.t_hour,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        SUM(wr.wr_net_loss) AS total_net_loss,
+        COUNT(*) AS return_txn_cnt,
+        r.r_reason_desc
+    FROM web_returns wr
+    JOIN item i ON wr.wr_item_sk = i.i_item_sk
+    JOIN time_dim td ON wr.wr_returned_time_sk = td.t_time_sk
+    LEFT JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
+    JOIN customer c_refund ON wr.wr_refunded_customer_sk = c_refund.c_customer_sk
+    JOIN customer_demographics cd_refund ON wr.wr_refunded_cdemo_sk = cd_refund.cd_demo_sk
+    WHERE wr.wr_return_quantity > 0
+      AND r.r_reason_id = 'AAAAAAAADAAAAAAA'
+      AND c_refund.c_birth_year >= 1960
+      AND cd_refund.cd_credit_rating = 'Excellent'
+    GROUP BY i.i_category, td.t_hour, r.r_reason_desc
+)
 SELECT
-    td_sales.t_hour                                   AS hour_of_day,
-    cd_sales.cd_gender                               AS gender,
-    cp.cp_department                                 AS department,
-    SUM(ss.ss_net_profit)                           AS total_sales_profit,
-    SUM(cr.cr_net_loss)                              AS total_catalog_return_loss,
-    SUM(COALESCE(wr.wr_net_loss, 0))                AS total_web_return_loss,
-    COUNT(DISTINCT ss.ss_ticket_number)             AS distinct_tickets
-FROM store_sales ss
+    sd.i_category,
+    sd.t_hour,
+    sd.sales_source,
+    SUM(sd.total_net_paid) AS sum_net_paid,
+    SUM(sd.total_discount) AS sum_discount,
+    SUM(sd.sales_txn_cnt) AS total_sales_txns
+FROM sales_data sd
+GROUP BY sd.i_category, sd.t_hour, sd.sales_source
 
--- Join to time dimension for the sale timestamp
-JOIN time_dim td_sales
-  ON ss.ss_sold_time_sk = td_sales.t_time_sk
+UNION ALL
 
--- Join to ITEM (sales role) and reuse ITEM for catalog and web roles
-JOIN item i_sales
-  ON ss.ss_item_sk = i_sales.i_item_sk
+SELECT
+    ra.i_category,
+    ra.t_hour,
+    ra.r_reason_desc AS sales_source,
+    SUM(ra.total_return_amt) AS sum_net_paid,
+    SUM(ra.total_net_loss) AS sum_discount,
+    SUM(ra.return_txn_cnt) AS total_sales_txns
+FROM returns_agg ra
+GROUP BY ra.i_category, ra.t_hour, ra.r_reason_desc
 
--- Join to CUSTOMER_DEMOGRAPHICS for the buyer of the sale
-JOIN customer_demographics cd_sales
-  ON ss.ss_cdemo_sk = cd_sales.cd_demo_sk
-
--- Catalog Returns path (inner joins)
-JOIN catalog_returns cr
-  ON i_sales.i_item_sk = cr.cr_item_sk               -- rule: cr_item_sk = item.i_item_sk
-JOIN item i_cat
-  ON cr.cr_item_sk = i_cat.i_item_sk                  -- second alias of ITEM
-JOIN time_dim td_cat
-  ON cr.cr_returned_time_sk = td_cat.t_time_sk
-JOIN customer_demographics cd_refund
-  ON cr.cr_refunded_cdemo_sk = cd_refund.cd_demo_sk
-JOIN customer_demographics cd_returning
-  ON cr.cr_returning_cdemo_sk = cd_returning.cd_demo_sk
-JOIN catalog_page cp
-  ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-
--- Web Returns path (LEFT OUTER to preserve sales rows)
-LEFT JOIN web_returns wr
-  ON i_sales.i_item_sk = wr.wr_item_sk               -- rule: wr_item_sk = item.i_item_sk
-LEFT JOIN item i_web
-  ON wr.wr_item_sk = i_web.i_item_sk
-LEFT JOIN time_dim td_web
-  ON wr.wr_returned_time_sk = td_web.t_time_sk
-LEFT JOIN customer_demographics cd_wr_refund
-  ON wr.wr_refunded_cdemo_sk = cd_wr_refund.cd_demo_sk
-LEFT JOIN customer_demographics cd_wr_return
-  ON wr.wr_returning_cdemo_sk = cd_wr_return.cd_demo_sk
-
-WHERE td_sales.t_hour BETWEEN 8 AND 20               -- focus on business hours
-  AND cd_sales.cd_gender = 'M'                       -- example gender filter
-
-GROUP BY
-    td_sales.t_hour,
-    cd_sales.cd_gender,
-    cp.cp_department
-
-ORDER BY
-    total_web_return_loss DESC,
-    hour_of_day ASC
-
+ORDER BY i_category, t_hour, sales_source
 LIMIT 100

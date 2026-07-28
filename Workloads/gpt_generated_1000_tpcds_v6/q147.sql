@@ -1,55 +1,67 @@
-WITH filtered_returns AS (
-    SELECT
-        cr.cr_return_amt_inc_tax,
-        cr.cr_return_quantity,
-        cr.cr_order_number,
-        cr.cr_ship_mode_sk,
-        cr.cr_refunded_cdemo_sk,
-        cp.cp_department,
-        cp.cp_catalog_number,
-        sm.sm_carrier,
-        cd.cd_demo_sk,
-        cd.cd_gender,
-        cd.cd_credit_rating
-    FROM catalog_returns cr
-    JOIN catalog_page cp
-        ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN ship_mode sm
-        ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN customer_demographics cd
-        ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-    WHERE cp.cp_catalog_number IN (10, 13)
-      AND cp.cp_end_date_sk BETWEEN 2451000 AND 2451500
-      AND cr.cr_return_amt_inc_tax > 1000
-      AND cd.cd_credit_rating = 'Good'
+WITH base AS (
+   SELECT
+     c.c_customer_sk,
+     c.c_first_name,
+     c.c_last_name,
+     ca.ca_state AS ca_state,
+     ib.ib_lower_bound AS ib_lower_bound,
+     SUM(sr.sr_net_loss) AS total_store_net_loss,
+     SUM(cr.cr_net_loss) AS total_catalog_net_loss,
+     SUM(ws.ws_net_paid) AS total_web_paid,
+     COUNT(DISTINCT sr.sr_ticket_number) AS store_return_cnt,
+     COUNT(DISTINCT cr.cr_order_number) AS catalog_return_cnt,
+     COUNT(DISTINCT ws.ws_order_number) AS web_order_cnt
+   FROM store_returns sr
+   JOIN customer c ON sr.sr_customer_sk = c.c_customer_sk
+   JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
+   JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
+   JOIN household_demographics hd ON sr.sr_hdemo_sk = hd.hd_demo_sk
+   JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+   JOIN catalog_returns cr ON cr.cr_returning_customer_sk = c.c_customer_sk
+   JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
+   JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+   JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
+   JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+   JOIN web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+   WHERE
+     cc.cc_gmt_offset > 0
+     AND sm.sm_contract = 'OrDuVy2H'
+     AND ca.ca_zip = '57783'
+     AND ib.ib_lower_bound >= 30000
+     AND w.w_state = 'CA'
+     AND r.r_reason_desc LIKE '%defect%'
+   GROUP BY
+     c.c_customer_sk,
+     c.c_first_name,
+     c.c_last_name,
+     ca.ca_state,
+     ib.ib_lower_bound
+),
+filtered AS (
+   SELECT
+     b.*, 
+     (b.total_web_paid - b.total_store_net_loss - b.total_catalog_net_loss) AS net_contribution,
+     RANK() OVER (PARTITION BY b.ca_state ORDER BY (b.total_web_paid - b.total_store_net_loss - b.total_catalog_net_loss) DESC) AS state_rank
+   FROM base b
+   WHERE NOT EXISTS (
+       SELECT 1
+       FROM store_returns sr2
+       WHERE sr2.sr_customer_sk = b.c_customer_sk
+         AND sr2.sr_return_quantity > 10
+   )
 )
 SELECT
-    fr.cp_department,
-    fr.sm_carrier,
-    fr.cd_gender,
-    SUM(fr.cr_return_amt_inc_tax) AS total_return_amount,
-    AVG(ws.ws_net_profit) AS avg_net_profit,
-    COUNT(DISTINCT fr.cr_order_number) AS distinct_return_orders,
-    MIN(fr.cr_return_quantity) AS min_return_qty,
-    MAX(fr.cr_return_quantity) AS max_return_qty,
-    SUM(CASE WHEN fr.cr_return_amt_inc_tax > 2000 THEN fr.cr_return_amt_inc_tax ELSE 0 END) AS high_value_return_sum,
-    CASE
-        WHEN SUM(fr.cr_return_amt_inc_tax) > (
-            SELECT AVG(cr2.cr_return_amt_inc_tax)
-            FROM catalog_returns cr2
-        ) THEN 'Above Avg Total'
-        ELSE 'Below Avg Total'
-    END AS total_return_category
-FROM filtered_returns fr
-JOIN web_sales ws
-    ON ws.ws_bill_cdemo_sk = fr.cd_demo_sk
-   AND ws.ws_ship_mode_sk = fr.cr_ship_mode_sk
-WHERE EXISTS (
-    SELECT 1
-    FROM web_sales ws2
-    WHERE ws2.ws_ship_mode_sk = fr.cr_ship_mode_sk
-      AND ws2.ws_quantity > 10
-)
-GROUP BY fr.cp_department, fr.sm_carrier, fr.cd_gender
-ORDER BY total_return_amount DESC
+  f.c_customer_sk,
+  f.c_first_name,
+  f.c_last_name,
+  f.ca_state,
+  f.ib_lower_bound,
+  f.total_store_net_loss,
+  f.total_catalog_net_loss,
+  f.total_web_paid,
+  f.net_contribution,
+  f.state_rank
+FROM filtered f
+WHERE f.state_rank <= 5
+ORDER BY f.net_contribution DESC
 LIMIT 100

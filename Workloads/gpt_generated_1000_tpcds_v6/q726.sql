@@ -1,86 +1,35 @@
-WITH returns_furniture AS (
+WITH sales AS (
     SELECT
-        sr.sr_ticket_number,
-        i.i_item_id,
-        i.i_class,
-        r.r_reason_desc,
-        sr.sr_return_amt,
-        (
-            SELECT AVG(sr2.sr_return_amt)
-            FROM store_returns sr2
-            WHERE sr2.sr_reason_sk = sr.sr_reason_sk
-        ) AS avg_return_amt_for_reason,
-        inv.inv_quantity_on_hand,
-        w.w_zip,
-        ROW_NUMBER() OVER (PARTITION BY r.r_reason_desc ORDER BY sr.sr_return_amt DESC) AS rn
-    FROM store_returns sr
-    JOIN item i
-        ON sr.sr_item_sk = i.i_item_sk
-    JOIN reason r
-        ON sr.sr_reason_sk = r.r_reason_sk
-    JOIN customer_demographics cd
-        ON sr.sr_cdemo_sk = cd.cd_demo_sk
-    JOIN inventory inv
-        ON inv.inv_item_sk = i.i_item_sk
-    JOIN warehouse w
-        ON inv.inv_warehouse_sk = w.w_warehouse_sk
-    WHERE i.i_class = 'furniture'
-      AND cd.cd_gender = 'F'
-      AND inv.inv_quantity_on_hand > 500
-      AND w.w_zip = '44593'
-),
-returns_shirts AS (
-    SELECT
-        sr.sr_ticket_number,
-        i.i_item_id,
-        i.i_class,
-        r.r_reason_desc,
-        sr.sr_return_amt,
-        (
-            SELECT AVG(sr2.sr_return_amt)
-            FROM store_returns sr2
-            WHERE sr2.sr_reason_sk = sr.sr_reason_sk
-        ) AS avg_return_amt_for_reason,
-        inv.inv_quantity_on_hand,
-        w.w_zip,
-        ROW_NUMBER() OVER (PARTITION BY r.r_reason_desc ORDER BY sr.sr_return_amt DESC) AS rn
-    FROM store_returns sr
-    JOIN item i
-        ON sr.sr_item_sk = i.i_item_sk
-    JOIN reason r
-        ON sr.sr_reason_sk = r.r_reason_sk
-    JOIN customer_demographics cd
-        ON sr.sr_cdemo_sk = cd.cd_demo_sk
-    JOIN inventory inv
-        ON inv.inv_item_sk = i.i_item_sk
-    JOIN warehouse w
-        ON inv.inv_warehouse_sk = w.w_warehouse_sk
-    WHERE i.i_class = 'shirts'
-      AND cd.cd_gender = 'M'
-      AND inv.inv_quantity_on_hand > 500
-      AND w.w_zip = '44593'
+        cs.cs_item_sk,
+        cs.cs_promo_sk,
+        cs.cs_order_number,
+        cs.cs_net_profit
+    FROM tpcds.catalog_sales cs
 )
 SELECT
-    sr_ticket_number,
-    i_item_id,
-    i_class,
-    r_reason_desc,
-    sr_return_amt,
-    avg_return_amt_for_reason,
-    inv_quantity_on_hand,
-    w_zip,
-    rn
-FROM returns_furniture
-UNION ALL
-SELECT
-    sr_ticket_number,
-    i_item_id,
-    i_class,
-    r_reason_desc,
-    sr_return_amt,
-    avg_return_amt_for_reason,
-    inv_quantity_on_hand,
-    w_zip,
-    rn
-FROM returns_shirts
+    i.i_category,
+    i.i_brand,
+    concat(i.i_brand, ' - ', i.i_category) AS brand_category,
+    substring(i.i_product_name, 1, 3) AS product_prefix,
+    sum(s.cs_net_profit) AS total_net_profit,
+    count(distinct s.cs_order_number) AS order_cnt
+FROM sales s
+JOIN tpcds.item i
+    ON s.cs_item_sk = i.i_item_sk
+JOIN tpcds.promotion p
+    ON s.cs_promo_sk = p.p_promo_sk
+WHERE regexp_like(i.i_item_desc, '(?i)red')
+  AND p.p_promo_name LIKE '%DISCOUNT%'
+  AND EXISTS (
+        SELECT 1
+        FROM tpcds.store_returns sr
+        WHERE sr.sr_item_sk = i.i_item_sk
+          AND sr.sr_net_loss > 100
+    )
+GROUP BY
+    i.i_category,
+    i.i_brand,
+    concat(i.i_brand, ' - ', i.i_category),
+    substring(i.i_product_name, 1, 3)
+ORDER BY total_net_profit DESC
 LIMIT 100

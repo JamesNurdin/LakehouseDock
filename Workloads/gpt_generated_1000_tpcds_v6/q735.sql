@@ -1,47 +1,46 @@
-WITH top_customers AS (
-    SELECT
-        c.c_customer_sk,
-        concat(c.c_first_name, ' ', c.c_last_name) AS cust_name,
-        SUM(ws.ws_net_profit) AS total_profit,
-        (
-            SELECT COUNT(DISTINCT ws2.ws_bill_customer_sk)
-            FROM web_sales ws2
-            JOIN item i2 ON ws2.ws_item_sk = i2.i_item_sk
-            WHERE i2.i_manufact_id = 260
-        ) AS total_customers_for_manufact
-    FROM web_sales ws
-    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
-    JOIN item i ON ws.ws_item_sk = i.i_item_sk
-    WHERE i.i_manufact_id = 260
-      AND ws.ws_net_profit > 0
-    GROUP BY c.c_customer_sk, concat(c.c_first_name, ' ', c.c_last_name)
-    HAVING SUM(ws.ws_net_profit) > 1000
-)
-SELECT DISTINCT entity_type, entity_id, description, metric
-FROM (
-    SELECT
-        'customer' AS entity_type,
-        tc.c_customer_sk AS entity_id,
-        tc.cust_name AS description,
-        tc.total_profit AS metric
-    FROM top_customers tc
-
-    UNION ALL
-
-    SELECT
-        'item' AS entity_type,
-        i.i_item_sk AS entity_id,
-        i.i_product_name AS description,
-        CAST(inv.inv_quantity_on_hand AS double) AS metric
-    FROM inventory inv
-    JOIN item i ON inv.inv_item_sk = i.i_item_sk
-    WHERE inv.inv_quantity_on_hand < 50
-      AND i.i_class = 'infants'
-      AND EXISTS (
-          SELECT 1
-          FROM web_sales ws
-          WHERE ws.ws_item_sk = i.i_item_sk
-            AND ws.ws_net_profit > 0
-      )
-) AS combined
+SELECT
+    s.s_store_name,
+    d_sales.d_year,
+    i.i_category,
+    SUM(ss.ss_net_paid) AS total_sales,
+    SUM(sr.sr_net_loss) AS total_store_returns,
+    SUM(wr.wr_net_loss) AS total_web_returns,
+    COUNT(DISTINCT ss.ss_ticket_number) AS num_transactions
+FROM
+    store_sales ss
+JOIN date_dim d_sales
+    ON ss.ss_sold_date_sk = d_sales.d_date_sk
+JOIN item i
+    ON ss.ss_item_sk = i.i_item_sk
+JOIN store s
+    ON ss.ss_store_sk = s.s_store_sk
+JOIN store_returns sr
+    ON sr.sr_ticket_number = ss.ss_ticket_number
+JOIN reason r_store
+    ON sr.sr_reason_sk = r_store.r_reason_sk
+JOIN date_dim d_return
+    ON sr.sr_returned_date_sk = d_return.d_date_sk
+JOIN web_returns wr
+    ON wr.wr_item_sk = i.i_item_sk
+JOIN reason r_web
+    ON wr.wr_reason_sk = r_web.r_reason_sk
+JOIN date_dim d_web
+    ON wr.wr_returned_date_sk = d_web.d_date_sk
+JOIN date_dim d_closed
+    ON s.s_closed_date_sk = d_closed.d_date_sk
+WHERE
+    EXISTS (
+        SELECT 1
+        FROM web_returns wr2
+        WHERE wr2.wr_item_sk = i.i_item_sk
+          AND wr2.wr_returned_date_sk = d_sales.d_date_sk
+          AND wr2.wr_return_quantity > 0
+    )
+    AND d_sales.d_year = 2001
+GROUP BY
+    s.s_store_name,
+    d_sales.d_year,
+    i.i_category
+ORDER BY
+    total_sales DESC
 LIMIT 100

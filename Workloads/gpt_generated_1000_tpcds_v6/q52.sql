@@ -1,51 +1,37 @@
-WITH order_pages AS (
-    SELECT DISTINCT wp_web_page_sk
-    FROM web_page
-    WHERE wp_type = 'order'
-),
-filtered_sales AS (
+WITH sales AS (
     SELECT
-        ws.ws_bill_customer_sk,
-        ws.ws_bill_addr_sk,
-        ws.ws_ship_addr_sk,
-        ws.ws_web_page_sk,
-        ws.ws_net_paid_inc_ship_tax,
-        ws.ws_net_profit
-    FROM web_sales ws
-    WHERE ws.ws_net_profit > 0
-      AND ws.ws_net_paid_inc_ship_tax > 500
+        ca.ca_state AS state,
+        'sales' AS metric,
+        SUM(cs.cs_net_paid_inc_ship) AS amount
+    FROM catalog_sales cs
+    JOIN date_dim dd ON cs.cs_sold_date_sk = dd.d_date_sk
+    JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    WHERE dd.d_year = 2001
+    GROUP BY ca.ca_state
+),
+returns AS (
+    SELECT
+        ca.ca_state AS state,
+        'returns' AS metric,
+        SUM(wr.wr_net_loss) AS amount
+    FROM web_returns wr
+    JOIN date_dim dd ON wr.wr_returned_date_sk = dd.d_date_sk
+    JOIN customer_address ca ON wr.wr_refunded_addr_sk = ca.ca_address_sk
+    JOIN item i ON wr.wr_item_sk = i.i_item_sk
+    WHERE dd.d_year = 2001
+    GROUP BY ca.ca_state
+),
+combined AS (
+    SELECT state, metric, amount FROM sales
+    UNION ALL
+    SELECT state, metric, amount FROM returns
 )
 SELECT
-    c.c_customer_id,
-    c.c_first_name,
-    c.c_last_name,
-    ca_bill.ca_state,
-    wp.wp_type,
-    SUM(fs.ws_net_paid_inc_ship_tax) AS total_net_paid,
-    ROW_NUMBER() OVER (PARTITION BY ca_bill.ca_state ORDER BY SUM(fs.ws_net_paid_inc_ship_tax) DESC) AS state_rank
-FROM filtered_sales fs
-JOIN order_pages op
-    ON fs.ws_web_page_sk = op.wp_web_page_sk
-JOIN web_page wp
-    ON fs.ws_web_page_sk = wp.wp_web_page_sk
-JOIN customer c
-    ON fs.ws_bill_customer_sk = c.c_customer_sk
-JOIN customer_address ca_bill
-    ON fs.ws_bill_addr_sk = ca_bill.ca_address_sk
-WHERE c.c_preferred_cust_flag = 'Y'
-  AND ca_bill.ca_street_type = 'Ave'
-  AND EXISTS (
-        SELECT 1
-        FROM customer_address ca_ship
-        WHERE ca_ship.ca_address_sk = fs.ws_ship_addr_sk
-          AND ca_ship.ca_state = 'CA'
-    )
-GROUP BY
-    c.c_customer_id,
-    c.c_first_name,
-    c.c_last_name,
-    ca_bill.ca_state,
-    wp.wp_type
-HAVING SUM(fs.ws_net_paid_inc_ship_tax) > 1000
-ORDER BY total_net_paid DESC
-LIMIT 10
+    state,
+    metric,
+    amount,
+    row_number() OVER (PARTITION BY metric ORDER BY amount DESC) AS metric_rank
+FROM combined
+ORDER BY metric, amount DESC
+LIMIT 100

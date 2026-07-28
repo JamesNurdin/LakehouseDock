@@ -1,51 +1,52 @@
-WITH joined AS (
+WITH ss_agg AS (
     SELECT
-        cr.cr_return_amount,
-        cc.cc_call_center_id,
-        cc.cc_state,
-        cd.cd_gender,
-        cd.cd_purchase_estimate,
-        hd.hd_income_band_sk,
-        hd.hd_buy_potential
-    FROM catalog_returns cr
-    JOIN call_center cc
-        ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    JOIN customer c
-        ON cr.cr_refunded_customer_sk = c.c_customer_sk
-    JOIN customer_demographics cd
-        ON c.c_current_cdemo_sk = cd.cd_demo_sk
-    JOIN household_demographics hd
-        ON c.c_current_hdemo_sk = hd.hd_demo_sk
-    WHERE cc.cc_state = 'TX'
-      AND cc.cc_gmt_offset BETWEEN -6.00 AND -5.00
-      AND cd.cd_gender = 'M'
-      AND cd.cd_purchase_estimate >= 3000
-      AND hd.hd_income_band_sk IN (10, 11, 14)
-      AND hd.hd_buy_potential = '1001-5000'
+        ss_customer_sk,
+        SUM(ss_ext_sales_price) AS total_sales,
+        SUM(ss_quantity) AS total_quantity
+    FROM store_sales
+    WHERE ss_ext_list_price > 1000
+    GROUP BY ss_customer_sk
 ),
-agg AS (
+cr_agg AS (
     SELECT
-        cc_call_center_id,
-        cc_state,
-        cd_gender,
-        hd_income_band_sk,
-        SUM(cr_return_amount) AS total_return_amount,
-        COUNT(*) AS return_cnt,
-        AVG(cr_return_amount) AS avg_return_amount
-    FROM joined
-    GROUP BY cc_call_center_id, cc_state, cd_gender, hd_income_band_sk
+        cr_refunded_customer_sk AS customer_sk,
+        SUM(cr_net_loss) AS total_cr_net_loss,
+        SUM(cr_fee) AS total_cr_fee
+    FROM catalog_returns
+    WHERE cr_fee > 10
+    GROUP BY cr_refunded_customer_sk
+),
+wr_agg AS (
+    SELECT
+        wr_refunded_customer_sk AS customer_sk,
+        SUM(wr_net_loss) AS total_wr_net_loss,
+        SUM(wr_return_quantity) AS total_wr_qty
+    FROM web_returns
+    WHERE wr_return_quantity > 1
+    GROUP BY wr_refunded_customer_sk
 )
 SELECT
-    cc_call_center_id,
-    cc_state,
-    cd_gender,
-    hd_income_band_sk,
-    total_return_amount,
-    return_cnt,
-    avg_return_amount,
-    RANK() OVER (PARTITION BY cc_state ORDER BY total_return_amount DESC) AS state_rank,
-    SUM(total_return_amount) OVER (PARTITION BY cd_gender) AS gender_total_return
-FROM agg
-WHERE return_cnt > 10
-ORDER BY total_return_amount DESC
+    c.c_customer_id,
+    ss.total_sales,
+    ss.total_quantity,
+    cr.total_cr_net_loss,
+    cr.total_cr_fee,
+    wr.total_wr_net_loss,
+    wr.total_wr_qty,
+    (COALESCE(cr.total_cr_net_loss, 0) + COALESCE(wr.total_wr_net_loss, 0)) AS combined_net_loss,
+    CASE
+        WHEN (COALESCE(cr.total_cr_net_loss, 0) + COALESCE(wr.total_wr_net_loss, 0)) > 1000 THEN 'High'
+        WHEN (COALESCE(cr.total_cr_net_loss, 0) + COALESCE(wr.total_wr_net_loss, 0)) > 0 THEN 'Medium'
+        ELSE 'Low'
+    END AS loss_category,
+    RANK() OVER (ORDER BY (COALESCE(cr.total_cr_net_loss, 0) + COALESCE(wr.total_wr_net_loss, 0)) DESC) AS loss_rank
+FROM customer c
+LEFT JOIN ss_agg ss
+    ON ss.ss_customer_sk = c.c_customer_sk
+LEFT JOIN cr_agg cr
+    ON cr.customer_sk = c.c_customer_sk
+LEFT JOIN wr_agg wr
+    ON wr.customer_sk = c.c_customer_sk
+WHERE c.c_preferred_cust_flag = 'Y'
+ORDER BY loss_rank
 LIMIT 100

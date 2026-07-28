@@ -1,60 +1,56 @@
-WITH item_wh AS (
-    SELECT i.i_item_sk,
-           i.i_category,
-           i.i_manufact_id,
-           w.w_warehouse_sk,
-           w.w_warehouse_name
-    FROM item i
-    JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk
-    JOIN warehouse w   ON w.w_warehouse_sk = inv.inv_warehouse_sk
-    GROUP BY i.i_item_sk,
-             i.i_category,
-             i.i_manufact_id,
-             w.w_warehouse_sk,
-             w.w_warehouse_name
+WITH sales_agg AS (
+  SELECT
+    cc.cc_name,
+    s.s_store_name,
+    d_sold.d_year,
+    cd_bill.cd_gender,
+    SUM(ws.ws_net_paid_inc_ship_tax) AS total_net_paid,
+    AVG(ws.ws_quantity) AS avg_quantity,
+    COUNT(DISTINCT ws.ws_order_number) AS order_cnt,
+    SUM(ws.ws_ext_tax) AS total_tax
+  FROM tpcds.web_sales ws
+  JOIN tpcds.date_dim d_sold
+    ON ws.ws_sold_date_sk = d_sold.d_date_sk
+  JOIN tpcds.date_dim d_ship
+    ON ws.ws_ship_date_sk = d_ship.d_date_sk
+  JOIN tpcds.customer c_bill
+    ON ws.ws_bill_customer_sk = c_bill.c_customer_sk
+  JOIN tpcds.customer_demographics cd_bill
+    ON ws.ws_bill_cdemo_sk = cd_bill.cd_demo_sk
+  JOIN tpcds.household_demographics hd_bill
+    ON ws.ws_bill_hdemo_sk = hd_bill.hd_demo_sk
+  JOIN tpcds.income_band ib
+    ON hd_bill.hd_income_band_sk = ib.ib_income_band_sk
+  JOIN tpcds.call_center cc
+    ON cc.cc_closed_date_sk = d_sold.d_date_sk
+  JOIN tpcds.store s
+    ON s.s_closed_date_sk = d_ship.d_date_sk
+  WHERE
+    d_sold.d_quarter_seq = 15
+    AND d_ship.d_week_seq = 20
+    AND cc.cc_state = 'CA'
+    AND s.s_state = 'TX'
+    AND hd_bill.hd_buy_potential = '>10000'
+    AND ib.ib_lower_bound >= 50000
+    AND ws.ws_net_paid_inc_ship_tax > 1000
+    AND cd_bill.cd_gender = 'F'
+    AND ws.ws_quantity BETWEEN 2 AND 5
+  GROUP BY
+    cc.cc_name,
+    s.s_store_name,
+    d_sold.d_year,
+    cd_bill.cd_gender
 )
-SELECT record_type,
-       item_sk,
-       warehouse_sk,
-       category,
-       warehouse_name,
-       total_sales,
-       total_profit
-FROM (
-    SELECT 'sales'   AS record_type,
-           cs.cs_item_sk      AS item_sk,
-           cs.cs_warehouse_sk AS warehouse_sk,
-           iwh.i_category     AS category,
-           iwh.w_warehouse_name AS warehouse_name,
-           SUM(cs.cs_ext_sales_price) AS total_sales,
-           SUM(cs.cs_net_profit)      AS total_profit
-    FROM catalog_sales cs
-    JOIN item_wh iwh
-      ON cs.cs_item_sk = iwh.i_item_sk
-     AND cs.cs_warehouse_sk = iwh.w_warehouse_sk
-    WHERE cs.cs_ext_list_price > 8000
-      AND cs.cs_quantity >= 1
-    GROUP BY cs.cs_item_sk,
-             cs.cs_warehouse_sk,
-             iwh.i_category,
-             iwh.w_warehouse_name
-    UNION ALL
-    SELECT 'returns' AS record_type,
-           wr.wr_item_sk      AS item_sk,
-           iwh.w_warehouse_sk AS warehouse_sk,
-           iwh.i_category     AS category,
-           iwh.w_warehouse_name AS warehouse_name,
-           -SUM(wr.wr_return_amt) AS total_sales,
-           -SUM(wr.wr_net_loss)   AS total_profit
-    FROM web_returns wr
-    JOIN item_wh iwh
-      ON wr.wr_item_sk = iwh.i_item_sk
-    WHERE iwh.i_manufact_id = 460
-      AND wr.wr_returned_time_sk IN (23325, 72837)
-    GROUP BY wr.wr_item_sk,
-             iwh.w_warehouse_sk,
-             iwh.i_category,
-             iwh.w_warehouse_name
-) AS combined
-ORDER BY total_sales DESC
+SELECT
+  cc_name,
+  s_store_name,
+  d_year,
+  cd_gender,
+  total_net_paid,
+  avg_quantity,
+  order_cnt,
+  total_tax,
+  RANK() OVER (PARTITION BY d_year ORDER BY total_net_paid DESC) AS yearly_net_rank
+FROM sales_agg
+ORDER BY d_year DESC, total_net_paid DESC
 LIMIT 100

@@ -1,42 +1,31 @@
-WITH sales_data AS (
+WITH returns AS (
     SELECT
-        i.i_item_sk,
-        i.i_product_name,
-        SUM(cs.cs_ext_sales_price) AS catalog_sales,
-        SUM(ws.ws_ext_sales_price) AS web_sales,
-        SUM(cs.cs_net_profit) + SUM(ws.ws_net_profit) AS total_profit
-    FROM tpcds.item i
-    LEFT JOIN tpcds.catalog_sales cs
-        ON cs.cs_item_sk = i.i_item_sk
-    LEFT JOIN tpcds.web_sales ws
-        ON ws.ws_item_sk = i.i_item_sk
-    WHERE i.i_formulation LIKE '%papaya%'
-    GROUP BY i.i_item_sk, i.i_product_name
+        'Return' AS source,
+        cc.cc_name AS location,
+        SUM(cr.cr_return_amount) AS total_amount
+    FROM catalog_returns cr
+    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN customer_demographics cd ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
+    WHERE cc.cc_state = 'CA'
+      AND cr.cr_return_amount > 1500
+    GROUP BY cc.cc_name
+),
+sales AS (
+    SELECT
+        'Sale' AS source,
+        wp.wp_url AS location,
+        SUM(ws.ws_net_paid) AS total_amount
+    FROM web_sales ws
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+    WHERE wp.wp_type = 'content'
+      AND ws.ws_net_paid > 5000
+    GROUP BY wp.wp_url
 )
-SELECT
-    s.i_item_sk,
-    s.i_product_name,
-    (s.catalog_sales + s.web_sales) AS total_sales,
-    CASE WHEN (s.catalog_sales + s.web_sales) > 5000 THEN 'High' ELSE 'Low' END AS sales_category,
-    s.total_profit
-FROM sales_data s
-WHERE (s.catalog_sales + s.web_sales) IS NOT NULL
-
+SELECT source, location, total_amount
+FROM returns
 UNION ALL
-
-SELECT
-    r.wr_item_sk AS i_item_sk,
-    i.i_product_name,
-    -SUM(r.wr_return_amt) AS total_sales,
-    CASE WHEN -SUM(r.wr_return_amt) > 5000 THEN 'High' ELSE 'Low' END AS sales_category,
-    -SUM(r.wr_net_loss) AS total_profit
-FROM tpcds.web_returns r
-JOIN tpcds.web_sales ws
-    ON r.wr_item_sk = ws.ws_item_sk
-   AND r.wr_order_number = ws.ws_order_number
-JOIN tpcds.item i
-    ON i.i_item_sk = r.wr_item_sk
-WHERE i.i_formulation LIKE '%papaya%'
-GROUP BY r.wr_item_sk, i.i_product_name
-
-LIMIT 100
+SELECT source, location, total_amount
+FROM sales
+ORDER BY total_amount DESC

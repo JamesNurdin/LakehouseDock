@@ -1,51 +1,49 @@
-WITH income_bounds AS (
-   SELECT ib_income_band_sk,
-          CONCAT('Band ', CAST(ib_lower_bound AS VARCHAR), '-', CAST(ib_upper_bound AS VARCHAR)) AS income_band_label
-   FROM income_band
+WITH catalog_sales_agg AS (
+    SELECT
+        concat(cc.cc_name, '-', cc.cc_city) AS call_center_desc,
+        CASE WHEN cs.cs_net_profit > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_flag,
+        sum(cs.cs_net_paid) AS total_net_paid,
+        sum(cs.cs_net_profit) AS total_net_profit
+    FROM catalog_sales cs
+    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    WHERE regexp_like(i.i_product_name, '(Pro|Max)')
+      AND cc.cc_name LIKE 'A%'
+    GROUP BY
+        concat(cc.cc_name, '-', cc.cc_city),
+        CASE WHEN cs.cs_net_profit > 0 THEN 'Profitable' ELSE 'Loss' END
 ),
-customer_info AS (
-   SELECT c.c_customer_sk,
-          c.c_email_address,
-          ca.ca_street_number,
-          ca.ca_street_name,
-          ca.ca_city,
-          ca.ca_state,
-          CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ', ', ca.ca_city, ', ', ca.ca_state) AS full_address,
-          SUBSTRING(c.c_email_address FROM 1 FOR POSITION('@' IN c.c_email_address) - 1) AS email_user
-   FROM customer c
-   JOIN customer_address ca
-     ON c.c_current_addr_sk = ca.ca_address_sk
+web_sales_agg AS (
+    SELECT
+        concat(wp.wp_type, '_', substring(wp.wp_url, 1, 10)) AS page_desc,
+        CASE WHEN sum(ws.ws_net_profit) > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_flag,
+        sum(ws.ws_net_paid) AS total_net_paid,
+        sum(ws.ws_net_profit) AS total_net_profit
+    FROM web_sales ws
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE regexp_like(wp.wp_url, 'sports')
+      AND wp.wp_autogen_flag = 'N'
+      AND i.i_brand_id = 2004002
+    GROUP BY concat(wp.wp_type, '_', substring(wp.wp_url, 1, 10))
 )
-SELECT
-    ib.income_band_label,
-    ci.full_address,
-    ci.email_user,
-    COUNT(DISTINCT sr.sr_ticket_number) AS return_count,
-    SUM(sr.sr_return_amt) AS total_return_amount,
-    AVG(sr.sr_return_amt) AS avg_return_amount,
-    SUM(CASE WHEN sr.sr_fee > 30 THEN sr.sr_fee ELSE 0 END) AS high_fee_total
-FROM store_returns sr
-JOIN item i
-  ON sr.sr_item_sk = i.i_item_sk
-JOIN reason r
-  ON sr.sr_reason_sk = r.r_reason_sk
-JOIN household_demographics hd
-  ON sr.sr_hdemo_sk = hd.hd_demo_sk
-JOIN income_bounds ib
-  ON hd.hd_income_band_sk = ib.ib_income_band_sk
-JOIN customer_info ci
-  ON sr.sr_customer_sk = ci.c_customer_sk
-WHERE REGEXP_LIKE(r.r_reason_desc, '(?i)price|product')
-  AND i.i_product_name LIKE '%Gold%'
-  AND EXISTS (
-        SELECT 1
-        FROM web_page wp
-        WHERE wp.wp_customer_sk = ci.c_customer_sk
-          AND wp.wp_url LIKE 'https://%'
-      )
-GROUP BY
-    ib.income_band_label,
-    ci.full_address,
-    ci.email_user
-ORDER BY total_return_amount DESC
+SELECT *
+FROM (
+    SELECT
+        'Catalog' AS source,
+        call_center_desc AS entity,
+        profit_flag,
+        total_net_paid,
+        total_net_profit
+    FROM catalog_sales_agg
+    UNION ALL
+    SELECT
+        'Web' AS source,
+        page_desc AS entity,
+        profit_flag,
+        total_net_paid,
+        total_net_profit
+    FROM web_sales_agg
+) combined
+ORDER BY total_net_paid DESC
 LIMIT 100

@@ -1,65 +1,49 @@
-WITH filtered_returns AS (
+WITH base AS (
     SELECT
-        cr.cr_returned_date_sk,
-        cr.cr_returned_time_sk,
-        cr.cr_item_sk,
-        cr.cr_refunded_customer_sk,
-        cr.cr_refunded_cdemo_sk,
-        cr.cr_refunded_hdemo_sk,
-        cr.cr_refunded_addr_sk,
-        cr.cr_returning_customer_sk,
-        cr.cr_returning_cdemo_sk,
-        cr.cr_returning_hdemo_sk,
-        cr.cr_returning_addr_sk,
-        cr.cr_call_center_sk,
-        cr.cr_catalog_page_sk,
-        cr.cr_ship_mode_sk,
-        cr.cr_warehouse_sk,
-        cr.cr_reason_sk,
-        cr.cr_order_number,
-        cr.cr_return_quantity,
-        cr.cr_return_amount,
-        cr.cr_return_tax,
-        cr.cr_return_amt_inc_tax,
-        cr.cr_fee,
-        cr.cr_return_ship_cost,
-        cr.cr_refunded_cash,
-        cr.cr_reversed_charge,
-        cr.cr_store_credit,
-        cr.cr_net_loss,
+        d.d_year,
         cc.cc_name,
-        w.w_city,
-        td.t_hour,
-        r.r_reason_desc
-    FROM catalog_returns cr
-    JOIN time_dim td ON cr.cr_returned_time_sk = td.t_time_sk
-    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
-    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-    JOIN customer_address ca_ref ON cr.cr_refunded_addr_sk = ca_ref.ca_address_sk
-    JOIN customer_address ca_ret ON cr.cr_returning_addr_sk = ca_ret.ca_address_sk
-    WHERE td.t_am_pm = 'PM'
-      AND td.t_minute BETWEEN 5 AND 15
-      AND w.w_gmt_offset = -5.00
+        sm.sm_type,
+        cr.cr_return_amount,
+        ws.ws_ext_sales_price,
+        wr.wr_fee,
+        sr.sr_fee
+    FROM tpcds.catalog_returns cr
+    JOIN tpcds.date_dim d
+        ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN tpcds.call_center cc
+        ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    JOIN tpcds.ship_mode sm
+        ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN tpcds.customer c
+        ON cr.cr_refunded_customer_sk = c.c_customer_sk
+    JOIN tpcds.customer_address ca
+        ON cr.cr_refunded_addr_sk = ca.ca_address_sk
+    JOIN tpcds.store_returns sr
+        ON sr.sr_returned_date_sk = d.d_date_sk
+    JOIN tpcds.web_sales ws
+        ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN tpcds.web_returns wr
+        ON wr.wr_returned_date_sk = d.d_date_sk
+        AND wr.wr_order_number = ws.ws_order_number
+    WHERE d.d_year = 2002
       AND cc.cc_state = 'CA'
-      AND r.r_reason_desc LIKE '%Damaged%'
-      AND cr.cr_return_amount > 100
+      AND sm.sm_type = 'AIR'
+      AND cr.cr_return_amount > 1000
+      AND ws.ws_ext_sales_price > 5000
 )
 SELECT
+    d_year,
     cc_name,
-    w_city,
-    t_hour,
-    r_reason_desc,
-    COUNT(*) AS return_count,
-    SUM(cr_return_amount) AS total_return_amount,
-    AVG(cr_return_quantity) AS avg_return_quantity,
-    MIN(cr_return_amount) AS min_return_amount,
-    MAX(cr_return_amount) AS max_return_amount
-FROM filtered_returns
-GROUP BY
-    cc_name,
-    w_city,
-    t_hour,
-    r_reason_desc
-ORDER BY total_return_amount DESC
+    sm_type,
+    SUM(cr_return_amount)        AS total_return_amount,
+    SUM(ws_ext_sales_price)      AS total_sales_amount,
+    COUNT(*)                     AS transaction_cnt,
+    AVG(wr_fee)                  AS avg_web_return_fee,
+    MAX(sr_fee)                  AS max_store_return_fee
+FROM base
+GROUP BY GROUPING SETS (
+    (d_year, cc_name, sm_type),
+    (d_year, cc_name),
+    (d_year)
+)
 LIMIT 100

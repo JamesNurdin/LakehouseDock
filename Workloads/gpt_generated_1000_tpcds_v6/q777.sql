@@ -1,37 +1,38 @@
-SELECT
-    sm.sm_ship_mode_id,
-    sm.sm_code,
-    sm.sm_type,
-    CONCAT(sm.sm_code, '_', COALESCE(sm.sm_carrier, '')) AS mode_full,
-    REGEXP_EXTRACT(sm.sm_ship_mode_id, '(A+)', 1) AS a_seq,
-    SUM(cr.cr_return_amount) AS total_return_amount,
-    COUNT(DISTINCT cr.cr_order_number) AS distinct_return_orders,
-    SUM(ws.ws_net_profit) AS total_net_profit,
-    AVG(cr.cr_refunded_cash) AS avg_refunded_cash
-FROM catalog_returns cr
-JOIN ship_mode sm
-  ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN web_sales ws
-  ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-WHERE REGEXP_LIKE(sm.sm_code, '^A')                             -- code starts with 'A' (e.g., "AIR")
-  AND sm.sm_carrier LIKE '%AIR%'                                 -- carrier contains the word AIR
-  AND EXISTS (
-        SELECT 1
-        FROM web_sales ws2
-        WHERE ws2.ws_ship_mode_sk = sm.sm_ship_mode_sk
-          AND ws2.ws_net_paid > 1000
-      )
-  AND cr.cr_return_amount > (
-        SELECT AVG(cr2.cr_return_amount)
-        FROM catalog_returns cr2
-        WHERE cr2.cr_ship_mode_sk = sm.sm_ship_mode_sk
-      )
-GROUP BY
-    sm.sm_ship_mode_id,
-    sm.sm_code,
-    sm.sm_type,
-    CONCAT(sm.sm_code, '_', COALESCE(sm.sm_carrier, '')),
-    REGEXP_EXTRACT(sm.sm_ship_mode_id, '(A+)', 1)
-HAVING SUM(cr.cr_return_amount) > 5000
-ORDER BY total_return_amount DESC
-LIMIT 10
+WITH catalog_agg AS (
+    SELECT
+        d.d_date AS return_date,
+        ws.web_name AS site_name,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        SUM(cr.cr_return_tax) AS total_return_tax,
+        COUNT(*) AS return_cnt,
+        'catalog' AS source
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN web_site ws ON ws.web_open_date_sk = d.d_date_sk
+    WHERE d.d_date = DATE '1900-01-10'
+      AND ws.web_tax_percentage = 0.07
+      AND cr.cr_return_quantity > 1
+    GROUP BY GROUPING SETS ((d.d_date, ws.web_name), (d.d_date), (ws.web_name), ())
+),
+web_agg AS (
+    SELECT
+        d.d_date AS return_date,
+        ws.web_name AS site_name,
+        SUM(wr.wr_return_amt) AS total_return_amount,
+        SUM(wr.wr_return_tax) AS total_return_tax,
+        COUNT(*) AS return_cnt,
+        'web' AS source
+    FROM web_returns wr
+    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
+    JOIN web_site ws ON ws.web_close_date_sk = d.d_date_sk
+    WHERE d.d_date = DATE '1900-01-10'
+      AND ws.web_tax_percentage = 0.07
+      AND wr.wr_account_credit > 100
+    GROUP BY GROUPING SETS ((d.d_date, ws.web_name), (d.d_date), (ws.web_name), ())
+)
+SELECT *
+FROM catalog_agg
+UNION ALL
+SELECT *
+FROM web_agg
+LIMIT 100

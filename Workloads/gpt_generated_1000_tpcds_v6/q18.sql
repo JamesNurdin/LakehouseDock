@@ -1,44 +1,40 @@
-WITH sales_agg AS (
+WITH filtered_returns AS (
     SELECT
-        cs_call_center_sk,
-        cs_promo_sk,
-        SUM(cs_net_paid_inc_ship_tax) AS total_net_paid,
-        SUM(cs_ext_discount_amt) AS total_discount,
-        COUNT(*) AS sales_cnt
-    FROM catalog_sales
-    WHERE cs_net_paid_inc_ship_tax >= 1000
-    GROUP BY cs_call_center_sk, cs_promo_sk
+        cr.cr_returned_date_sk,
+        cr.cr_item_sk,
+        cr.cr_net_loss,
+        i.i_category,
+        i.i_class,
+        i.i_item_desc,
+        cp.cp_description,
+        wp.wp_url,
+        d.d_year
+    FROM catalog_returns cr
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN web_page wp ON wp.wp_creation_date_sk = d.d_date_sk
+    WHERE regexp_like(i.i_item_desc, '(police|legal)')
+      AND i.i_category LIKE 'S%'
+      AND wp.wp_url LIKE '%promo%'
+      AND regexp_like(cp.cp_description, '^.*discount.*$')
 )
 SELECT
-    cc.cc_call_center_id,
-    cc.cc_name,
-    concat(cc.cc_city, ', ', cc.cc_state) AS location,
-    cc.cc_gmt_offset,
-    p.p_promo_name,
-    p.p_channel_press,
-    sa.total_net_paid,
-    sa.total_discount,
-    sa.sales_cnt,
-    (
-        SELECT AVG(cs_ext_discount_amt)
-        FROM catalog_sales cs2
-        WHERE cs2.cs_promo_sk = p.p_promo_sk
-    ) AS avg_discount_per_promo,
-    (
-        SELECT COUNT(DISTINCT p2.p_promo_id)
-        FROM promotion p2
-        JOIN catalog_sales cs3 ON cs3.cs_promo_sk = p2.p_promo_sk
-        WHERE cs3.cs_call_center_sk = cc.cc_call_center_sk
-    ) AS distinct_promo_cnt
-FROM sales_agg sa
-JOIN call_center cc
-    ON sa.cs_call_center_sk = cc.cc_call_center_sk
-JOIN promotion p
-    ON sa.cs_promo_sk = p.p_promo_sk
-WHERE
-    regexp_like(cc.cc_street_name, '(River|Hill)')
-    AND cc.cc_city LIKE 'San%'
-    AND substring(cc.cc_zip, 1, 5) = '12345'
-    AND p.p_channel_press = 'N'
-ORDER BY sa.total_net_paid DESC
+    d.d_year,
+    i.i_category,
+    concat(i.i_category, '-', i.i_class) AS cat_class,
+    SUM(cr.cr_net_loss) AS total_net_loss,
+    COUNT(*) AS returns_cnt,
+    MAX(wp.wp_url) AS sample_url
+FROM catalog_returns cr
+JOIN item i ON cr.cr_item_sk = i.i_item_sk
+JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+JOIN web_page wp ON wp.wp_creation_date_sk = d.d_date_sk
+WHERE regexp_like(i.i_item_desc, '(police|legal)')
+  AND i.i_category LIKE 'S%'
+  AND wp.wp_url LIKE '%promo%'
+  AND regexp_like(cp.cp_description, '^.*discount.*$')
+GROUP BY d.d_year, i.i_category, concat(i.i_category, '-', i.i_class)
+ORDER BY total_net_loss DESC
 LIMIT 100

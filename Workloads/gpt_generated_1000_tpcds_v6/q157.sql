@@ -1,47 +1,39 @@
-WITH base AS (
+/*
+ * Goal: Compare item‑level sales performance during peak midday hours (12‑14) across the brick‑and‑mortar store channel and the web channel.
+ * The query aggregates quantity sold and net paid amount per item for each channel, then combines the two result sets with UNION ALL.
+ */
+WITH store_agg AS (
     SELECT
-        cr.cr_return_amount,
-        cr.cr_call_center_sk,
-        cr.cr_warehouse_sk,
-        cr.cr_ship_mode_sk,
-        cr.cr_returned_time_sk,
-        sm.sm_carrier,
-        td.t_hour
-    FROM catalog_returns cr
-    JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN time_dim td ON cr.cr_returned_time_sk = td.t_time_sk
+        i.i_item_id,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_net_paid) AS total_revenue,
+        CAST('store' AS varchar) AS channel
+    FROM store_sales ss
+    JOIN item i
+        ON ss.ss_item_sk = i.i_item_sk
+    JOIN time_dim td
+        ON ss.ss_sold_time_sk = td.t_time_sk
+    WHERE td.t_hour BETWEEN 12 AND 14
+    GROUP BY i.i_item_id
+),
+web_agg AS (
+    SELECT
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_paid) AS total_revenue,
+        CAST('web' AS varchar) AS channel
+    FROM web_sales ws
+    JOIN item i
+        ON ws.ws_item_sk = i.i_item_sk
+    JOIN time_dim td
+        ON ws.ws_sold_time_sk = td.t_time_sk
+    WHERE td.t_hour BETWEEN 12 AND 14
+    GROUP BY i.i_item_id
 )
-
-SELECT entity_type,
-       entity_name,
-       total_return_amount,
-       amount_category
-FROM (
-    SELECT
-        'CallCenter' AS entity_type,
-        cc.cc_name AS entity_name,
-        SUM(b.cr_return_amount) AS total_return_amount,
-        CASE WHEN SUM(b.cr_return_amount) > 1000 THEN 'High' ELSE 'Low' END AS amount_category
-    FROM base b
-    JOIN call_center cc ON b.cr_call_center_sk = cc.cc_call_center_sk
-    WHERE cc.cc_state = 'CA'
-      AND b.sm_carrier = 'UPS'
-      AND b.t_hour BETWEEN 9 AND 17
-    GROUP BY cc.cc_name
-
-    UNION ALL
-
-    SELECT
-        'Warehouse' AS entity_type,
-        w.w_warehouse_name AS entity_name,
-        SUM(b.cr_return_amount) AS total_return_amount,
-        CASE WHEN SUM(b.cr_return_amount) > 1000 THEN 'High' ELSE 'Low' END AS amount_category
-    FROM base b
-    JOIN warehouse w ON b.cr_warehouse_sk = w.w_warehouse_sk
-    WHERE w.w_state = 'TX'
-      AND b.sm_carrier = 'PRIVATECARRIER'
-      AND b.t_hour BETWEEN 0 AND 8
-    GROUP BY w.w_warehouse_name
-) AS combined
-ORDER BY total_return_amount DESC
+SELECT *
+FROM store_agg
+UNION ALL
+SELECT *
+FROM web_agg
+ORDER BY total_quantity DESC
 LIMIT 100

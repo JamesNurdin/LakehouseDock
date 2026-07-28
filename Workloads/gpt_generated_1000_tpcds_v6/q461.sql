@@ -1,91 +1,50 @@
-WITH
-  -- First analytical slice with one set of filters
-  slice_a AS (
-    SELECT
-      p.p_promo_name AS p_promo_name,
-      r_cr.r_reason_desc AS r_reason_desc,
-      COUNT(DISTINCT cr.cr_order_number) AS catalog_return_orders,
-      SUM(cr.cr_return_amount) AS total_catalog_return_amount,
-      COUNT(DISTINCT wr.wr_order_number) AS web_return_orders,
-      SUM(wr.wr_return_amt) AS total_web_return_amount,
-      AVG(ws.ws_ext_list_price) AS avg_web_sale_price,
-      MIN(ws.ws_net_profit) AS min_web_net_profit,
-      MAX(ws.ws_net_profit) AS max_web_net_profit
-    FROM catalog_returns cr
-    JOIN time_dim t_cr ON cr.cr_returned_time_sk = t_cr.t_time_sk
-    JOIN item i ON cr.cr_item_sk = i.i_item_sk
-    JOIN customer_address ca_refunded ON cr.cr_refunded_addr_sk = ca_refunded.ca_address_sk
-    JOIN customer_address ca_returning ON cr.cr_returning_addr_sk = ca_returning.ca_address_sk
-    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    JOIN reason r_cr ON cr.cr_reason_sk = r_cr.r_reason_sk
-    JOIN web_sales ws ON ws.ws_item_sk = i.i_item_sk
-    JOIN time_dim t_ws ON ws.ws_sold_time_sk = t_ws.t_time_sk
-    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
-    JOIN customer_address ca_bill ON ws.ws_bill_addr_sk = ca_bill.ca_address_sk
-    JOIN customer_address ca_ship ON ws.ws_ship_addr_sk = ca_ship.ca_address_sk
-    JOIN web_returns wr ON wr.wr_order_number = ws.ws_order_number
-    JOIN time_dim t_wr ON wr.wr_returned_time_sk = t_wr.t_time_sk
-    JOIN reason r_wr ON wr.wr_reason_sk = r_wr.r_reason_sk
-    JOIN customer_address ca_wr_refunded ON wr.wr_refunded_addr_sk = ca_wr_refunded.ca_address_sk
-    JOIN customer_address ca_wr_returning ON wr.wr_returning_addr_sk = ca_wr_returning.ca_address_sk
-    WHERE t_cr.t_hour BETWEEN 9 AND 12
-      AND i.i_category = 'Electronics'
-      AND cr.cr_fee > 60
-      AND ws.ws_ext_list_price >= 2000
-      AND p.p_discount_active = 'Y'
-    GROUP BY p.p_promo_name, r_cr.r_reason_desc
-  ),
-  -- Second analytical slice with a different set of filters
-  slice_b AS (
-    SELECT
-      p.p_promo_name AS p_promo_name,
-      r_cr.r_reason_desc AS r_reason_desc,
-      COUNT(DISTINCT cr.cr_order_number) AS catalog_return_orders,
-      SUM(cr.cr_return_amount) AS total_catalog_return_amount,
-      COUNT(DISTINCT wr.wr_order_number) AS web_return_orders,
-      SUM(wr.wr_return_amt) AS total_web_return_amount,
-      AVG(ws.ws_ext_list_price) AS avg_web_sale_price,
-      MIN(ws.ws_net_profit) AS min_web_net_profit,
-      MAX(ws.ws_net_profit) AS max_web_net_profit
-    FROM catalog_returns cr
-    JOIN time_dim t_cr ON cr.cr_returned_time_sk = t_cr.t_time_sk
-    JOIN item i ON cr.cr_item_sk = i.i_item_sk
-    JOIN customer_address ca_refunded ON cr.cr_refunded_addr_sk = ca_refunded.ca_address_sk
-    JOIN customer_address ca_returning ON cr.cr_returning_addr_sk = ca_returning.ca_address_sk
-    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    JOIN reason r_cr ON cr.cr_reason_sk = r_cr.r_reason_sk
-    JOIN web_sales ws ON ws.ws_item_sk = i.i_item_sk
-    JOIN time_dim t_ws ON ws.ws_sold_time_sk = t_ws.t_time_sk
-    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
-    JOIN customer_address ca_bill ON ws.ws_bill_addr_sk = ca_bill.ca_address_sk
-    JOIN customer_address ca_ship ON ws.ws_ship_addr_sk = ca_ship.ca_address_sk
-    JOIN web_returns wr ON wr.wr_order_number = ws.ws_order_number
-    JOIN time_dim t_wr ON wr.wr_returned_time_sk = t_wr.t_time_sk
-    JOIN reason r_wr ON wr.wr_reason_sk = r_wr.r_reason_sk
-    JOIN customer_address ca_wr_refunded ON wr.wr_refunded_addr_sk = ca_wr_refunded.ca_address_sk
-    JOIN customer_address ca_wr_returning ON wr.wr_returning_addr_sk = ca_wr_returning.ca_address_sk
-    WHERE t_cr.t_hour BETWEEN 13 AND 18
-      AND i.i_category = 'Furniture'
-      AND cr.cr_fee > 40
-      AND ws.ws_ext_list_price >= 500
-      AND p.p_discount_active = 'N'
-    GROUP BY p.p_promo_name, r_cr.r_reason_desc
-  )
+WITH avg_sales_price AS (
+    SELECT avg(cs_sales_price) AS avg_price
+    FROM catalog_sales
+)
 SELECT
-  p_promo_name,
-  r_reason_desc,
-  SUM(catalog_return_orders) AS total_catalog_return_orders,
-  SUM(total_catalog_return_amount) AS total_catalog_return_amount,
-  SUM(web_return_orders) AS total_web_return_orders,
-  SUM(total_web_return_amount) AS total_web_return_amount,
-  AVG(avg_web_sale_price) AS avg_web_sale_price,
-  MIN(min_web_net_profit) AS min_web_net_profit,
-  MAX(max_web_net_profit) AS max_web_net_profit
-FROM (
-  SELECT * FROM slice_a
-  UNION ALL
-  SELECT * FROM slice_b
-) combined
-GROUP BY p_promo_name, r_reason_desc
-ORDER BY total_catalog_return_amount DESC
+    p.p_promo_name,
+    sm.sm_type,
+    td.t_meal_time,
+    CASE
+        WHEN SUM(cs.cs_net_paid) > SUM(ss.ss_net_paid) THEN 'Catalog greater'
+        ELSE 'Store greater'
+    END AS sales_comparison,
+    SUM(cs.cs_net_paid)      AS catalog_net_paid,
+    SUM(ss.ss_net_paid)      AS store_net_paid,
+    SUM(ws.ws_net_paid)      AS web_net_paid,
+    COUNT(DISTINCT cs.cs_order_number) AS distinct_orders
+FROM catalog_sales cs
+JOIN time_dim td                     ON cs.cs_sold_time_sk = td.t_time_sk
+JOIN promotion p                     ON cs.cs_promo_sk = p.p_promo_sk
+JOIN ship_mode sm                    ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN warehouse w                     ON cs.cs_warehouse_sk = w.w_warehouse_sk
+JOIN customer_demographics cd_bill   ON cs.cs_bill_cdemo_sk = cd_bill.cd_demo_sk
+JOIN customer_demographics cd_ship   ON cs.cs_ship_cdemo_sk = cd_ship.cd_demo_sk
+JOIN catalog_returns cr              ON cr.cr_order_number = cs.cs_order_number
+                                      AND cr.cr_item_sk = cs.cs_item_sk
+LEFT JOIN time_dim td_cr             ON cr.cr_returned_time_sk = td_cr.t_time_sk
+LEFT JOIN ship_mode sm_cr            ON cr.cr_ship_mode_sk = sm_cr.sm_ship_mode_sk
+LEFT JOIN warehouse w_cr             ON cr.cr_warehouse_sk = w_cr.w_warehouse_sk
+LEFT JOIN customer_demographics cd_refunded   ON cr.cr_refunded_cdemo_sk = cd_refunded.cd_demo_sk
+LEFT JOIN customer_demographics cd_returning  ON cr.cr_returning_cdemo_sk = cd_returning.cd_demo_sk
+JOIN store_sales ss                  ON ss.ss_sold_time_sk = td.t_time_sk
+JOIN store s                         ON ss.ss_store_sk = s.s_store_sk
+JOIN customer_demographics cd_ss    ON ss.ss_cdemo_sk = cd_ss.cd_demo_sk
+JOIN promotion p_ss                  ON ss.ss_promo_sk = p_ss.p_promo_sk
+JOIN web_sales ws                    ON ws.ws_sold_time_sk = td.t_time_sk
+JOIN ship_mode sm_ws                 ON ws.ws_ship_mode_sk = sm_ws.sm_ship_mode_sk
+JOIN warehouse w_ws                  ON ws.ws_warehouse_sk = w_ws.w_warehouse_sk
+JOIN promotion p_ws                  ON ws.ws_promo_sk = p_ws.p_promo_sk
+JOIN web_page wp                     ON ws.ws_web_page_sk = wp.wp_web_page_sk
+JOIN customer_demographics cd_ws    ON ws.ws_bill_cdemo_sk = cd_ws.cd_demo_sk
+WHERE cs.cs_sales_price > (SELECT avg_price FROM avg_sales_price)
+  AND NOT EXISTS (
+        SELECT 1
+        FROM catalog_returns cr2
+        WHERE cr2.cr_order_number = cs.cs_order_number
+          AND cr2.cr_return_amount > 100
+    )
+GROUP BY p.p_promo_name, sm.sm_type, td.t_meal_time
+ORDER BY catalog_net_paid DESC
 LIMIT 100

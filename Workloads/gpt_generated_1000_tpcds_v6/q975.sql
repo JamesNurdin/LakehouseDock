@@ -1,113 +1,69 @@
-WITH
-  inv_agg AS (
-    SELECT
-      inv_item_sk,
-      inv_warehouse_sk,
-      SUM(inv_quantity_on_hand) AS total_on_hand
-    FROM inventory
-    WHERE inv_quantity_on_hand > 10
-    GROUP BY inv_item_sk, inv_warehouse_sk
-  ),
-  item_filter AS (
-    SELECT
-      i.i_item_sk,
-      i.i_item_id,
-      i.i_product_name,
-      i.i_size,
-      i.i_formulation,
-      i.i_category
-    FROM item i
-    WHERE i.i_size = 'large'
-      AND i.i_formulation LIKE '%steel%'
-  ),
-  sales_union AS (
-    SELECT
-      cs.cs_item_sk      AS item_sk,
-      cs.cs_warehouse_sk AS warehouse_sk,
-      cs.cs_ship_mode_sk AS ship_mode_sk,
-      cs.cs_ext_sales_price AS sales_price,
-      cs.cs_net_profit      AS profit,
-      cs.cs_ext_discount_amt AS discount_amt,
-      'catalog' AS sales_channel
-    FROM catalog_sales cs
-    WHERE cs.cs_ext_ship_cost > 500
-
-    UNION ALL
-
-    SELECT
-      ss.ss_item_sk      AS item_sk,
-      NULL               AS warehouse_sk,
-      NULL               AS ship_mode_sk,
-      ss.ss_ext_sales_price AS sales_price,
-      ss.ss_net_profit      AS profit,
-      ss.ss_ext_discount_amt AS discount_amt,
-      'store' AS sales_channel
-    FROM store_sales ss
-    WHERE ss.ss_ext_tax < 10
-
-    UNION ALL
-
-    SELECT
-      ws.ws_item_sk      AS item_sk,
-      ws.ws_warehouse_sk AS warehouse_sk,
-      ws.ws_ship_mode_sk AS ship_mode_sk,
-      ws.ws_ext_sales_price AS sales_price,
-      ws.ws_net_profit      AS profit,
-      ws.ws_ext_discount_amt AS discount_amt,
-      'web' AS sales_channel
-    FROM web_sales ws
-    WHERE ws.ws_quantity > 5
-  ),
-  sales_agg AS (
-    SELECT
-      item_sk,
-      warehouse_sk,
-      ship_mode_sk,
-      SUM(sales_price) AS total_sales,
-      SUM(profit)      AS total_profit,
-      COUNT(*)         AS txn_count
-    FROM sales_union
-    GROUP BY item_sk, warehouse_sk, ship_mode_sk
-  ),
-  ranked_sales AS (
-    SELECT
-      sa.item_sk,
-      sa.warehouse_sk,
-      sa.ship_mode_sk,
-      sa.total_sales,
-      sa.total_profit,
-      sa.txn_count,
-      RANK() OVER (PARTITION BY sa.warehouse_sk ORDER BY sa.total_sales DESC) AS sales_rank
-    FROM sales_agg sa
-  )
-SELECT DISTINCT
-  i.i_item_id,
-  i.i_product_name,
-  w.w_warehouse_name,
-  sm.sm_type AS ship_type,
-  rs.total_sales,
-  rs.total_profit,
-  rs.txn_count,
-  rs.sales_rank,
-  ia.total_on_hand
-FROM ranked_sales rs
-JOIN item_filter i
-  ON i.i_item_sk = rs.item_sk
-LEFT JOIN inv_agg ia
-  ON ia.inv_item_sk = rs.item_sk
- AND ia.inv_warehouse_sk = rs.warehouse_sk
-LEFT JOIN warehouse w
-  ON w.w_warehouse_sk = rs.warehouse_sk
-LEFT JOIN ship_mode sm
-  ON sm.sm_ship_mode_sk = rs.ship_mode_sk
-WHERE w.w_state = 'CA'
-  AND rs.total_profit > 0
-  AND rs.sales_rank <= 10
-  AND EXISTS (
-        SELECT 1
-        FROM catalog_sales cs2
-        WHERE cs2.cs_item_sk = i.i_item_sk
-          AND cs2.cs_ext_sales_price > 2000
-      )
-ORDER BY rs.sales_rank, rs.total_sales DESC
+WITH sales_cte AS (
+   SELECT
+       s.s_store_sk,
+       s.s_store_name,
+       s.s_city,
+       ca.ca_city AS cust_city,
+       cd.cd_gender,
+       r.r_reason_desc,
+       ss.ss_ticket_number AS ticket_number,
+       ss.ss_ext_sales_price AS sales_amount,
+       0.0 AS return_amount,
+       ss.ss_sold_date_sk
+   FROM store_sales ss
+   JOIN store s ON ss.ss_store_sk = s.s_store_sk
+   JOIN customer_demographics cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
+   JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+   JOIN store_returns sr ON ss.ss_ticket_number = sr.sr_ticket_number
+   JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+   WHERE s.s_city = 'Liberty'
+     AND ca.ca_city = 'Fairview'
+     AND cd.cd_gender = 'M'
+     AND r.r_reason_desc = 'Damaged'
+     AND ss.ss_sold_date_sk BETWEEN 2450000 AND 2450100
+     AND ss.ss_ext_sales_price > 100
+),
+returns_cte AS (
+   SELECT
+       s.s_store_sk,
+       s.s_store_name,
+       s.s_city,
+       ca.ca_city AS cust_city,
+       cd.cd_gender,
+       r.r_reason_desc,
+       sr.sr_ticket_number AS ticket_number,
+       0.0 AS sales_amount,
+       sr.sr_return_amt_inc_tax AS return_amount,
+       sr.sr_returned_date_sk
+   FROM store_returns sr
+   JOIN store s ON sr.sr_store_sk = s.s_store_sk
+   JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
+   JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
+   JOIN store_sales ss ON sr.sr_ticket_number = ss.ss_ticket_number
+   JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+   WHERE s.s_city = 'Liberty'
+     AND ca.ca_city = 'Fairview'
+     AND cd.cd_gender = 'M'
+     AND r.r_reason_desc = 'Damaged'
+     AND sr.sr_returned_date_sk BETWEEN 2450000 AND 2450100
+     AND sr.sr_return_amt_inc_tax > 100
+)
+SELECT
+   s_store_sk,
+   s_store_name,
+   s_city,
+   cust_city,
+   cd_gender,
+   r_reason_desc,
+   ticket_number,
+   sales_amount,
+   return_amount,
+   (sales_amount - return_amount) AS net_amount,
+   ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY (sales_amount - return_amount) DESC) AS store_net_rank
+FROM (
+   SELECT * FROM sales_cte
+   UNION ALL
+   SELECT * FROM returns_cte
+) combined
+ORDER BY net_amount DESC
 LIMIT 100

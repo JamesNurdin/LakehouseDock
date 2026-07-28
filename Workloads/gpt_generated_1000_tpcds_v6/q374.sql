@@ -1,47 +1,55 @@
-WITH
-    filtered_ship AS (
-        SELECT DISTINCT
-            sm_ship_mode_sk,
-            sm_ship_mode_id,
-            sm_carrier
-        FROM ship_mode
-        WHERE sm_carrier LIKE '%Express%'
-          AND regexp_like(sm_ship_mode_id, '^AAAAAAA[AB]A')
-    ),
-    overall AS (
-        SELECT AVG(cr_return_amount) AS overall_avg
-        FROM catalog_returns
-    ),
-    base AS (
-        SELECT
-            sm.sm_ship_mode_id,
-            sm.sm_carrier,
-            td.t_time_id,
-            COUNT(DISTINCT cr.cr_order_number) AS distinct_orders,
-            SUM(cr.cr_return_amount) AS total_return_amount,
-            AVG(cr.cr_return_tax) AS avg_return_tax,
-            AVG(cr.cr_return_amount) AS avg_return_amount
-        FROM catalog_returns cr
-        JOIN filtered_ship sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-        JOIN time_dim td ON cr.cr_returned_time_sk = td.t_time_sk
-        WHERE td.t_minute BETWEEN 0 AND 5
-          AND td.t_time_id LIKE 'AAAAAAA%AA%'
-          AND regexp_like(td.t_time_id, 'A{8}A')
-        GROUP BY
-            sm.sm_ship_mode_id,
-            sm.sm_carrier,
-            td.t_time_id
-    )
+WITH sales_data AS (
+    SELECT
+        d.d_date,
+        d.d_year,
+        p.p_promo_name,
+        p.p_channel_demo,
+        w.w_city,
+        w.w_state,
+        w.w_warehouse_id,
+        t.t_hour,
+        ss.ss_net_profit,
+        ss.ss_sales_price,
+        ss.ss_ticket_number,
+        i.inv_quantity_on_hand,
+        wr.wr_return_quantity
+    FROM
+        store_sales ss
+        INNER JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+        INNER JOIN time_dim t ON ss.ss_sold_time_sk = t.t_time_sk
+        INNER JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+        LEFT JOIN inventory i ON i.inv_date_sk = d.d_date_sk
+        LEFT JOIN warehouse w ON i.inv_warehouse_sk = w.w_warehouse_sk
+        LEFT JOIN web_returns wr ON wr.wr_returned_date_sk = d.d_date_sk
+            AND wr.wr_item_sk = ss.ss_item_sk
+        LEFT JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+        LEFT JOIN web_site ws ON ws.web_open_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2001
+        AND p.p_channel_demo = 'N'
+        AND w.w_state = 'CA'
+        AND t.t_hour BETWEEN 9 AND 17
+)
 SELECT
-    b.sm_ship_mode_id,
-    b.sm_carrier,
-    CONCAT(b.sm_ship_mode_id, '-', b.sm_carrier) AS ship_mode_desc,
-    b.distinct_orders,
-    b.total_return_amount,
-    b.avg_return_tax,
-    regexp_extract(b.t_time_id, '^(.....)', 1) AS time_id_prefix,
-    CASE WHEN b.avg_return_amount > o.overall_avg THEN 'ABOVE_AVG' ELSE 'BELOW_AVG' END AS amount_vs_overall
-FROM base b
-CROSS JOIN overall o
-ORDER BY b.total_return_amount DESC
+    d_date,
+    p_promo_name,
+    w_city,
+    w_state,
+    SUM(ss_net_profit) AS total_profit,
+    AVG(ss_sales_price) AS avg_sales_price,
+    COUNT(DISTINCT ss_ticket_number) AS distinct_tickets,
+    SUM(COALESCE(inv_quantity_on_hand, 0)) AS total_inventory_on_hand,
+    COUNT(wr_return_quantity) AS total_returns
+FROM
+    sales_data
+GROUP BY
+    d_date,
+    p_promo_name,
+    w_city,
+    w_state
+HAVING
+    SUM(ss_net_profit) > 10000
+    AND COUNT(DISTINCT ss_ticket_number) > 100
+ORDER BY
+    total_profit DESC
 LIMIT 100

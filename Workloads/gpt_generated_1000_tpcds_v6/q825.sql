@@ -1,37 +1,40 @@
-WITH agg AS (
+WITH agg_returns AS (
     SELECT
-        d.d_year,
-        w.w_city,
-        cc.cc_division,
-        SUM(wr.wr_return_amt) AS total_return_amt,
-        SUM(i.inv_quantity_on_hand) AS total_quantity,
-        AVG(wr.wr_return_tax) AS avg_return_tax,
-        SUM(CASE WHEN wr.wr_return_tax > 20 THEN 1 ELSE 0 END) AS high_tax_cnt
-    FROM web_returns wr
-    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
-    JOIN household_demographics hd ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN inventory i ON i.inv_date_sk = d.d_date_sk
-    JOIN warehouse w ON i.inv_warehouse_sk = w.w_warehouse_sk
-    JOIN call_center cc ON cc.cc_closed_date_sk = d.d_date_sk
-    WHERE d.d_year = 2001
-      AND d.d_month_seq BETWEEN 1200 AND 1300
+        d_cc.d_year,
+        cc.cc_name,
+        hd_sr.hd_buy_potential,
+        SUM(sr.sr_return_amt) AS total_store_return_amt,
+        SUM(wr.wr_return_amt) AS total_web_return_amt,
+        COUNT(DISTINCT sr.sr_ticket_number) AS distinct_store_tickets,
+        COUNT(DISTINCT wr.wr_order_number) AS distinct_web_orders,
+        CASE
+            WHEN SUM(sr.sr_return_amt) + SUM(wr.wr_return_amt) > 5000 THEN 'HIGH'
+            ELSE 'LOW'
+        END AS return_level
+    FROM call_center cc
+    JOIN date_dim d_cc ON cc.cc_closed_date_sk = d_cc.d_date_sk
+    JOIN store_returns sr ON sr.sr_returned_date_sk = d_cc.d_date_sk
+    JOIN household_demographics hd_sr ON sr.sr_hdemo_sk = hd_sr.hd_demo_sk
+    JOIN web_returns wr ON wr.wr_returned_date_sk = d_cc.d_date_sk
+    JOIN household_demographics hd_wr ON wr.wr_refunded_hdemo_sk = hd_wr.hd_demo_sk
+    WHERE d_cc.d_quarter_seq = 12
       AND cc.cc_state = 'CA'
-      AND w.w_state = 'CA'
-      AND i.inv_quantity_on_hand > 100
-      AND wr.wr_return_tax > 0
-      AND hd.hd_vehicle_count >= 2
-      AND cc.cc_employees BETWEEN 50 AND 200
-    GROUP BY ROLLUP (d.d_year, w.w_city, cc.cc_division)
+      AND hd_sr.hd_buy_potential = '>10000'
+      AND wr.wr_fee > 20
+    GROUP BY d_cc.d_year, cc.cc_name, hd_sr.hd_buy_potential
 )
-SELECT
-    d_year,
-    w_city,
-    cc_division,
-    total_return_amt,
-    total_quantity,
-    avg_return_tax,
-    high_tax_cnt,
-    ROW_NUMBER() OVER (PARTITION BY d_year ORDER BY total_return_amt DESC) AS rn_within_year
-FROM agg
-ORDER BY d_year, w_city, cc_division
+SELECT DISTINCT
+    a.d_year,
+    a.cc_name,
+    a.hd_buy_potential,
+    a.total_store_return_amt,
+    a.total_web_return_amt,
+    a.return_level,
+    a.distinct_store_tickets,
+    a.distinct_web_orders,
+    RANK() OVER (PARTITION BY a.d_year ORDER BY (a.total_store_return_amt + a.total_web_return_amt) DESC) AS rank_by_total,
+    SUM(a.total_store_return_amt + a.total_web_return_amt) OVER (PARTITION BY a.d_year ORDER BY a.cc_name ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_return_amt
+FROM agg_returns a
+WHERE (a.total_store_return_amt + a.total_web_return_amt) > 10000
+ORDER BY a.d_year DESC, rank_by_total
 LIMIT 100

@@ -1,21 +1,40 @@
-SELECT d.d_year AS year,
-       SUM(ws.ws_net_paid) AS total_net_paid,
-       CASE WHEN SUM(ws.ws_net_paid) > 10000 THEN 'High' ELSE 'Low' END AS profit_category
-FROM web_sales ws
-JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
-JOIN web_site wsite ON ws.ws_web_site_sk = wsite.web_site_sk
-WHERE wsite.web_state = 'CA'
-  AND d.d_year BETWEEN 2000 AND 2002
-GROUP BY d.d_year
+WITH catalog_loss AS (
+    SELECT
+        d.d_year,
+        d.d_month_seq,
+        'catalog' AS return_source,
+        SUM(cr.cr_net_loss) AS total_net_loss
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE sm.sm_type = 'OVERNIGHT'
+      AND d.d_year = 2001
+    GROUP BY d.d_year, d.d_month_seq
+),
+store_loss AS (
+    SELECT
+        d.d_year,
+        d.d_month_seq,
+        'store' AS return_source,
+        SUM(sr.sr_net_loss) AS total_net_loss
+    FROM store_returns sr
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    JOIN store s ON sr.sr_store_sk = s.s_store_sk
+    WHERE s.s_state = 'CA'
+      AND d.d_year = 2001
+    GROUP BY d.d_year, d.d_month_seq
+)
+SELECT
+    d_year,
+    d_month_seq,
+    return_source,
+    total_net_loss
+FROM catalog_loss
 UNION ALL
-SELECT d.d_year AS year,
-       SUM(ss.ss_net_paid) AS total_net_paid,
-       CASE WHEN SUM(ss.ss_net_paid) > 8000 THEN 'High' ELSE 'Low' END AS profit_category
-FROM store_sales ss
-JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
-JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
-WHERE ca.ca_location_type = 'single family'
-  AND d.d_year BETWEEN 2000 AND 2002
-GROUP BY d.d_year
-ORDER BY year, total_net_paid DESC
-LIMIT 100
+SELECT
+    d_year,
+    d_month_seq,
+    return_source,
+    total_net_loss
+FROM store_loss
+ORDER BY d_year, d_month_seq, return_source

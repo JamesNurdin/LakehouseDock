@@ -1,70 +1,34 @@
-WITH
-store_sales_summary AS (
+WITH store_profit AS (
     SELECT
-        s.s_store_id AS store_id,
-        s.s_store_name AS store_name,
-        cd.cd_gender AS gender,
-        SUM(ss.ss_net_profit) AS total_net_profit,
-        COUNT(DISTINCT ss.ss_ticket_number) AS distinct_tickets,
-        CASE
-            WHEN SUM(ss.ss_net_profit) > 10000 THEN 'High'
-            WHEN SUM(ss.ss_net_profit) > 5000 THEN 'Medium'
-            ELSE 'Low'
-        END AS profit_category
-    FROM store_sales ss
-    JOIN store s ON ss.ss_store_sk = s.s_store_sk
-    JOIN customer_demographics cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
-    WHERE s.s_store_name LIKE '%Store%'
-    GROUP BY s.s_store_id, s.s_store_name, cd.cd_gender
+        d.d_year,
+        i.i_category,
+        SUM(ss.ss_net_profit) AS total_profit,
+        'store' AS channel
+    FROM tpcds.store_sales ss
+    JOIN tpcds.date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN tpcds.item i ON ss.ss_item_sk = i.i_item_sk
+    WHERE d.d_year = 2001
+    GROUP BY d.d_year, i.i_category
+    HAVING SUM(ss.ss_net_profit) > 0
 ),
-catalog_sales_summary AS (
+web_profit AS (
     SELECT
-        sm.sm_ship_mode_id AS mode_id,
-        sm.sm_code AS mode_code,
-        CASE
-            WHEN regexp_like(sm.sm_code, '^A') THEN 'Air'
-            WHEN regexp_like(sm.sm_code, '^B') THEN 'Bike'
-            ELSE 'Other'
-        END AS mode_category,
-        SUM(cs.cs_net_profit) AS total_net_profit,
-        COUNT(DISTINCT cs.cs_order_number) AS distinct_orders,
-        CASE
-            WHEN SUM(cs.cs_net_profit) > 20000 THEN 'High'
-            WHEN SUM(cs.cs_net_profit) > 10000 THEN 'Medium'
-            ELSE 'Low'
-        END AS profit_category,
-        regexp_extract(sm.sm_ship_mode_id, '[A-Z]+') AS mode_alpha
-    FROM catalog_sales cs
-    JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-    WHERE sm.sm_contract LIKE '%a%'
-    GROUP BY sm.sm_ship_mode_id,
-        sm.sm_code,
-        CASE
-            WHEN regexp_like(sm.sm_code, '^A') THEN 'Air'
-            WHEN regexp_like(sm.sm_code, '^B') THEN 'Bike'
-            ELSE 'Other'
-        END,
-        regexp_extract(sm.sm_ship_mode_id, '[A-Z]+')
+        d.d_year,
+        i.i_category,
+        SUM(ws.ws_net_profit) AS total_profit,
+        'web' AS channel
+    FROM tpcds.web_sales ws
+    JOIN tpcds.date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN tpcds.item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE d.d_year = 2001
+    GROUP BY d.d_year, i.i_category
+    HAVING SUM(ws.ws_net_profit) > 0
 )
-
-SELECT DISTINCT
-    store_id AS id,
-    store_name AS name,
-    gender AS segment,
-    total_net_profit,
-    profit_category,
-    'Store' AS source
-FROM store_sales_summary
-
-UNION ALL
-
-SELECT
-    mode_id AS id,
-    mode_code AS name,
-    mode_category AS segment,
-    total_net_profit,
-    profit_category,
-    'ShipMode' AS source
-FROM catalog_sales_summary
-
-ORDER BY total_net_profit DESC
+SELECT DISTINCT year, category, channel, total_profit
+FROM (
+    SELECT d_year AS year, i_category AS category, total_profit, channel FROM store_profit
+    UNION ALL
+    SELECT d_year AS year, i_category AS category, total_profit, channel FROM web_profit
+) combined
+ORDER BY total_profit DESC
+LIMIT 100

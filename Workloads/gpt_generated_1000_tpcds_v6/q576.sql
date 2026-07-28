@@ -1,79 +1,53 @@
-WITH
-  sales_agg AS (
+WITH catalog_metrics AS (
     SELECT
-      ss_store_sk,
-      ss_sold_date_sk,
-      MIN(ss_addr_sk) AS addr_sk,
-      SUM(ss_ext_sales_price) AS total_sales,
-      SUM(ss_net_profit) AS total_profit,
-      SUM(ss_quantity) AS total_qty
-    FROM store_sales
-    WHERE ss_sold_date_sk IN (
-      SELECT d_date_sk FROM date_dim WHERE d_year = 2001
-    )
-    GROUP BY ss_store_sk, ss_sold_date_sk
-  ),
-  returns_agg AS (
+        d.d_date AS sale_date,
+        'Catalog' AS channel,
+        SUM(cs.cs_net_paid) AS total_net_paid,
+        SUM(COALESCE(cr.cr_return_amount, 0)) AS total_return_amount,
+        SUM(cs.cs_net_paid) - SUM(COALESCE(cr.cr_return_amount, 0)) AS net_after_returns
+    FROM catalog_sales cs
+    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    LEFT JOIN catalog_returns cr
+        ON cs.cs_order_number = cr.cr_order_number
+        AND cr.cr_returned_date_sk = d.d_date_sk
+    WHERE d.d_year = 2000
+      AND EXISTS (
+          SELECT 1
+          FROM promotion p
+          WHERE p.p_promo_sk = cs.cs_promo_sk
+            AND p.p_start_date_sk > 2450300
+      )
+    GROUP BY d.d_date
+),
+web_metrics AS (
     SELECT
-      sr_store_sk,
-      sr_returned_date_sk,
-      COUNT(*) AS return_cnt,
-      SUM(sr_refunded_cash) AS refunded_cash
-    FROM store_returns
-    WHERE sr_returned_date_sk IN (
-      SELECT d_date_sk FROM date_dim WHERE d_year = 2001
-    )
-    GROUP BY sr_store_sk, sr_returned_date_sk
-  ),
-  avg_profit AS (
-    SELECT
-      d.d_year,
-      AVG(sa.total_profit) AS avg_profit
-    FROM sales_agg sa
-    JOIN date_dim d ON sa.ss_sold_date_sk = d.d_date_sk
-    GROUP BY d.d_year
-  )
-SELECT
-  s.s_store_id,
-  s.s_store_name,
-  d_sales.d_month_seq,
-  d_sales.d_year,
-  ca.ca_city,
-  ca.ca_street_type,
-  s.s_state,
-  sa.total_sales,
-  sa.total_profit,
-  CASE WHEN sa.total_profit > ap.avg_profit THEN 'Above Avg' ELSE 'Below Avg' END AS profit_category,
-  COALESCE(ra.return_cnt, 0) AS return_count,
-  RANK() OVER (PARTITION BY d_sales.d_year ORDER BY sa.total_profit DESC) AS profit_rank,
-  ROW_NUMBER() OVER (PARTITION BY s.s_store_id ORDER BY d_sales.d_date_sk) AS sales_day_seq
-FROM sales_agg sa
-JOIN store s
-  ON sa.ss_store_sk = s.s_store_sk
-JOIN date_dim d_sales
-  ON sa.ss_sold_date_sk = d_sales.d_date_sk
-LEFT JOIN returns_agg ra
-  ON s.s_store_sk = ra.sr_store_sk
-  AND d_sales.d_date_sk = ra.sr_returned_date_sk
-JOIN customer_address ca
-  ON sa.addr_sk = ca.ca_address_sk
-JOIN time_dim t_sales
-  ON EXISTS (
-       SELECT 1
-       FROM store_sales ssx
-       WHERE ssx.ss_store_sk = s.s_store_sk
-         AND ssx.ss_sold_date_sk = d_sales.d_date_sk
-         AND ssx.ss_sold_time_sk = t_sales.t_time_sk
-         AND t_sales.t_hour BETWEEN 9 AND 17
-     )
-JOIN date_dim d_closed
-  ON s.s_closed_date_sk = d_closed.d_date_sk
-     AND d_closed.d_year = 2001
-JOIN avg_profit ap
-  ON d_sales.d_year = ap.d_year
-WHERE
-  d_sales.d_year = 2001
-  AND s.s_state = 'CA'
-  AND ca.ca_city = 'Glendale'
-  AND ca.ca_street_type = 'Court'
-  AND t_sales.t_am_pm = 'PM'
+        d.d_date AS sale_date,
+        'Web' AS channel,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        SUM(COALESCE(wr.wr_return_amt, 0)) AS total_return_amount,
+        SUM(ws.ws_net_paid) - SUM(COALESCE(wr.wr_return_amt, 0)) AS net_after_returns
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    LEFT JOIN web_returns wr
+        ON ws.ws_order_number = wr.wr_order_number
+        AND wr.wr_returned_date_sk = d.d_date_sk
+    WHERE d.d_year = 2000
+      AND ws.ws_promo_sk IN (
+          SELECT p_promo_sk
+          FROM promotion
+          WHERE p_channel_email = 'N'
+      )
+    GROUP BY d.d_date
+)
+SELECT sale_date,
+       channel,
+       total_net_paid,
+       total_return_amount,
+       net_after_returns
+FROM (
+    SELECT * FROM catalog_metrics
+    UNION ALL
+    SELECT * FROM web_metrics
+) combined
+ORDER BY sale_date, channel
+LIMIT 100

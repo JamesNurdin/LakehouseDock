@@ -1,55 +1,36 @@
-WITH ss AS (
+WITH catalog_returns_enhanced AS (
     SELECT
-        ss_ticket_number,
-        ss_sold_date_sk,
-        ss_item_sk,
-        ss_store_sk,
-        ss_customer_sk,
-        ss_quantity,
-        ss_sales_price,
-        ss_ext_sales_price,
-        ss_net_paid,
-        ss_net_profit
-    FROM store_sales
-),
-sr AS (
-    SELECT
-        sr_ticket_number,
-        sr_return_quantity,
-        sr_return_amt,
-        sr_net_loss,
-        sr_item_sk,
-        sr_store_sk,
-        sr_customer_sk
-    FROM store_returns
+        w.w_warehouse_sk,
+        w.w_warehouse_name,
+        w.w_city,
+        d.d_date,
+        date_format(date_trunc('month', d.d_date), '%Y-%m') AS month_str,
+        cr.cr_net_loss,
+        cc.cc_name
+    FROM catalog_returns cr
+    JOIN warehouse w
+        ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    JOIN date_dim d
+        ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN call_center cc
+        ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    WHERE w.w_city LIKE '%York%'
+      AND regexp_like(cc.cc_name, 'Center$')
 )
 SELECT
-    s.s_store_name,
-    i.i_category,
-    SUM(ss.ss_ext_sales_price) AS total_sales_amount,
-    SUM(sr.sr_return_amt) AS total_return_amount,
-    SUM(cr.cr_fee) AS total_catalog_fee,
-    CASE WHEN SUM(cr.cr_fee) > 1000 THEN 'HIGH' ELSE 'LOW' END AS fee_category,
-    COUNT(DISTINCT ss.ss_ticket_number) AS sales_txn_cnt,
-    GROUPING(s.s_store_name) AS grp_store,
-    GROUPING(i.i_category) AS grp_category
-FROM ss
-JOIN sr ON sr.sr_ticket_number = ss.ss_ticket_number
-JOIN item i ON ss.ss_item_sk = i.i_item_sk
-JOIN item i_sr ON sr.sr_item_sk = i_sr.i_item_sk
-JOIN customer c_ss ON ss.ss_customer_sk = c_ss.c_customer_sk
-JOIN customer c_sr ON sr.sr_customer_sk = c_sr.c_customer_sk
-JOIN store s ON ss.ss_store_sk = s.s_store_sk
-JOIN store s_sr ON sr.sr_store_sk = s_sr.s_store_sk
-JOIN catalog_returns cr ON cr.cr_item_sk = i.i_item_sk
-JOIN customer c_cr ON cr.cr_refunded_customer_sk = c_cr.c_customer_sk
-JOIN web_returns wr ON wr.wr_item_sk = i.i_item_sk
-JOIN customer c_wr ON wr.wr_refunded_customer_sk = c_wr.c_customer_sk
-GROUP BY GROUPING SETS (
-    (s.s_store_name, i.i_category),
-    (s.s_store_name),
-    (i.i_category),
-    ()
+    c.w_warehouse_name,
+    c.month_str,
+    CONCAT(c.w_warehouse_name, ' - ', c.month_str) AS warehouse_month,
+    MAX(CASE WHEN regexp_like(c.w_city, '^New.*') THEN 'New' ELSE 'Other' END) AS city_category,
+    SUM(c.cr_net_loss) AS total_net_loss,
+    COUNT(*) AS return_cnt
+FROM catalog_returns_enhanced c
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM inventory i
+    WHERE i.inv_warehouse_sk = c.w_warehouse_sk
+      AND i.inv_quantity_on_hand > 1000
 )
-ORDER BY total_sales_amount DESC
+GROUP BY ROLLUP (c.w_warehouse_name, c.month_str)
+ORDER BY c.w_warehouse_name, c.month_str
 LIMIT 100

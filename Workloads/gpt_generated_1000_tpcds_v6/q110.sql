@@ -1,48 +1,42 @@
-WITH filtered_returns AS (
+WITH cc_closed AS (
     SELECT
-        cr.cr_returned_date_sk,
-        cr.cr_return_amount,
-        cr.cr_return_quantity,
-        cr.cr_net_loss,
-        cr.cr_warehouse_sk,
-        cr.cr_catalog_page_sk,
-        cr.cr_reason_sk,
-        cr.cr_fee,
-        cr.cr_return_ship_cost
-    FROM catalog_returns cr
-    WHERE cr.cr_return_amount BETWEEN 20 AND 5000
-      AND cr.cr_return_quantity >= 1
-      AND cr.cr_fee < 100
-      AND cr.cr_return_ship_cost > 0
-      AND cr.cr_net_loss > 0
-      AND cr.cr_returned_date_sk BETWEEN 2450900 AND 2451543
+        cc.cc_division_name AS division_name,
+        d.d_year AS closed_year,
+        SUM(cc.cc_sq_ft) AS sum_sq_ft,
+        AVG(cc.cc_employees) AS avg_employees,
+        COUNT(*) AS cnt_centers,
+        SUM(CASE WHEN cc.cc_tax_percentage > 5.00 THEN 1 ELSE 0 END) AS high_tax_cnt
+    FROM call_center cc
+    JOIN date_dim d ON cc.cc_closed_date_sk = d.d_date_sk
+    WHERE cc.cc_state = 'CA'                                   -- predicate 1
+      AND cc.cc_gmt_offset BETWEEN -8.00 AND -5.00             -- predicate 2
+      AND d.d_current_year = 'Y'                               -- predicate 3
+    GROUP BY cc.cc_division_name, d.d_year
 )
 SELECT
-    cp.cp_catalog_page_id,
-    COALESCE(w.w_warehouse_name, 'UNKNOWN') AS warehouse_name,
-    r.r_reason_desc,
-    fr.cr_return_amount,
-    fr.cr_return_quantity,
-    fr.cr_net_loss,
-    ROW_NUMBER() OVER (PARTITION BY COALESCE(w.w_warehouse_name, 'UNKNOWN') ORDER BY fr.cr_return_amount DESC) AS rn_by_warehouse,
-    RANK() OVER (ORDER BY fr.cr_return_amount DESC) AS overall_return_amount_rank,
-    CASE
-        WHEN fr.cr_return_amount > 3000 THEN 'High'
-        WHEN fr.cr_return_amount > 1000 THEN 'Medium'
-        ELSE 'Low'
-    END AS amount_category
-FROM filtered_returns fr
-JOIN catalog_page cp
-    ON fr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-JOIN reason r
-    ON fr.cr_reason_sk = r.r_reason_sk
-LEFT JOIN warehouse w
-    ON fr.cr_warehouse_sk = w.w_warehouse_sk
-WHERE cp.cp_department = 'Electronics'
-  AND cp.cp_type = 'Catalog'
-  AND r.r_reason_desc LIKE '%Did not%'
-  AND w.w_state IN ('CA', 'NY', 'TX')
-  AND cp.cp_end_date_sk > 2450900
-  AND cp.cp_catalog_page_number BETWEEN 1 AND 100
-ORDER BY overall_return_amount_rank ASC
+    closed_year,
+    size_bucket,
+    COUNT(*) AS divisions_in_bucket,
+    AVG(sum_sq_ft) AS avg_sq_ft_per_division,
+    AVG(avg_employees) AS avg_employees_per_division,
+    SUM(high_tax_cnt) AS total_high_tax_centers
+FROM (
+    SELECT
+        division_name,
+        closed_year,
+        sum_sq_ft,
+        avg_employees,
+        cnt_centers,
+        high_tax_cnt,
+        CASE
+            WHEN sum_sq_ft > 500000 THEN 'Large'
+            WHEN sum_sq_ft > 200000 THEN 'Medium'
+            ELSE 'Small'
+        END AS size_bucket
+    FROM cc_closed
+    WHERE cnt_centers >= 5                                     -- outer filter
+) agg2
+GROUP BY closed_year, size_bucket
+HAVING AVG(sum_sq_ft) > 100000
+ORDER BY closed_year DESC, avg_sq_ft_per_division DESC
 LIMIT 100

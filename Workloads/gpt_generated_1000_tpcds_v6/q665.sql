@@ -1,64 +1,48 @@
-WITH filtered_returns AS (
-    SELECT
-        cr.cr_returned_date_sk,
-        cr.cr_return_amount,
-        cr.cr_return_tax,
-        cr.cr_net_loss,
-        cr.cr_return_quantity,
-        cr.cr_call_center_sk,
-        cr.cr_reason_sk
-    FROM catalog_returns cr
-    WHERE cr.cr_return_amount > 100
-      AND cr.cr_return_tax >= 5
-      AND cr.cr_return_quantity BETWEEN 1 AND 10
-      AND cr.cr_returned_date_sk BETWEEN 2450000 AND 2452000
-      AND cr.cr_call_center_sk IS NOT NULL
-      AND cr.cr_reason_sk IS NOT NULL
+WITH avg_cr_net_loss AS (
+    SELECT AVG(cr_net_loss) AS avg_loss
+    FROM catalog_returns
 ),
-joined AS (
-    SELECT
-        fr.cr_returned_date_sk,
-        fr.cr_return_amount,
-        fr.cr_return_tax,
-        fr.cr_net_loss,
-        fr.cr_return_quantity,
-        cc.cc_call_center_id,
-        cc.cc_state,
-        cc.cc_sq_ft,
-        cc.cc_gmt_offset,
-        r.r_reason_id,
-        r.r_reason_desc
-    FROM filtered_returns fr
-    JOIN call_center cc
-        ON fr.cr_call_center_sk = cc.cc_call_center_sk
-    JOIN reason r
-        ON fr.cr_reason_sk = r.r_reason_sk
-    WHERE cc.cc_sq_ft > 0
-      AND cc.cc_state IN ('CA', 'TX', 'NY')
-      AND cc.cc_gmt_offset BETWEEN -5 AND 5
-      AND r.r_reason_desc LIKE '%color%'
-),
-aggregated AS (
-    SELECT
-        cc_call_center_id,
-        r_reason_id,
-        r_reason_desc,
-        cc_state,
-        SUM(cr_net_loss) AS total_net_loss
-    FROM joined
-    GROUP BY cc_call_center_id, r_reason_id, r_reason_desc, cc_state
+high_price_items AS (
+    SELECT COUNT(*) AS cnt
+    FROM item
+    WHERE i_current_price > 100
 )
-SELECT DISTINCT
-    cc_call_center_id,
-    r_reason_id,
-    r_reason_desc,
-    cc_state,
-    total_net_loss,
-    RANK() OVER (PARTITION BY cc_call_center_id ORDER BY total_net_loss DESC) AS loss_rank
-FROM aggregated
-WHERE total_net_loss > 0
-  AND total_net_loss < 10000
-  AND cc_state <> 'FL'
-  AND r_reason_id <> 'AAAAAAAABBAAAAAA'
-ORDER BY total_net_loss DESC, cc_call_center_id
+SELECT
+    'Store' AS return_channel,
+    r.r_reason_desc,
+    SUM(sr.sr_net_loss) AS total_net_loss,
+    hp.cnt AS high_price_item_count
+FROM store_returns sr
+JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+CROSS JOIN high_price_items hp
+WHERE sr.sr_net_loss > (SELECT avg_loss FROM avg_cr_net_loss)
+GROUP BY r.r_reason_desc, hp.cnt
+
+UNION ALL
+
+SELECT
+    'Catalog' AS return_channel,
+    r.r_reason_desc,
+    SUM(cr.cr_net_loss) AS total_net_loss,
+    hp.cnt
+FROM catalog_returns cr
+JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+CROSS JOIN high_price_items hp
+WHERE cr.cr_net_loss > (SELECT avg_loss FROM avg_cr_net_loss)
+GROUP BY r.r_reason_desc, hp.cnt
+
+UNION ALL
+
+SELECT
+    'Web' AS return_channel,
+    r.r_reason_desc,
+    SUM(wr.wr_net_loss) AS total_net_loss,
+    hp.cnt
+FROM web_returns wr
+JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
+CROSS JOIN high_price_items hp
+WHERE wr.wr_net_loss > (SELECT avg_loss FROM avg_cr_net_loss)
+GROUP BY r.r_reason_desc, hp.cnt
+
+ORDER BY return_channel, total_net_loss DESC
 LIMIT 100

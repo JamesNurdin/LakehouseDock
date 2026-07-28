@@ -1,70 +1,61 @@
-WITH sales_agg AS (
+WITH base AS (
     SELECT
-        ws_warehouse_sk,
-        ws_web_site_sk,
-        ws_ship_mode_sk,
-        ws_bill_hdemo_sk,
-        ws_bill_addr_sk,
-        ws_ship_hdemo_sk,
-        ws_ship_addr_sk,
-        ws_web_page_sk,
-        SUM(ws_net_paid) AS total_net_paid,
-        COUNT(*) AS order_cnt,
-        AVG(ws_ext_tax) AS avg_ext_tax
-    FROM tpcds.web_sales
-    WHERE ws_ext_tax > 0
-      AND ws_ext_list_price BETWEEN 500 AND 20000
-      AND ws_quantity >= 1
-      AND ws_net_paid_inc_ship_tax >= 100
-      AND ws_ship_date_sk IS NOT NULL
-      AND ws_sold_date_sk BETWEEN 2450000 AND 2451000
-    GROUP BY
-        ws_warehouse_sk,
-        ws_web_site_sk,
-        ws_ship_mode_sk,
-        ws_bill_hdemo_sk,
-        ws_bill_addr_sk,
-        ws_ship_hdemo_sk,
-        ws_ship_addr_sk,
-        ws_web_page_sk
+        s.s_store_name                AS s_store_name,
+        d_sold.d_year                AS d_year,
+        sm.sm_type                   AS sm_type,
+        cs.cs_net_profit             AS cs_net_profit,
+        cs.cs_order_number           AS cs_order_number
+    FROM store_sales ss
+    JOIN date_dim d_sold
+      ON ss.ss_sold_date_sk = d_sold.d_date_sk
+    JOIN customer c
+      ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd1
+      ON ss.ss_cdemo_sk = cd1.cd_demo_sk
+    JOIN store s
+      ON ss.ss_store_sk = s.s_store_sk
+    JOIN inventory i
+      ON i.inv_date_sk = d_sold.d_date_sk
+    JOIN catalog_sales cs
+      ON cs.cs_sold_date_sk = d_sold.d_date_sk
+    JOIN catalog_page cp
+      ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN ship_mode sm
+      ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN call_center cc
+      ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN catalog_returns cr
+      ON cr.cr_order_number = cs.cs_order_number
+    JOIN reason r
+      ON cr.cr_reason_sk = r.r_reason_sk
+    JOIN web_returns wr
+      ON wr.wr_returned_date_sk = d_sold.d_date_sk
+    JOIN web_page wp
+      ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    -- Re‑use date_dim under a different alias for the ship date of the catalog sale
+    JOIN date_dim d_ship
+      ON cs.cs_ship_date_sk = d_ship.d_date_sk
+    -- Re‑use customer_demographics under a different alias for the ship‑customer demographics
+    JOIN customer_demographics cd2
+      ON cs.cs_ship_cdemo_sk = cd2.cd_demo_sk
+),
+agg AS (
+    SELECT
+        s_store_name,
+        d_year,
+        sm_type,
+        SUM(cs_net_profit)        AS total_profit,
+        COUNT(DISTINCT cs_order_number) AS distinct_orders
+    FROM base
+    GROUP BY s_store_name, d_year, sm_type
 )
-SELECT DISTINCT
-    ws.web_name AS web_site_name,
-    w.w_warehouse_name AS warehouse_name,
-    sm.sm_carrier AS carrier,
-    ca_bill.ca_gmt_offset AS bill_gmt_offset,
-    hd_bill.hd_vehicle_count AS bill_vehicle_cnt,
-    total_net_paid,
-    order_cnt,
-    avg_ext_tax,
-    RANK() OVER (PARTITION BY ws.web_name ORDER BY total_net_paid DESC) AS warehouse_rank
-FROM sales_agg sa
-JOIN tpcds.warehouse w
-  ON sa.ws_warehouse_sk = w.w_warehouse_sk
-JOIN tpcds.ship_mode sm
-  ON sa.ws_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN tpcds.web_site ws
-  ON sa.ws_web_site_sk = ws.web_site_sk
-JOIN tpcds.household_demographics hd_bill
-  ON sa.ws_bill_hdemo_sk = hd_bill.hd_demo_sk
-JOIN tpcds.household_demographics hd_ship
-  ON sa.ws_ship_hdemo_sk = hd_ship.hd_demo_sk
-JOIN tpcds.customer_address ca_bill
-  ON sa.ws_bill_addr_sk = ca_bill.ca_address_sk
-JOIN tpcds.customer_address ca_ship
-  ON sa.ws_ship_addr_sk = ca_ship.ca_address_sk
-JOIN tpcds.web_page wp
-  ON sa.ws_web_page_sk = wp.wp_web_page_sk
-WHERE ca_bill.ca_gmt_offset = -5.00
-  AND ca_ship.ca_state = 'CA'
-  AND hd_bill.hd_vehicle_count >= 0
-  AND hd_ship.hd_buy_potential = '>10000'
-  AND sm.sm_carrier = 'UPS'
-  AND w.w_warehouse_sq_ft > 50000
-  AND EXISTS (
-        SELECT 1 FROM tpcds.web_page wp2
-        WHERE wp2.wp_web_page_sk = sa.ws_web_page_sk
-          AND wp2.wp_url LIKE '%example%'
-    )
-ORDER BY total_net_paid DESC
+SELECT
+    s_store_name,
+    d_year,
+    sm_type,
+    total_profit,
+    distinct_orders,
+    ROW_NUMBER() OVER (PARTITION BY sm_type ORDER BY total_profit DESC) AS profit_rank
+FROM agg
+ORDER BY total_profit DESC
 LIMIT 100

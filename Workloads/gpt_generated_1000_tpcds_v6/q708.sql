@@ -1,43 +1,67 @@
-WITH
-  d_sold AS (
-    SELECT * FROM date_dim WHERE d_year = 2001
-  ),
-  d_ship AS (
-    SELECT * FROM date_dim WHERE d_year = 2001
-  ),
-  d_closed AS (
-    SELECT * FROM date_dim WHERE d_year = 2001
-  )
+WITH store_agg AS (
+    SELECT
+        i.i_item_id AS i_item_id,
+        i.i_brand AS i_brand,
+        t.t_hour AS t_hour,
+        SUM(ss.ss_quantity) AS total_quantity,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        SUM(ss.ss_net_profit) AS total_profit
+    FROM store_sales ss
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN time_dim t ON ss.ss_sold_time_sk = t.t_time_sk
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    WHERE p.p_channel_radio = 'N'
+      AND t.t_shift = 'first'
+    GROUP BY i.i_item_id, i.i_brand, t.t_hour
+),
+web_agg AS (
+    SELECT
+        i.i_item_id AS i_item_id,
+        i.i_brand AS i_brand,
+        t.t_hour AS t_hour,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN time_dim t ON ws.ws_sold_time_sk = t.t_time_sk
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE p.p_channel_radio = 'N'
+      AND t.t_shift = 'first'
+    GROUP BY i.i_item_id, i.i_brand, t.t_hour
+)
 SELECT
-  s.s_store_name,
-  w.w_warehouse_name,
-  d_sold.d_year,
-  d_sold.d_month_seq,
-  SUM(cs.cs_net_paid)                AS total_catalog_net_paid,
-  SUM(ss.ss_net_paid)                AS total_store_net_paid,
-  COUNT(DISTINCT cs.cs_order_number) AS distinct_orders,
-  AVG(cs.cs_ext_discount_amt)        AS avg_catalog_discount,
-  MAX(ss.ss_ext_tax)                 AS max_store_tax,
-  MIN(w.w_warehouse_sq_ft)           AS min_warehouse_sq_ft
-FROM catalog_sales cs
-JOIN d_sold   ON cs.cs_sold_date_sk = d_sold.d_date_sk
-JOIN d_ship   ON cs.cs_ship_date_sk = d_ship.d_date_sk
-JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
-JOIN store_sales ss ON ss.ss_sold_date_sk = d_sold.d_date_sk
-JOIN store s   ON ss.ss_store_sk = s.s_store_sk
-JOIN d_closed ON s.s_closed_date_sk = d_closed.d_date_sk
-WHERE
-  ss.ss_coupon_amt > 100
-  AND cs.cs_ext_sales_price > 5000
-  AND s.s_state = 'CA'
-  AND w.w_state = 'TX'
-  AND w.w_gmt_offset = -6.00
-GROUP BY
-  s.s_store_name,
-  w.w_warehouse_name,
-  d_sold.d_year,
-  d_sold.d_month_seq
-ORDER BY
-  total_catalog_net_paid DESC,
-  s.s_store_name ASC
+    combined.item_id,
+    combined.brand,
+    combined.hour,
+    SUM(combined.total_quantity) AS quantity,
+    SUM(combined.total_sales) AS sales,
+    SUM(combined.total_profit) AS profit
+FROM (
+    SELECT
+        i_item_id AS item_id,
+        i_brand AS brand,
+        t_hour AS hour,
+        total_quantity,
+        total_sales,
+        total_profit
+    FROM store_agg
+    UNION ALL
+    SELECT
+        i_item_id AS item_id,
+        i_brand AS brand,
+        t_hour AS hour,
+        total_quantity,
+        total_sales,
+        total_profit
+    FROM web_agg
+) AS combined
+GROUP BY GROUPING SETS (
+    (item_id, brand, hour),
+    (item_id, brand),
+    (brand, hour),
+    (brand),
+    ()
+)
+ORDER BY quantity DESC
 LIMIT 100

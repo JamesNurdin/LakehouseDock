@@ -1,45 +1,29 @@
-/* Goal: Compare total sales for high‑income vs low‑income households, distinguishing those that made purchases during midday hours. The query uses a CTE to aggregate sales, a scalar subquery for the overall average, DISTINCT, EXISTS/NOT EXISTS filters, and combines the two result sets with UNION ALL. */
-WITH agg_sales AS (
+WITH catalog_agg AS (
     SELECT
-        hd.hd_demo_sk,
-        SUM(ss.ss_ext_sales_price) AS total_sales,
-        ib.ib_upper_bound AS income_upper,
-        hd.hd_buy_potential AS buy_potential
-    FROM store_sales ss
-    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    GROUP BY
-        hd.hd_demo_sk,
-        ib.ib_upper_bound,
-        hd.hd_buy_potential
+        'catalog' AS channel,
+        cr.cr_warehouse_sk AS warehouse_sk,
+        SUM(cr.cr_net_loss) AS total_net_loss
+    FROM catalog_returns cr
+    JOIN catalog_sales cs
+        ON cr.cr_order_number = cs.cs_order_number
+    WHERE cr.cr_returned_date_sk BETWEEN 2450000 AND 2450100
+    GROUP BY cr.cr_warehouse_sk
+),
+web_agg AS (
+    SELECT
+        'web' AS channel,
+        ws.ws_warehouse_sk AS warehouse_sk,
+        SUM(wr.wr_net_loss) AS total_net_loss
+    FROM web_returns wr
+    JOIN web_sales ws
+        ON wr.wr_order_number = ws.ws_order_number
+    WHERE wr.wr_returned_date_sk BETWEEN 2450000 AND 2450100
+    GROUP BY ws.ws_warehouse_sk
 )
-SELECT DISTINCT
-    a.hd_demo_sk,
-    a.buy_potential,
-    a.total_sales,
-    (SELECT AVG(total_sales) FROM agg_sales) AS avg_sales
-FROM agg_sales a
-WHERE a.income_upper >= 90000
-  AND EXISTS (
-        SELECT 1
-        FROM store_sales ss2
-        JOIN time_dim td ON ss2.ss_sold_time_sk = td.t_time_sk
-        WHERE ss2.ss_hdemo_sk = a.hd_demo_sk
-          AND td.t_hour BETWEEN 12 AND 14
-      )
+SELECT channel, warehouse_sk, total_net_loss
+FROM catalog_agg
 UNION ALL
-SELECT DISTINCT
-    a.hd_demo_sk,
-    a.buy_potential,
-    a.total_sales,
-    (SELECT AVG(total_sales) FROM agg_sales) AS avg_sales
-FROM agg_sales a
-WHERE a.income_upper <= 50000
-  AND NOT EXISTS (
-        SELECT 1
-        FROM store_sales ss2
-        JOIN time_dim td ON ss2.ss_sold_time_sk = td.t_time_sk
-        WHERE ss2.ss_hdemo_sk = a.hd_demo_sk
-          AND td.t_hour BETWEEN 12 AND 14
-      )
+SELECT channel, warehouse_sk, total_net_loss
+FROM web_agg
+ORDER BY total_net_loss DESC
 LIMIT 100

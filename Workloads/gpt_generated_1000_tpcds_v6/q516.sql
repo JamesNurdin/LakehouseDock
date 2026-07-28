@@ -1,42 +1,43 @@
-WITH filtered_returns AS (
-   SELECT
-       wr.wr_returned_date_sk,
-       wr.wr_return_quantity,
-       wr.wr_return_amt,
-       wr.wr_net_loss,
-       wr.wr_returning_cdemo_sk
-   FROM web_returns wr
-   WHERE wr.wr_return_quantity > 1
-     AND wr.wr_return_amt > 100
-     AND wr.wr_returning_cdemo_sk IN (1664039, 776056)
+WITH store_sales_agg AS (
+  SELECT
+    c.c_customer_id AS cust_id,
+    s.s_store_name AS description,
+    SUM(ss.ss_net_profit) AS metric,
+    CASE
+      WHEN SUM(ss.ss_net_profit) > 10000 THEN 'HIGH'
+      ELSE 'LOW'
+    END AS category
+  FROM store_sales ss
+  JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+  JOIN store s ON ss.ss_store_sk = s.s_store_sk
+  WHERE s.s_floor_space > 6000000
+    AND ss.ss_net_paid > 0
+  GROUP BY c.c_customer_id, s.s_store_name
 ),
-agg AS (
-   SELECT
-       cc.cc_name,
-       cc.cc_mkt_id,
-       d.d_year,
-       SUM(fr.wr_net_loss) AS total_net_loss,
-       AVG(fr.wr_return_amt) AS avg_return_amt,
-       COUNT(*) AS return_cnt
-   FROM filtered_returns fr
-   JOIN date_dim d
-     ON fr.wr_returned_date_sk = d.d_date_sk
-   JOIN call_center cc
-     ON cc.cc_closed_date_sk = d.d_date_sk
-   WHERE cc.cc_state = 'CA'
-     AND cc.cc_mkt_class = 'National'
-     AND d.d_dow = 5
-     AND d.d_year = 2002
-   GROUP BY cc.cc_name, cc.cc_mkt_id, d.d_year
+store_returns_agg AS (
+  SELECT
+    c.c_customer_id AS cust_id,
+    r.r_reason_desc AS description,
+    SUM(sr.sr_net_loss) AS metric,
+    CASE
+      WHEN SUM(sr.sr_net_loss) > 5000 THEN 'HIGH_LOSS'
+      ELSE 'LOW_LOSS'
+    END AS category
+  FROM store_returns sr
+  JOIN customer c ON sr.sr_customer_sk = c.c_customer_sk
+  JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+  WHERE sr.sr_return_tax > 5.00
+  GROUP BY c.c_customer_id, r.r_reason_desc
 )
-SELECT
-    a.cc_name,
-    a.cc_mkt_id,
-    a.d_year,
-    a.total_net_loss,
-    a.avg_return_amt,
-    a.return_cnt,
-    ROW_NUMBER() OVER (PARTITION BY a.cc_mkt_id ORDER BY a.total_net_loss DESC) AS market_rank
-FROM agg a
-ORDER BY a.total_net_loss DESC
+SELECT DISTINCT
+  cust_id,
+  description,
+  metric,
+  category
+FROM (
+  SELECT cust_id, description, metric, category FROM store_sales_agg
+  UNION ALL
+  SELECT cust_id, description, metric, category FROM store_returns_agg
+) AS combined
+ORDER BY metric DESC
 LIMIT 100

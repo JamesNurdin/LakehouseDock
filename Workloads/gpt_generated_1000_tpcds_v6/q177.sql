@@ -1,55 +1,51 @@
-WITH base AS (
+WITH base_customers AS (
     SELECT
-        cc.cc_name,
-        cc.cc_state,
-        sm.sm_carrier,
-        w.w_warehouse_name,
-        inv.inv_quantity_on_hand,
-        cs.cs_net_profit,
-        ss.ss_net_paid,
-        wr.wr_return_amt,
-        r.r_reason_desc
-    FROM household_demographics hd
-    JOIN store_sales ss
-        ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    JOIN catalog_sales cs
-        ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-    JOIN call_center cc
-        ON cs.cs_call_center_sk = cc.cc_call_center_sk
-    JOIN ship_mode sm
-        ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN warehouse w
-        ON cs.cs_warehouse_sk = w.w_warehouse_sk
-    JOIN inventory inv
-        ON inv.inv_warehouse_sk = w.w_warehouse_sk
-    JOIN web_returns wr
-        ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN reason r
-        ON wr.wr_reason_sk = r.r_reason_sk
-    WHERE cc.cc_state = 'PA'
-      AND sm.sm_carrier = 'USPS'
-      AND inv.inv_quantity_on_hand > 200
+        c.c_customer_sk,
+        c.c_birth_country,
+        c.c_birth_year,
+        c.c_current_cdemo_sk,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_dep_count
+    FROM tpcds.customer c
+    JOIN tpcds.customer_demographics cd
+        ON c.c_current_cdemo_sk = cd.cd_demo_sk
 )
 SELECT
-    cc_name,
-    cc_state,
-    sm_carrier,
-    w_warehouse_name,
-    inv_quantity_on_hand,
-    SUM(cs_net_profit) AS total_net_profit,
-    SUM(ss_net_paid) AS total_store_sales,
-    SUM(wr_return_amt) AS total_return_amount,
-    CASE
-        WHEN SUM(cs_net_profit) > (SELECT AVG(cs_net_profit) FROM catalog_sales) THEN 'Above Avg'
-        ELSE 'Below Avg'
-    END AS profit_category,
-    RANK() OVER (PARTITION BY cc_state ORDER BY SUM(cs_net_profit) DESC) AS profit_rank_state
-FROM base
-GROUP BY
-    cc_name,
-    cc_state,
-    sm_carrier,
-    w_warehouse_name,
-    inv_quantity_on_hand
-ORDER BY profit_rank_state, total_net_profit DESC
+    birth_country,
+    birth_year,
+    cust_cnt,
+    avg_purchase_est
+FROM (
+    SELECT
+        bc.c_birth_country AS birth_country,
+        bc.c_birth_year AS birth_year,
+        COUNT(*) AS cust_cnt,
+        AVG(bc.cd_purchase_estimate) AS avg_purchase_est
+    FROM base_customers bc
+    WHERE bc.cd_marital_status = 'M'
+      AND bc.c_birth_country IN ('MONACO', 'KOREA', 'VANUATU')
+      AND NOT EXISTS (
+          SELECT 1
+          FROM tpcds.customer_demographics cd2
+          WHERE cd2.cd_demo_sk = bc.c_current_cdemo_sk
+            AND cd2.cd_dep_count > 5
+      )
+    GROUP BY bc.c_birth_country, bc.c_birth_year
+    HAVING COUNT(*) > 10
+
+    UNION ALL
+
+    SELECT
+        bc.c_birth_country AS birth_country,
+        bc.c_birth_year AS birth_year,
+        COUNT(*) AS cust_cnt,
+        AVG(bc.cd_purchase_estimate) AS avg_purchase_est
+    FROM base_customers bc
+    WHERE bc.cd_marital_status = 'S'
+      AND bc.cd_dep_count <= 2
+    GROUP BY bc.c_birth_country, bc.c_birth_year
+    HAVING COUNT(*) >= 5
+) AS combined
+ORDER BY birth_country ASC, cust_cnt DESC
 LIMIT 100

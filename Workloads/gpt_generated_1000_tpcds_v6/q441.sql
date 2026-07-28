@@ -1,48 +1,61 @@
-/*
-Goal: Rank stores by total net loss per fiscal year for high‑value returns, filtered by date, quantity, amount, item start date and store state.
-*/
-WITH base AS (
+WITH catalog_agg AS (
     SELECT
-        cr.cr_return_quantity,
-        cr.cr_return_amount,
-        cr.cr_net_loss,
-        d.d_year,
-        d.d_date,
-        i.i_category,
-        i.i_rec_start_date,
-        s.s_store_name,
-        s.s_state
+        cr.cr_returned_date_sk,
+        cr.cr_ship_mode_sk,
+        cr.cr_refunded_hdemo_sk,
+        SUM(cr.cr_return_amount)        AS total_catalog_return,
+        SUM(cr.cr_net_loss)            AS total_catalog_loss,
+        COUNT(*)                       AS catalog_return_cnt
     FROM catalog_returns cr
-    JOIN date_dim d
-        ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN item i
-        ON cr.cr_item_sk = i.i_item_sk
-    JOIN store s
-        ON s.s_closed_date_sk = d.d_date_sk
-    WHERE
-        d.d_date BETWEEN DATE '1900-01-01' AND DATE '1900-01-31'          -- filter 1
-        AND cr.cr_return_quantity > 1                                   -- filter 2
-        AND cr.cr_return_amount > 10.00                                 -- filter 3
-        AND i.i_rec_start_date >= DATE '1999-01-01'                     -- filter 4
-        AND s.s_state = 'CA'                                            -- filter 5
-),
-agg AS (
-    SELECT
-        d_year,
-        s_store_name,
-        i_category,
-        SUM(cr_return_amount) AS total_return_amount,
-        SUM(cr_net_loss) AS total_net_loss
-    FROM base
-    GROUP BY d_year, s_store_name, i_category
+    JOIN catalog_page cp
+        ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    GROUP BY cr.cr_returned_date_sk, cr.cr_ship_mode_sk, cr.cr_refunded_hdemo_sk
 )
 SELECT
-    d_year,
-    s_store_name,
-    i_category,
-    total_return_amount,
-    total_net_loss,
-    RANK() OVER (PARTITION BY d_year ORDER BY total_net_loss DESC) AS net_loss_rank
-FROM agg
-ORDER BY d_year DESC, net_loss_rank ASC, total_return_amount DESC
+    d_ret.d_year                                   AS return_year,
+    sm.sm_code                                     AS ship_mode_code,
+    ib.ib_income_band_sk                           AS income_band_sk,
+    ca_ref.ca_state                                AS customer_state,
+    c_ref.c_preferred_cust_flag                    AS preferred_customer,
+    ws.web_name                                    AS web_site_name,
+    cat.total_catalog_return                       AS catalog_return_amount,
+    cat.total_catalog_loss                         AS catalog_loss_amount,
+    CASE WHEN cat.total_catalog_loss > 5000 THEN 'HIGH' ELSE 'LOW' END AS loss_category,
+    COALESCE(wr_sum.wr_return_amt, 0)               AS web_return_amount
+FROM catalog_agg cat
+JOIN date_dim d_ret
+    ON cat.cr_returned_date_sk = d_ret.d_date_sk                     -- join rule 1
+JOIN ship_mode sm
+    ON cat.cr_ship_mode_sk = sm.sm_ship_mode_sk                       -- join rule 2
+JOIN household_demographics hd_ref
+    ON cat.cr_refunded_hdemo_sk = hd_ref.hd_demo_sk                  -- join rule 3
+JOIN income_band ib
+    ON hd_ref.hd_income_band_sk = ib.ib_income_band_sk               -- join rule 4
+LEFT JOIN customer c_ref
+    ON c_ref.c_current_hdemo_sk = hd_ref.hd_demo_sk                  -- join rule 5 (customer to hd)
+LEFT JOIN customer_address ca_ref
+    ON c_ref.c_current_addr_sk = ca_ref.ca_address_sk                -- join rule 6 (customer to address)
+JOIN web_site ws
+    ON ws.web_open_date_sk = d_ret.d_date_sk                         -- join rule 7 (web_site to date_dim)
+LEFT JOIN (
+    SELECT
+        wr.wr_returned_date_sk,
+        SUM(wr.wr_return_amt) AS wr_return_amt
+    FROM web_returns wr
+    GROUP BY wr.wr_returned_date_sk
+) wr_sum
+    ON wr_sum.wr_returned_date_sk = d_ret.d_date_sk                  -- join rule 8 (web_returns to date_dim)
+WHERE d_ret.d_year = 2002
+GROUP BY
+    d_ret.d_year,
+    sm.sm_code,
+    ib.ib_income_band_sk,
+    ca_ref.ca_state,
+    c_ref.c_preferred_cust_flag,
+    ws.web_name,
+    cat.total_catalog_return,
+    cat.total_catalog_loss,
+    wr_sum.wr_return_amt
+ORDER BY
+    cat.total_catalog_loss DESC
 LIMIT 100

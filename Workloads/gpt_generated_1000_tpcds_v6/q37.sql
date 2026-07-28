@@ -1,38 +1,74 @@
-WITH sales_filtered AS (
+/* goal: Identify top household demographics by total return amount, enriched with profit metrics from catalog, store and web sales, and rank them within income bands. The query joins all seven selected tables, applies multiple filters, uses a scalar subquery, an EXISTS filter, DISTINCT in the subquery, window ranking functions, and limits the result to the top 100 rows. */
+WITH joined_data AS (
     SELECT
-        cs.cs_call_center_sk,
-        cs.cs_sold_time_sk,
-        cs.cs_ext_sales_price,
-        cc.cc_name,
-        cc.cc_city,
-        cc.cc_state,
-        td.t_shift,
-        td.t_sub_shift,
-        cp.cp_description
-    FROM catalog_sales cs
-    JOIN call_center cc
-        ON cs.cs_call_center_sk = cc.cc_call_center_sk
-    JOIN time_dim td
-        ON cs.cs_sold_time_sk = td.t_time_sk
-    JOIN catalog_page cp
-        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-    WHERE regexp_like(cp.cp_description, '(?i)promo')
-      AND cc.cc_name LIKE '%Center%'
-      AND td.t_sub_shift = 'morning'
+        cr.cr_return_quantity,
+        cr.cr_return_amount,
+        cr.cr_item_sk,
+        cs.cs_item_sk AS cs_item_sk,
+        cs.cs_net_paid_inc_ship_tax,
+        cs.cs_net_paid_inc_ship_tax AS cs_net_paid,
+        ss.ss_net_profit,
+        ws.ws_net_profit,
+        hd.hd_demo_sk,
+        hd.hd_buy_potential,
+        hd.hd_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        sm.sm_ship_mode_id,
+        sm.sm_type,
+        sm.sm_ship_mode_sk
+    FROM catalog_returns cr
+    JOIN catalog_sales cs
+        ON cr.cr_order_number = cs.cs_order_number
+    JOIN ship_mode sm
+        ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN household_demographics hd
+        ON cr.cr_returning_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib
+        ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN store_sales ss
+        ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN web_sales ws
+        ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+    WHERE cs.cs_item_sk IN (86978, 129416, 197860)
+      AND cr.cr_return_quantity > 0
+      AND sm.sm_type = 'AIR'
+      AND ib.ib_lower_bound >= 50000
+      AND cs.cs_net_paid_inc_ship_tax > 2000
+      AND EXISTS (
+            SELECT 1
+            FROM web_sales ws2
+            WHERE ws2.ws_bill_hdemo_sk = hd.hd_demo_sk
+              AND ws2.ws_quantity > 10
+        )
 )
 SELECT
-    cc_name,
-    concat(cc_city, ', ', cc_state) AS location,
-    t_shift,
-    COUNT(DISTINCT cs_call_center_sk) AS distinct_call_centers,
-    SUM(cs_ext_sales_price) AS total_sales,
-    regexp_extract(cc_name, '(\\w+) Center', 1) AS name_prefix
-FROM sales_filtered
+    hd_demo_sk,
+    hd_buy_potential,
+    ib_lower_bound,
+    ib_upper_bound,
+    sm_ship_mode_id,
+    sm_type,
+    SUM(cr_return_amount) AS total_return_amount,
+    SUM(cs_net_paid) AS total_sales_inc_tax,
+    SUM(ss_net_profit) AS total_store_profit,
+    SUM(ws_net_profit) AS total_web_profit,
+    (
+        SELECT AVG(DISTINCT cs3.cs_list_price)
+        FROM catalog_sales cs3
+        WHERE cs3.cs_item_sk = jd.cr_item_sk
+    ) AS avg_list_price_for_item,
+    RANK() OVER (PARTITION BY hd_income_band_sk ORDER BY SUM(cr_return_amount) DESC) AS return_rank_by_income_band,
+    ROW_NUMBER() OVER (ORDER BY SUM(cr_return_amount) DESC) AS overall_row_num
+FROM joined_data jd
 GROUP BY
-    cc_name,
-    concat(cc_city, ', ', cc_state),
-    t_shift,
-    regexp_extract(cc_name, '(\\w+) Center', 1)
-HAVING SUM(cs_ext_sales_price) > 1000
-ORDER BY total_sales DESC
-LIMIT 10
+    hd_demo_sk,
+    hd_buy_potential,
+    ib_lower_bound,
+    ib_upper_bound,
+    sm_ship_mode_id,
+    sm_type,
+    jd.cr_item_sk,
+    hd_income_band_sk
+ORDER BY total_return_amount DESC
+LIMIT 100

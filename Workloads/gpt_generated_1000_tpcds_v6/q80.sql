@@ -1,40 +1,30 @@
-WITH bill_sales AS (
-        SELECT
-            p.p_promo_id,
-            hd.hd_buy_potential,
-            SUM(ws.ws_net_paid_inc_ship) AS total_net_paid,
-            COUNT(*) AS order_cnt
-        FROM web_sales ws
-        JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
-        JOIN household_demographics hd ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-        WHERE p.p_channel_event = 'N'
-          AND hd.hd_dep_count > 2
-        GROUP BY p.p_promo_id, hd.hd_buy_potential
-    ),
-    ship_sales AS (
-        SELECT
-            p.p_promo_id,
-            hd.hd_buy_potential,
-            SUM(ws.ws_net_paid_inc_ship) AS total_net_paid,
-            COUNT(*) AS order_cnt
-        FROM web_sales ws
-        JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
-        JOIN household_demographics hd ON ws.ws_ship_hdemo_sk = hd.hd_demo_sk
-        WHERE p.p_channel_radio = 'N'
-          AND hd.hd_income_band_sk >= 13
-        GROUP BY p.p_promo_id, hd.hd_buy_potential
-    ),
-    combined AS (
-        SELECT * FROM bill_sales
-        UNION ALL
-        SELECT * FROM ship_sales
-    )
-SELECT
-    p_promo_id,
-    hd_buy_potential,
-    total_net_paid,
-    order_cnt,
-    ROW_NUMBER() OVER (PARTITION BY p_promo_id ORDER BY total_net_paid DESC) AS rn
-FROM combined
-ORDER BY total_net_paid DESC
+WITH promo_returns AS (
+   SELECT
+       i.i_category AS category,
+       SUM(sr.sr_return_amt) AS value,
+       'promo_returns' AS source
+   FROM promotion p
+   JOIN item i ON p.p_item_sk = i.i_item_sk
+   JOIN store_returns sr ON sr.sr_item_sk = i.i_item_sk
+   WHERE p.p_response_target > 0
+     AND p.p_discount_active = 'Y'
+   GROUP BY i.i_category
+),
+high_inventory AS (
+   SELECT
+       i.i_category AS category,
+       SUM(inv.inv_quantity_on_hand) AS value,
+       'high_inventory' AS source
+   FROM inventory inv
+   JOIN item i ON inv.inv_item_sk = i.i_item_sk
+   WHERE inv.inv_quantity_on_hand > 500
+     AND inv.inv_date_sk BETWEEN 2450800 AND 2451100
+   GROUP BY i.i_category
+)
+SELECT category, value, source
+FROM promo_returns
+UNION ALL
+SELECT category, value, source
+FROM high_inventory
+ORDER BY category, source
 LIMIT 100

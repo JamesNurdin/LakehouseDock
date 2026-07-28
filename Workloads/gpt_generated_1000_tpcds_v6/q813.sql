@@ -1,51 +1,45 @@
-WITH returns_agg AS (
+WITH refunded AS (
     SELECT
-        wr_returned_date_sk,
-        SUM(wr_return_amt) AS total_return_amt,
-        COUNT(*) AS cnt_returns
-    FROM web_returns
-    WHERE wr_return_amt > 0
-    GROUP BY wr_returned_date_sk
+        d.d_year AS year,
+        s.s_city AS city,
+        COUNT(*) AS num_returns,
+        SUM(wr.wr_net_loss) AS total_net_loss,
+        REGEXP_EXTRACT(c.c_email_address, '@([^.]*)\\.') AS email_domain
+    FROM web_returns wr
+    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
+    JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
+    JOIN store s ON s.s_closed_date_sk = d.d_date_sk
+    WHERE REGEXP_LIKE(c.c_email_address, '^[A-Za-z0-9._%+-]+@.+\\.com$')
+      AND d.d_date BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+      AND s.s_gmt_offset = -5.00
+    GROUP BY d.d_year, s.s_city, REGEXP_EXTRACT(c.c_email_address, '@([^.]*)\\.')
 ),
-date_ret AS (
+returning AS (
     SELECT
-        r.wr_returned_date_sk,
-        r.total_return_amt,
-        r.cnt_returns,
-        d.d_year,
-        d.d_quarter_seq
-    FROM returns_agg r
-    JOIN date_dim d
-        ON r.wr_returned_date_sk = d.d_date_sk
-    WHERE d.d_current_day = 'N'
-),
-site_filtered AS (
-    SELECT
-        ws.web_site_sk,
-        ws.web_name,
-        ws.web_street_type,
-        ws.web_suite_number,
-        ws.web_open_date_sk,
-        d.d_year AS open_year,
-        d.d_quarter_seq AS open_quarter
-    FROM web_site ws
-    JOIN date_dim d
-        ON ws.web_open_date_sk = d.d_date_sk
-    WHERE regexp_like(ws.web_suite_number, '^Suite [0-9]+$')
-      AND ws.web_street_type LIKE '%Dr%'
+        d.d_year AS year,
+        s.s_city AS city,
+        COUNT(*) AS num_returns,
+        SUM(wr.wr_net_loss) AS total_net_loss,
+        SUBSTRING(c.c_first_name, 1, 1) || '.' || SUBSTRING(c.c_last_name, 1, 1) AS initials
+    FROM web_returns wr
+    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
+    JOIN customer c ON wr.wr_returning_customer_sk = c.c_customer_sk
+    JOIN store s ON s.s_closed_date_sk = d.d_date_sk
+    WHERE c.c_preferred_cust_flag = 'Y'
+      AND s.s_street_name LIKE '%Hill%'
+      AND d.d_year = 2022
+    GROUP BY d.d_year, s.s_city, SUBSTRING(c.c_first_name, 1, 1) || '.' || SUBSTRING(c.c_last_name, 1, 1)
 )
-SELECT DISTINCT
-    s.web_name,
-    s.web_street_type,
-    s.web_suite_number,
-    dr.d_year,
-    dr.d_quarter_seq,
-    dr.total_return_amt,
-    dr.cnt_returns,
-    regexp_extract(s.web_suite_number, '([0-9]+)') AS suite_number_extracted,
-    concat(s.web_name, ' - ', s.web_suite_number) AS site_suite_label
-FROM site_filtered s
-JOIN date_ret dr
-    ON s.open_year = dr.d_year
-ORDER BY dr.total_return_amt DESC
-LIMIT 100
+SELECT year,
+       city,
+       num_returns,
+       total_net_loss
+FROM refunded
+WHERE email_domain LIKE 'gmail%'
+UNION ALL
+SELECT year,
+       city,
+       num_returns,
+       total_net_loss
+FROM returning
+ORDER BY year DESC, total_net_loss DESC

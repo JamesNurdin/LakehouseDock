@@ -1,46 +1,45 @@
+WITH recent_dates AS (
+    SELECT d_date_sk, d_date, d_year
+    FROM date_dim
+    WHERE d_date BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+),
+combined AS (
+    SELECT
+        s.s_store_id AS entity_id,
+        d.d_year AS year,
+        SUM(ss.ss_net_paid) AS net_paid,
+        SUM(ss.ss_net_profit) AS net_profit,
+        ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(ss.ss_net_profit) DESC) AS rank,
+        'store' AS entity_type
+    FROM store_sales ss
+    JOIN recent_dates d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    WHERE c.c_email_address LIKE '%@%org'
+    GROUP BY s.s_store_id, d.d_year
+
+    UNION ALL
+
+    SELECT
+        cp.cp_catalog_page_id AS entity_id,
+        d.d_year AS year,
+        SUM(cs.cs_net_paid_inc_tax) AS net_paid,
+        CAST(NULL AS decimal(7,2)) AS net_profit,
+        ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY SUM(cs.cs_net_paid_inc_tax) DESC) AS rank,
+        'catalog' AS entity_type
+    FROM catalog_sales cs
+    JOIN recent_dates d ON cs.cs_sold_date_sk = d.d_date_sk
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    GROUP BY cp.cp_catalog_page_id, d.d_year
+)
 SELECT
-    c.c_customer_id,
-    d.d_year,
-    ib.ib_income_band_sk,
-    SUM(sr.sr_net_loss) AS total_store_loss,
-    SUM(ws.ws_net_profit) AS total_web_profit,
-    COUNT(DISTINCT ws.ws_order_number) AS distinct_web_orders,
-    AVG(ws.ws_coupon_amt) AS avg_coupon_amount,
-    MIN(ws.ws_net_paid) AS min_net_paid,
-    MAX(ws.ws_net_paid) AS max_net_paid
-FROM store_returns sr
-JOIN date_dim d
-  ON sr.sr_returned_date_sk = d.d_date_sk
-JOIN customer c
-  ON sr.sr_customer_sk = c.c_customer_sk
-JOIN household_demographics hd
-  ON sr.sr_hdemo_sk = hd.hd_demo_sk
-JOIN income_band ib
-  ON hd.hd_income_band_sk = ib.ib_income_band_sk
-JOIN web_sales ws
-  ON ws.ws_sold_date_sk = d.d_date_sk
-JOIN web_returns wr
-  ON wr.wr_returned_date_sk = d.d_date_sk
-  AND wr.wr_item_sk = ws.ws_item_sk
-  AND wr.wr_order_number = ws.ws_order_number
-WHERE
-    d.d_year = 2001
-    AND c.c_birth_country IN ('BURKINA FASO', 'BAHAMAS')
-    AND ib.ib_lower_bound >= 50000
-    AND sr.sr_return_quantity > 2
-    AND ws.ws_coupon_amt BETWEEN 50 AND 200
-    AND EXISTS (
-        SELECT 1
-        FROM reason r
-        WHERE r.r_reason_sk = sr.sr_reason_sk
-          AND r.r_reason_desc = 'Customer Not Satisfied'
-    )
-GROUP BY
-    c.c_customer_id,
-    d.d_year,
-    ib.ib_income_band_sk
-HAVING
-    SUM(sr.sr_net_loss) > 1000
-    AND SUM(ws.ws_net_profit) > 500
-ORDER BY total_store_loss DESC
+    entity_id,
+    year,
+    net_paid,
+    net_profit,
+    rank,
+    entity_type
+FROM combined
+WHERE net_paid > (SELECT AVG(net_paid) FROM combined)
+ORDER BY year DESC, net_paid DESC
 LIMIT 100

@@ -1,42 +1,42 @@
-WITH filtered_web_sales AS (
+WITH sales_agg AS (
     SELECT
-        ws.ws_sold_date_sk,
-        ws.ws_net_paid_inc_tax,
-        d_ws.d_year
-    FROM web_sales ws
-    JOIN date_dim d_ws ON ws.ws_sold_date_sk = d_ws.d_date_sk
-    WHERE ws.ws_net_paid_inc_tax > 1000
-      AND d_ws.d_year BETWEEN 2000 AND 2002
-      AND EXISTS (
-          SELECT 1 FROM web_page wp
-          WHERE wp.wp_web_page_sk = ws.ws_web_page_sk
-            AND wp.wp_type = 'Content'
-      )
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUM(ss.ss_ext_sales_price)               AS total_sales,
+        SUM(sr.sr_return_amt)                     AS total_store_return,
+        SUM(wr.wr_return_amt_inc_tax)             AS total_web_return,
+        COUNT(*)                                   AS txn_count
+    FROM customer_demographics cd
+    INNER JOIN store_sales ss
+        ON ss.ss_cdemo_sk = cd.cd_demo_sk
+    INNER JOIN store_returns sr
+        ON sr.sr_cdemo_sk = cd.cd_demo_sk
+           AND sr.sr_item_sk = ss.ss_item_sk
+           AND sr.sr_ticket_number = ss.ss_ticket_number
+    INNER JOIN web_returns wr
+        ON wr.wr_refunded_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender IN ('M', 'F')
+      AND cd.cd_marital_status IN ('M', 'S')
+      AND cd.cd_education_status = 'College'
+      AND ss.ss_net_paid_inc_tax > 1000
+      AND sr.sr_return_amt > 50
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
 )
 SELECT
-    d_sold.d_year,
-    cp.cp_department,
-    cd.cd_gender,
-    SUM(cs.cs_net_paid_inc_tax) AS total_catalog_sales,
-    (
-        SELECT SUM(fws.ws_net_paid_inc_tax)
-        FROM filtered_web_sales fws
-        WHERE fws.d_year = d_sold.d_year
-    ) AS total_web_sales,
-    RANK() OVER (PARTITION BY d_sold.d_year ORDER BY SUM(cs.cs_net_paid_inc_tax) DESC) AS sales_rank
-FROM catalog_sales cs
-JOIN date_dim d_sold ON cs.cs_sold_date_sk = d_sold.d_date_sk
-JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
-WHERE cp.cp_department IN (
-        SELECT DISTINCT cp_department
-        FROM catalog_page
-        WHERE cp_type = 'Catalog'
-      )
-  AND d_sold.d_month_seq >= 1200
-  AND cs.cs_quantity > 1
-  AND cs.cs_ext_discount_amt < 500
-  AND cd.cd_education_status = 'College'
-GROUP BY d_sold.d_year, cp.cp_department, cd.cd_gender
-ORDER BY d_sold.d_year DESC, sales_rank
+    sa.cd_demo_sk,
+    sa.cd_gender,
+    sa.cd_marital_status,
+    sa.cd_education_status,
+    sa.total_sales,
+    sa.total_store_return,
+    sa.total_web_return,
+    ROW_NUMBER() OVER (PARTITION BY sa.cd_gender ORDER BY sa.total_sales DESC) AS gender_sales_rank,
+    CASE
+        WHEN sa.total_web_return > (SELECT AVG(total_web_return) FROM sales_agg) THEN 'ABOVE_AVG'
+        ELSE 'BELOW_AVG'
+    END AS web_return_category
+FROM sales_agg sa
+ORDER BY sa.total_sales DESC
 LIMIT 100

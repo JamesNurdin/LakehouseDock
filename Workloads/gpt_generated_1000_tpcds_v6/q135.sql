@@ -1,49 +1,56 @@
-WITH base AS (
+WITH cat AS (
     SELECT
-        cp.cp_department AS department,
-        t.t_shift AS shift,
-        cs.cs_net_paid_inc_ship_tax AS sales_amount
-    FROM catalog_sales cs
-    JOIN catalog_page cp
-        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN promotion p
-        ON cs.cs_promo_sk = p.p_promo_sk
-    JOIN time_dim t
-        ON cs.cs_sold_time_sk = t.t_time_sk
-    WHERE cp.cp_end_date_sk > 2451000
-      AND cp.cp_description LIKE '%store%'
-      AND cs.cs_wholesale_cost < 80
-      AND cs.cs_quantity BETWEEN 1 AND 5
-      AND cs.cs_net_paid_inc_ship_tax > 500
-      AND p.p_channel_radio = 'N'
-      AND p.p_channel_press = 'N'
-      AND t.t_shift = 'Evening'
-      AND EXISTS (
-          SELECT 1 FROM promotion p2
-          WHERE p2.p_promo_sk = cs.cs_promo_sk
-            AND p2.p_discount_active = 'Y'
-      )
+        i.i_brand AS brand,
+        i.i_item_desc AS item_desc,
+        CASE
+            WHEN cr.cr_return_amount > 1000 THEN 'High'
+            WHEN cr.cr_return_amount > 0 THEN 'Low'
+            ELSE 'None'
+        END AS return_level,
+        cr.cr_return_amount AS return_amount,
+        cr.cr_return_quantity AS qty,
+        regexp_extract(i.i_item_desc, '^([^ ]+)', 1) AS first_word,
+        cc.cc_state AS state
+    FROM catalog_returns cr
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    JOIN time_dim td ON cr.cr_returned_time_sk = td.t_time_sk
+    WHERE regexp_like(i.i_item_desc, '[0-9]{3}')
+      AND cc.cc_state LIKE 'C%'
 ),
-agg AS (
+web AS (
     SELECT
-        department,
-        shift,
-        SUM(sales_amount) AS sum_sales,
-        COUNT(*) AS txn_count
-    FROM base
-    GROUP BY department, shift
+        i.i_brand AS brand,
+        i.i_item_desc AS item_desc,
+        CASE
+            WHEN wr.wr_return_amt > 500 THEN 'High'
+            WHEN wr.wr_return_amt > 0 THEN 'Low'
+            ELSE 'None'
+        END AS return_level,
+        wr.wr_return_amt AS return_amount,
+        wr.wr_return_quantity AS qty,
+        regexp_extract(i.i_item_desc, '^([^ ]+)', 1) AS first_word,
+        wp.wp_url AS page_url
+    FROM web_returns wr
+    JOIN item i ON wr.wr_item_sk = i.i_item_sk
+    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    JOIN time_dim td ON wr.wr_returned_time_sk = td.t_time_sk
+    WHERE wp.wp_url LIKE '%/promo%'
+      AND regexp_like(wp.wp_url, '/promo[0-9]{2}')
 )
 SELECT
-    department,
-    shift,
-    sum_sales,
-    txn_count,
-    RANK() OVER (PARTITION BY department ORDER BY sum_sales DESC) AS dept_sales_rank,
-    SUM(sum_sales) OVER (
-        PARTITION BY department
-        ORDER BY sum_sales DESC
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS cumulative_sales
-FROM agg
-ORDER BY sum_sales DESC
-LIMIT 20
+    brand,
+    return_level,
+    COUNT(*) AS return_cnt,
+    SUM(return_amount) AS total_return_amount,
+    AVG(qty) AS avg_qty,
+    MAX(first_word) AS sample_word
+FROM (
+    SELECT brand, return_level, return_amount, qty, first_word FROM cat
+    UNION ALL
+    SELECT brand, return_level, return_amount, qty, first_word FROM web
+) u
+GROUP BY brand, return_level
+HAVING SUM(return_amount) > 1000
+ORDER BY total_return_amount DESC
+LIMIT 100

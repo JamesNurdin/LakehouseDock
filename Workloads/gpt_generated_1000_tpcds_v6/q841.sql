@@ -1,46 +1,49 @@
-WITH store_dates AS (
+WITH
+  catalog_agg AS (
     SELECT
-        s.s_store_sk,
-        s.s_store_name,
-        s.s_state,
-        s.s_zip,
-        d.d_date_sk,
-        d.d_date,
-        d.d_quarter_name,
-        d.d_year
-    FROM store s
-    JOIN date_dim d
-        ON s.s_closed_date_sk = d.d_date_sk
-    WHERE s.s_state = 'CA'
-      AND s.s_zip = '32477     '
-      AND d.d_quarter_name = '1900Q3'
-      AND d.d_year = 2000
-      AND d.d_date BETWEEN DATE '2000-01-01' AND DATE '2000-12-31'
-)
+      cs.cs_bill_customer_sk,
+      cs.cs_catalog_page_sk,
+      SUM(cs.cs_net_paid) AS sum_cs_net_paid,
+      SUM(cs.cs_net_profit) AS sum_cs_net_profit,
+      COUNT(*) AS cnt_cs
+    FROM catalog_sales cs
+    GROUP BY cs.cs_bill_customer_sk, cs.cs_catalog_page_sk
+  ),
+  web_agg AS (
+    SELECT
+      ws.ws_bill_customer_sk,
+      SUM(ws.ws_net_paid) AS sum_ws_net_paid,
+      SUM(ws.ws_net_profit) AS sum_ws_net_profit,
+      COUNT(*) AS cnt_ws
+    FROM web_sales ws
+    GROUP BY ws.ws_bill_customer_sk
+  ),
+  page_profit AS (
+    SELECT
+      cs.cs_catalog_page_sk AS cs_catalog_page_sk,
+      AVG(cs.cs_net_profit) AS avg_page_profit
+    FROM catalog_sales cs
+    GROUP BY cs.cs_catalog_page_sk
+  )
 SELECT
-    sd.s_store_sk,
-    sd.s_store_name,
-    sd.s_state,
-    sd.s_zip,
-    sd.d_date,
-    sd.d_quarter_name,
-    COALESCE(wp.wp_url, 'N/A') AS web_page_url,
-    wp.wp_max_ad_count,
-    CASE
-        WHEN wp.wp_max_ad_count >= 3 THEN 'HighAds'
-        WHEN wp.wp_max_ad_count = 0 THEN 'NoAds'
-        ELSE 'LowAds'
-    END AS ad_category,
-    ROW_NUMBER() OVER (PARTITION BY sd.s_state ORDER BY sd.d_date DESC) AS rn_state,
-    RANK() OVER (ORDER BY wp.wp_max_ad_count DESC NULLS LAST) AS rank_by_ads
-FROM store_dates sd
-LEFT JOIN web_page wp
-    ON wp.wp_creation_date_sk = sd.d_date_sk
-WHERE wp.wp_max_ad_count IS NOT NULL
-  AND wp.wp_max_ad_count >= 1
-  AND wp.wp_url LIKE 'http://www.%'
-  AND wp.wp_type = 'HOME'
-  AND wp.wp_rec_end_date >= DATE '1999-01-01'
-  AND wp.wp_autogen_flag = 'N'
-ORDER BY rank_by_ads
+  c.c_customer_id,
+  cp.cp_department,
+  ca.sum_cs_net_paid + wa.sum_ws_net_paid AS total_net_paid,
+  pp.avg_page_profit,
+  CASE WHEN (ca.sum_cs_net_paid + wa.sum_ws_net_paid) > 5000 THEN 'High' ELSE 'Low' END AS net_paid_category,
+  RANK() OVER (ORDER BY (ca.sum_cs_net_paid + wa.sum_ws_net_paid) DESC) AS revenue_rank,
+  (SELECT AVG(cs.cs_net_paid) FROM catalog_sales cs) AS avg_catalog_net_paid
+FROM catalog_agg ca
+JOIN web_agg wa
+  ON ca.cs_bill_customer_sk = wa.ws_bill_customer_sk
+JOIN customer c
+  ON ca.cs_bill_customer_sk = c.c_customer_sk
+JOIN catalog_page cp
+  ON ca.cs_catalog_page_sk = cp.cp_catalog_page_sk
+LEFT JOIN page_profit pp
+  ON ca.cs_catalog_page_sk = pp.cs_catalog_page_sk
+WHERE cp.cp_department = 'Sports'
+  AND ca.sum_cs_net_paid > 1000
+  AND wa.sum_ws_net_paid BETWEEN 2000 AND 10000
+ORDER BY revenue_rank
 LIMIT 100

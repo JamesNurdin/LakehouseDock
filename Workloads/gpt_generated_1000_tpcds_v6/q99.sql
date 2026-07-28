@@ -1,84 +1,100 @@
-WITH ws_agg AS (
+WITH base AS (
     SELECT
-        i.i_category,
-        w.w_warehouse_name,
-        d_sold.d_year,
-        SUM(ws.ws_ext_sales_price) AS total_sales,
-        SUM(ws.ws_net_profit) AS total_profit,
-        COUNT(*) AS sales_cnt
-    FROM web_sales ws
-    JOIN date_dim d_sold ON ws.ws_sold_date_sk = d_sold.d_date_sk
-    JOIN item i ON ws.ws_item_sk = i.i_item_sk
-    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
-    JOIN household_demographics hd_bill ON ws.ws_bill_hdemo_sk = hd_bill.hd_demo_sk
-    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
-    WHERE d_sold.d_year BETWEEN 1999 AND 2001
-      AND w.w_warehouse_sq_ft > 200000
-      AND i.i_current_price > 20
-      AND hd_bill.hd_income_band_sk IS NOT NULL
-      AND wp.wp_type = 'Content'
-    GROUP BY i.i_category, w.w_warehouse_name, d_sold.d_year
-),
-inv_agg AS (
-    SELECT
-        i.i_category,
-        w.w_warehouse_name,
-        d_inv.d_year,
-        SUM(inv.inv_quantity_on_hand) AS total_qty_on_hand
-    FROM inventory inv
-    JOIN date_dim d_inv ON inv.inv_date_sk = d_inv.d_date_sk
-    JOIN item i ON inv.inv_item_sk = i.i_item_sk
-    JOIN warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
-    WHERE d_inv.d_year BETWEEN 1999 AND 2001
-      AND w.w_warehouse_sq_ft > 200000
-      AND i.i_current_price > 20
-    GROUP BY i.i_category, w.w_warehouse_name, d_inv.d_year
-),
-ret_agg AS (
-    SELECT
-        i.i_category,
-        d_ret.d_year,
-        SUM(sr.sr_return_amt) AS total_return_amt,
-        COUNT(*) AS return_cnt
-    FROM store_returns sr
-    JOIN date_dim d_ret ON sr.sr_returned_date_sk = d_ret.d_date_sk
-    JOIN item i ON sr.sr_item_sk = i.i_item_sk
-    JOIN household_demographics hd_ret ON sr.sr_hdemo_sk = hd_ret.hd_demo_sk
-    WHERE d_ret.d_year BETWEEN 1999 AND 2001
-      AND sr.sr_return_quantity > 0
-      AND hd_ret.hd_vehicle_count >= 1
-    GROUP BY i.i_category, d_ret.d_year
+        ss.ss_item_sk,
+        ss.ss_sold_date_sk,
+        ss.ss_sold_time_sk,
+        ss.ss_addr_sk AS ss_addr_sk,
+        ws.ws_warehouse_sk,
+        ws.ws_ship_mode_sk,
+        ws.ws_promo_sk,
+        ws.ws_bill_addr_sk,
+        ws.ws_order_number,
+        SUM(ss.ss_ext_sales_price) AS store_sales_amount,
+        SUM(ws.ws_ext_sales_price) AS web_sales_amount,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_txn_cnt,
+        COUNT(DISTINCT ws.ws_order_number) AS web_txn_cnt
+    FROM store_sales ss
+    JOIN web_sales ws
+      ON ss.ss_item_sk = ws.ws_item_sk
+     AND ss.ss_sold_date_sk = ws.ws_sold_date_sk
+    GROUP BY ss.ss_item_sk,
+             ss.ss_sold_date_sk,
+             ss.ss_sold_time_sk,
+             ss.ss_addr_sk,
+             ws.ws_warehouse_sk,
+             ws.ws_ship_mode_sk,
+             ws.ws_promo_sk,
+             ws.ws_bill_addr_sk,
+             ws.ws_order_number
 )
 SELECT
-    ws.i_category,
-    ws.w_warehouse_name,
-    ws.d_year,
-    ws.total_sales,
-    ws.total_profit,
-    ws.sales_cnt,
-    inv.total_qty_on_hand,
-    ret.total_return_amt,
-    ret.return_cnt,
-    (ws.total_profit / NULLIF(ws.total_sales, 0)) AS profit_margin
-FROM ws_agg ws
-JOIN inv_agg inv
-  ON ws.i_category = inv.i_category
- AND ws.w_warehouse_name = inv.w_warehouse_name
- AND ws.d_year = inv.d_year
-JOIN ret_agg ret
-  ON ws.i_category = ret.i_category
- AND ws.d_year = ret.d_year
-WHERE EXISTS (
-    SELECT 1
-    FROM catalog_page cp
-    JOIN date_dim d_cp ON cp.cp_end_date_sk = d_cp.d_date_sk
-    WHERE cp.cp_type = 'Home'
-      AND cp.cp_department = 'Books'
-      AND d_cp.d_year = ws.d_year
-)
-  AND ws.total_sales > 10000
-  AND ws.total_profit > 0
-  AND inv.total_qty_on_hand > 5000
-  AND ret.total_return_amt < 2000
-ORDER BY ws.total_profit DESC
+    i.i_category,
+    d_day.d_day_name,
+    w.w_warehouse_name,
+    sm.sm_type AS ship_type,
+    p.p_promo_name,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    SUM(b.store_sales_amount) AS total_store_sales,
+    SUM(b.web_sales_amount) AS total_web_sales,
+    CASE
+        WHEN SUM(b.store_sales_amount + b.web_sales_amount) > 100000 THEN 'High'
+        WHEN SUM(b.store_sales_amount + b.web_sales_amount) BETWEEN 50000 AND 100000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_level,
+    COUNT(DISTINCT cr.cr_order_number) AS catalog_return_orders,
+    COUNT(DISTINCT wr.wr_order_number) AS web_return_orders
+FROM base b
+JOIN item i
+  ON i.i_item_sk = b.ss_item_sk
+JOIN date_dim d_day
+  ON d_day.d_date_sk = b.ss_sold_date_sk
+JOIN time_dim t_day
+  ON t_day.t_time_sk = b.ss_sold_time_sk
+JOIN warehouse w
+  ON w.w_warehouse_sk = b.ws_warehouse_sk
+JOIN ship_mode sm
+  ON sm.sm_ship_mode_sk = b.ws_ship_mode_sk
+JOIN promotion p
+  ON p.p_promo_sk = b.ws_promo_sk
+JOIN customer_address ca_store
+  ON ca_store.ca_address_sk = b.ss_addr_sk
+JOIN customer_address ca_bill
+  ON ca_bill.ca_address_sk = b.ws_bill_addr_sk
+LEFT JOIN catalog_returns cr
+  ON cr.cr_item_sk = b.ss_item_sk
+ AND cr.cr_returned_date_sk = b.ss_sold_date_sk
+LEFT JOIN reason r_cr
+  ON r_cr.r_reason_sk = cr.cr_reason_sk
+LEFT JOIN household_demographics hd_cr
+  ON hd_cr.hd_demo_sk = cr.cr_refunded_hdemo_sk
+LEFT JOIN income_band ib
+  ON ib.ib_income_band_sk = hd_cr.hd_income_band_sk
+LEFT JOIN warehouse w_ret
+  ON w_ret.w_warehouse_sk = cr.cr_warehouse_sk
+LEFT JOIN ship_mode sm_ret
+  ON sm_ret.sm_ship_mode_sk = cr.cr_ship_mode_sk
+LEFT JOIN date_dim d_ret
+  ON d_ret.d_date_sk = cr.cr_returned_date_sk
+LEFT JOIN time_dim t_ret
+  ON t_ret.t_time_sk = cr.cr_returned_time_sk
+LEFT JOIN web_returns wr
+  ON wr.wr_item_sk = b.ss_item_sk
+ AND wr.wr_returned_date_sk = b.ss_sold_date_sk
+ AND wr.wr_order_number = b.ws_order_number
+LEFT JOIN reason r_wr
+  ON r_wr.r_reason_sk = wr.wr_reason_sk
+LEFT JOIN date_dim d_ret_wr
+  ON d_ret_wr.d_date_sk = wr.wr_returned_date_sk
+LEFT JOIN time_dim t_ret_wr
+  ON t_ret_wr.t_time_sk = wr.wr_returned_time_sk
+GROUP BY
+    i.i_category,
+    d_day.d_day_name,
+    w.w_warehouse_name,
+    sm.sm_type,
+    p.p_promo_name,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound
+ORDER BY total_store_sales + total_web_sales DESC
 LIMIT 100

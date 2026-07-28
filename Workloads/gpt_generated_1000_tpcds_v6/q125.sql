@@ -1,49 +1,36 @@
-WITH catalog_sales_filtered AS (
+-- goal: Summarize store returns by product brand and customer credit category for morning returns (8‑12h) where the return reason matches a specific pattern and the product name contains 'PRO'.  Show return count, total net loss, average original sale price, the highest extracted reason code and a sample product name.
+WITH returns_data AS (
     SELECT
-        cs.cs_order_number      AS order_number,
-        cs.cs_item_sk           AS item_sk,
-        cs.cs_ship_mode_sk      AS ship_mode_sk,
-        cs.cs_net_profit        AS net_profit,
-        cs.cs_quantity          AS quantity
-    FROM catalog_sales cs
-    JOIN item i ON cs.cs_item_sk = i.i_item_sk
-    JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-    WHERE regexp_like(i.i_item_desc, '(?i).*\\b(box|pack)\\b.*')
-      AND sm.sm_carrier LIKE 'D%'
-),
-web_sales_filtered AS (
-    SELECT
-        ws.ws_order_number      AS order_number,
-        ws.ws_item_sk           AS item_sk,
-        ws.ws_ship_mode_sk      AS ship_mode_sk,
-        ws.ws_net_profit        AS net_profit,
-        ws.ws_quantity          AS quantity
-    FROM web_sales ws
-    JOIN item i ON ws.ws_item_sk = i.i_item_sk
-    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-    WHERE regexp_like(i.i_item_desc, '(?i).*\\b(box|pack)\\b.*')
-      AND sm.sm_carrier LIKE 'D%'
-),
-combined_sales AS (
-    SELECT * FROM catalog_sales_filtered
-    UNION ALL
-    SELECT * FROM web_sales_filtered
+        i.i_brand AS brand,
+        i.i_product_name AS product_name,
+        r.r_reason_desc AS reason_desc,
+        cd.cd_credit_rating AS credit_rating,
+        sr.sr_net_loss AS net_loss,
+        ss.ss_ext_sales_price AS original_sales_price,
+        td.t_hour AS hour_of_day,
+        concat(i.i_brand, ' ', i.i_product_name) AS full_product_name,
+        regexp_extract(r.r_reason_desc, '(\\d+)', 1) AS reason_code,
+        CASE WHEN cd.cd_credit_rating = 'Good' THEN 'High Credit' ELSE 'Other' END AS credit_category
+    FROM store_returns sr
+    JOIN time_dim td ON sr.sr_return_time_sk = td.t_time_sk
+    JOIN item i ON sr.sr_item_sk = i.i_item_sk
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
+    JOIN store_sales ss ON sr.sr_ticket_number = ss.ss_ticket_number
+        AND ss.ss_item_sk = i.i_item_sk
+    WHERE td.t_hour BETWEEN 8 AND 12
+      AND regexp_like(r.r_reason_desc, '^C[0-9]{2,}$')
+      AND i.i_product_name LIKE '%PRO%'
 )
 SELECT
-    sm.sm_ship_mode_id                              AS ship_mode_id,
-    sm.sm_carrier                                   AS carrier,
-    COUNT(DISTINCT cs.order_number)                AS distinct_orders,
-    SUM(cs.net_profit)                              AS total_profit,
-    SUM(cs.quantity)                                AS total_quantity,
-    CONCAT('Mode-', sm.sm_ship_mode_id)            AS mode_label,
-    REGEXP_EXTRACT(i.i_item_desc, '(?i)(box|pack)', 1) AS matched_term
-FROM combined_sales cs
-JOIN ship_mode sm ON cs.ship_mode_sk = sm.sm_ship_mode_sk
-JOIN item i ON cs.item_sk = i.i_item_sk
-GROUP BY
-    sm.sm_ship_mode_id,
-    sm.sm_carrier,
-    i.i_item_desc
-HAVING SUM(cs.net_profit) > 10000
-ORDER BY total_profit DESC
+    brand,
+    credit_category,
+    COUNT(*) AS return_count,
+    SUM(net_loss) AS total_net_loss,
+    AVG(original_sales_price) AS avg_original_sale_price,
+    MAX(reason_code) AS max_reason_code,
+    MIN(full_product_name) AS sample_product_name
+FROM returns_data
+GROUP BY brand, credit_category
+ORDER BY total_net_loss DESC
 LIMIT 100

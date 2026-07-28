@@ -1,45 +1,68 @@
-WITH returns_agg AS (
-    SELECT
-        i.i_item_id AS item_id,
-        i.i_brand AS brand,
-        td.t_hour AS hour_of_day,
-        SUM(cr.cr_net_loss) AS total_net_loss,
-        COUNT(*) AS return_cnt,
-        AVG(cr.cr_return_amount) AS avg_return_amount
-    FROM catalog_returns cr
-    JOIN time_dim td
-        ON cr.cr_returned_time_sk = td.t_time_sk
-    JOIN item i
-        ON cr.cr_item_sk = i.i_item_sk
-    JOIN inventory inv
-        ON i.i_item_sk = inv.inv_item_sk
-    JOIN promotion p
-        ON i.i_item_sk = p.p_item_sk
-    JOIN catalog_page cp
-        ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN call_center cc
-        ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    JOIN reason r
-        ON cr.cr_reason_sk = r.r_reason_sk
-    JOIN customer_address ca_refund
-        ON cr.cr_refunded_addr_sk = ca_refund.ca_address_sk
-    JOIN customer_address ca_returning
-        ON cr.cr_returning_addr_sk = ca_returning.ca_address_sk
-    WHERE cc.cc_state = 'CA'
-      AND td.t_shift = 'first'
-      AND i.i_brand = 'BrandX'
-      AND inv.inv_quantity_on_hand > 0
-      AND p.p_discount_active = 'Y'
-    GROUP BY i.i_item_id, i.i_brand, td.t_hour
-)
+/*
+  Goal:  Compute total net profit from store, catalog, and web sales broken down by store, year, and promotion, with subtotal rows for each store and overall totals. The query joins all 12 selected tables using the permitted join rules, re‑uses the DATE_DIM table under many aliases, re‑uses the PROMOTION table in a scalar EXISTS sub‑query, and demonstrates deep analytical aggregation via GROUPING SETS.
+*/
+WITH
+  -- Aliases for the DATE_DIM table used for different surrogate keys
+  d_sold           AS (SELECT * FROM date_dim),
+  d_cs_sold        AS (SELECT * FROM date_dim),
+  d_cs_ship        AS (SELECT * FROM date_dim),
+  d_cr_returned    AS (SELECT * FROM date_dim),
+  d_ws_sold        AS (SELECT * FROM date_dim),
+  d_ws_ship        AS (SELECT * FROM date_dim),
+  d_wp_creation    AS (SELECT * FROM date_dim),
+  d_web_open       AS (SELECT * FROM date_dim),
+  d_web_close      AS (SELECT * FROM date_dim),
+  d_store_closed   AS (SELECT * FROM date_dim),
+  d_promo_start    AS (SELECT * FROM date_dim),
+  d_promo_end      AS (SELECT * FROM date_dim)
 SELECT
-    item_id,
-    brand,
-    AVG(total_net_loss) AS avg_net_loss_per_hour,
-    SUM(return_cnt) AS total_returns,
-    AVG(avg_return_amount) AS overall_avg_return_amount
-FROM returns_agg
-GROUP BY item_id, brand
-HAVING AVG(total_net_loss) > 1000
-ORDER BY avg_net_loss_per_hour DESC
-LIMIT 100
+  s.s_store_name,
+  d_sold.d_year,
+  p.p_promo_name,
+  SUM(ss.ss_net_profit)          AS store_sales_profit,
+  SUM(cs.cs_net_profit)          AS catalog_sales_profit,
+  SUM(ws.ws_net_profit)          AS web_sales_profit,
+  COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+  COUNT(*) FILTER (WHERE cr.cr_return_quantity > 0) AS total_returns
+FROM store_sales ss
+JOIN store s                     ON ss.ss_store_sk = s.s_store_sk
+JOIN d_sold d_sold               ON ss.ss_sold_date_sk   = d_sold.d_date_sk
+JOIN promotion p                 ON ss.ss_promo_sk      = p.p_promo_sk
+JOIN customer c                  ON ss.ss_customer_sk   = c.c_customer_sk
+
+JOIN catalog_sales cs            ON cs.cs_bill_customer_sk = c.c_customer_sk
+JOIN d_cs_sold d_cs_sold         ON cs.cs_sold_date_sk = d_cs_sold.d_date_sk
+JOIN d_cs_ship d_cs_ship         ON cs.cs_ship_date_sk = d_cs_ship.d_date_sk
+JOIN ship_mode sm                ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN customer_demographics cd    ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+
+LEFT JOIN catalog_returns cr    ON cr.cr_order_number = cs.cs_order_number
+JOIN d_cr_returned d_cr_returned ON cr.cr_returned_date_sk = d_cr_returned.d_date_sk
+JOIN ship_mode sm_cr            ON cr.cr_ship_mode_sk = sm_cr.sm_ship_mode_sk
+
+JOIN web_sales ws               ON ws.ws_bill_customer_sk = c.c_customer_sk
+JOIN d_ws_sold d_ws_sold         ON ws.ws_sold_date_sk = d_ws_sold.d_date_sk
+JOIN d_ws_ship d_ws_ship         ON ws.ws_ship_date_sk = d_ws_ship.d_date_sk
+JOIN web_page wp                ON ws.ws_web_page_sk = wp.wp_web_page_sk
+JOIN d_wp_creation d_wp_creation ON wp.wp_creation_date_sk = d_wp_creation.d_date_sk
+JOIN web_site webs              ON ws.ws_web_site_sk = webs.web_site_sk
+JOIN d_web_open d_web_open       ON webs.web_open_date_sk  = d_web_open.d_date_sk
+JOIN d_web_close d_web_close     ON webs.web_close_date_sk = d_web_close.d_date_sk
+
+JOIN d_store_closed d_store_closed ON s.s_closed_date_sk = d_store_closed.d_date_sk
+JOIN d_promo_start d_promo_start   ON p.p_start_date_sk = d_promo_start.d_date_sk
+JOIN d_promo_end d_promo_end       ON p.p_end_date_sk   = d_promo_end.d_date_sk
+WHERE d_sold.d_year = 2001
+  AND p.p_discount_active = 'Y'
+  AND EXISTS (
+        SELECT 1 FROM promotion p2
+        WHERE p2.p_promo_sk = p.p_promo_sk
+          AND p2.p_cost > 1000
+      )
+GROUP BY GROUPING SETS (
+    (s.s_store_name, d_sold.d_year, p.p_promo_name),
+    (s.s_store_name, d_sold.d_year),
+    (s.s_store_name),
+    ()
+)
+ORDER BY s.s_store_name, d_sold.d_year, p.p_promo_name

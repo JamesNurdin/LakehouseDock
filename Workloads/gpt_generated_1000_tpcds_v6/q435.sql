@@ -1,46 +1,46 @@
-WITH first_set AS (
-    SELECT
-        hd.hd_demo_sk,
-        hd.hd_income_band_sk,
-        CASE
-            WHEN ib.ib_upper_bound <= 50000 THEN 'Low'
-            WHEN ib.ib_upper_bound <= 150000 THEN 'Mid'
-            ELSE 'High'
-        END AS income_category,
-        hd.hd_vehicle_count,
-        hd.hd_buy_potential,
-        (SELECT MAX(ib2.ib_upper_bound) FROM income_band ib2) AS max_income_upper,
-        ROW_NUMBER() OVER (PARTITION BY hd.hd_income_band_sk ORDER BY hd.hd_vehicle_count DESC) AS rn
-    FROM household_demographics hd
-    JOIN income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    WHERE hd.hd_vehicle_count >= 0
-      AND ib.ib_lower_bound >= 100000
+WITH catalog_part AS (
+  SELECT
+    'catalog' AS source,
+    ca.ca_state,
+    ca.ca_location_type,
+    hd.hd_vehicle_count,
+    SUM(cr.cr_net_loss) AS total_net_loss
+  FROM catalog_returns cr
+  JOIN customer_address ca
+    ON cr.cr_refunded_addr_sk = ca.ca_address_sk
+  JOIN household_demographics hd
+    ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
+  WHERE cr.cr_net_loss > 1000
+    AND hd.hd_vehicle_count >= 0
+    AND ca.ca_location_type IN ('single family', 'condo')
+  GROUP BY ca.ca_state, ca.ca_location_type, hd.hd_vehicle_count
 ),
-second_set AS (
-    SELECT
-        hd.hd_demo_sk,
-        hd.hd_income_band_sk,
-        CASE
-            WHEN ib.ib_upper_bound <= 50000 THEN 'Low'
-            WHEN ib.ib_upper_bound <= 150000 THEN 'Mid'
-            ELSE 'High'
-        END AS income_category,
-        hd.hd_vehicle_count,
-        hd.hd_buy_potential,
-        (SELECT MAX(ib2.ib_upper_bound) FROM income_band ib2) AS max_income_upper,
-        ROW_NUMBER() OVER (PARTITION BY hd.hd_income_band_sk ORDER BY hd.hd_vehicle_count DESC) AS rn
-    FROM household_demographics hd
-    JOIN income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    WHERE hd.hd_vehicle_count < 0
-      AND ib.ib_upper_bound <= 80000
+store_part AS (
+  SELECT
+    'store' AS source,
+    ca.ca_state,
+    ca.ca_location_type,
+    hd.hd_vehicle_count,
+    SUM(sr.sr_net_loss) AS total_net_loss
+  FROM store_returns sr
+  JOIN customer_address ca
+    ON sr.sr_addr_sk = ca.ca_address_sk
+  JOIN household_demographics hd
+    ON sr.sr_hdemo_sk = hd.hd_demo_sk
+  WHERE sr.sr_net_loss > 1000
+    AND hd.hd_vehicle_count >= 0
+    AND ca.ca_location_type IN ('single family', 'condo')
+  GROUP BY ca.ca_state, ca.ca_location_type, hd.hd_vehicle_count
 )
-SELECT *
+SELECT source,
+       ca_state,
+       ca_location_type,
+       hd_vehicle_count,
+       total_net_loss
 FROM (
-    SELECT * FROM first_set
-    UNION ALL
-    SELECT * FROM second_set
-) AS combined
-ORDER BY income_category, rn DESC
-LIMIT 100
+  SELECT source, ca_state, ca_location_type, hd_vehicle_count, total_net_loss FROM catalog_part
+  UNION ALL
+  SELECT source, ca_state, ca_location_type, hd_vehicle_count, total_net_loss FROM store_part
+) combined
+ORDER BY total_net_loss DESC
+LIMIT 20

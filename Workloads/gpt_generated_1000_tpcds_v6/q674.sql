@@ -1,44 +1,46 @@
-WITH sales_data AS (
+WITH filtered_web AS (
     SELECT
-        cs.cs_sold_date_sk,
-        cs.cs_quantity,
-        cs.cs_ext_tax,
-        cs.cs_net_paid,
-        cs.cs_net_profit,
-        cs.cs_bill_customer_sk
-    FROM catalog_sales cs
-    WHERE cs.cs_quantity > 2
-      AND cs.cs_ext_tax BETWEEN 10 AND 100
+        wr.wr_returned_date_sk AS returned_date_sk,
+        wr.wr_order_number,
+        wr.wr_return_amt,
+        wr.wr_net_loss,
+        wr.wr_web_page_sk,
+        wr.wr_refunded_cdemo_sk,
+        wp.wp_url,
+        wp.wp_type,
+        d.d_year,
+        d.d_month_seq,
+        ca.ca_city,
+        ca.ca_zip
+    FROM web_returns wr
+    JOIN web_page wp
+      ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    JOIN date_dim d
+      ON wr.wr_returned_date_sk = d.d_date_sk
+    JOIN customer_address ca
+      ON wr.wr_refunded_addr_sk = ca.ca_address_sk
+    WHERE regexp_like(wp.wp_url, '^https?://[^/]*\\.com/.*sale')
+      AND ca.ca_zip LIKE '9___'
 )
 SELECT
-    c.c_customer_id,
-    c.c_first_name,
-    c.c_last_name,
-    d_sold.d_date AS sold_date,
-    sd.cs_net_paid,
-    sd.cs_net_profit,
-    CASE
-        WHEN sd.cs_net_profit > 1000 THEN 'High'
-        WHEN sd.cs_net_profit > 0 THEN 'Medium'
-        ELSE 'Low'
-    END AS profit_category,
-    ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY sd.cs_net_paid DESC) AS purchase_rank
-FROM sales_data sd
-JOIN date_dim d_sold
-    ON sd.cs_sold_date_sk = d_sold.d_date_sk
-JOIN customer c
-    ON sd.cs_bill_customer_sk = c.c_customer_sk
-JOIN web_site ws
-    ON ws.web_open_date_sk = d_sold.d_date_sk
-WHERE d_sold.d_year = 2001
-  AND ws.web_mkt_id IN (1, 3, 5)
-  AND ws.web_country = 'United States'
-  AND EXISTS (
+    fw.d_year,
+    fw.d_month_seq,
+    fw.wp_type,
+    SUM(fw.wr_return_amt) AS total_return_amt,
+    SUM(fw.wr_net_loss) AS total_net_loss,
+    COUNT(DISTINCT fw.wr_order_number) AS distinct_orders,
+    CASE WHEN SUM(fw.wr_return_amt) > 10000 THEN 'High' ELSE 'Low' END AS return_level,
+    CONCAT(fw.ca_city, '-', SUBSTRING(fw.ca_zip, 1, 5)) AS city_zip,
+    ROW_NUMBER() OVER (PARTITION BY fw.d_year ORDER BY SUM(fw.wr_return_amt) DESC) AS rank_in_year
+FROM filtered_web fw
+JOIN customer_demographics cd
+  ON fw.wr_refunded_cdemo_sk = cd.cd_demo_sk
+WHERE EXISTS (
         SELECT 1
-        FROM web_page wp
-        WHERE wp.wp_customer_sk = c.c_customer_sk
-          AND wp.wp_link_count > 15
-          AND wp.wp_creation_date_sk = d_sold.d_date_sk
+        FROM catalog_sales cs
+        WHERE cs.cs_order_number = fw.wr_order_number
+          AND cs.cs_quantity > 5
     )
-ORDER BY purchase_rank
+GROUP BY fw.d_year, fw.d_month_seq, fw.wp_type, fw.ca_city, fw.ca_zip
+ORDER BY fw.d_year DESC, total_return_amt DESC
 LIMIT 100

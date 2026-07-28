@@ -1,42 +1,59 @@
-WITH sales_data AS (
-    SELECT
-        cs.cs_sold_date_sk,
-        cs.cs_order_number,
-        cs.cs_item_sk,
-        cs.cs_quantity,
-        cs.cs_net_paid,
-        cs.cs_net_profit,
-        d.d_date,
-        d.d_year,
-        i.i_category,
-        i.i_category_id,
-        i.i_units,
-        cp.cp_type,
-        cp.cp_department
-    FROM catalog_sales cs
-    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
-    JOIN item i ON cs.cs_item_sk = i.i_item_sk
-    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-    WHERE d.d_year = 2001
-      AND i.i_category_id IN (5, 7, 8)
-      AND cp.cp_type = 'A'
-      AND i.i_units = 'Box'
-      AND cs.cs_quantity > 0
-),
-returns_orders AS (
-    SELECT DISTINCT cr.cr_order_number
-    FROM catalog_returns cr
-    WHERE cr.cr_return_quantity > 0
-)
+WITH
+    customer_returns AS (
+        SELECT
+            c.c_customer_sk,
+            c.c_birth_year,
+            c.c_email_address,
+            SUM(sr.sr_return_amt) AS total_return_amt,
+            SUM(sr.sr_fee) AS total_fee,
+            COUNT(*) AS return_cnt
+        FROM
+            customer c
+            INNER JOIN store_returns sr
+                ON sr.sr_customer_sk = c.c_customer_sk
+        WHERE
+            c.c_birth_year BETWEEN 1960 AND 1990
+            AND c.c_preferred_cust_flag = 'Y'
+            AND sr.sr_return_amt > 100.00
+            AND sr.sr_fee BETWEEN 30.00 AND 80.00
+            AND sr.sr_return_ship_cost < 500.00
+            AND sr.sr_refunded_cash <> 0
+        GROUP BY
+            c.c_customer_sk,
+            c.c_birth_year,
+            c.c_email_address
+    ),
+    qualified_web_customers AS (
+        SELECT DISTINCT wp.wp_customer_sk AS c_customer_sk
+        FROM web_page wp
+        WHERE wp.wp_type = 'article'
+            AND wp.wp_char_count > 4000
+            AND wp.wp_rec_start_date >= DATE '2000-01-01'
+        UNION ALL
+        SELECT DISTINCT wp.wp_customer_sk AS c_customer_sk
+        FROM web_page wp
+        WHERE wp.wp_type = 'landing'
+            AND wp.wp_image_count >= 5
+            AND wp.wp_rec_end_date <= DATE '2025-12-31'
+    )
 SELECT
-    sd.i_category,
-    sd.i_category_id,
-    SUM(sd.cs_net_paid) AS total_paid,
-    SUM(sd.cs_net_profit) AS total_profit,
-    COUNT(DISTINCT sd.cs_order_number) AS order_cnt,
-    RANK() OVER (ORDER BY SUM(sd.cs_net_profit) DESC) AS profit_rank
-FROM sales_data sd
-WHERE sd.cs_order_number IN (SELECT cr_order_number FROM returns_orders)
-GROUP BY sd.i_category, sd.i_category_id
-ORDER BY profit_rank
+    cr.c_birth_year,
+    COUNT(DISTINCT cr.c_customer_sk) AS num_customers,
+    AVG(cr.total_return_amt) AS avg_return_amt,
+    SUM(cr.total_fee) AS sum_fee
+FROM
+    customer_returns cr
+WHERE
+    EXISTS (
+        SELECT 1 FROM qualified_web_customers qwc
+        WHERE qwc.c_customer_sk = cr.c_customer_sk
+    )
+    AND cr.total_return_amt > 500.00
+    AND cr.total_fee < 400.00
+GROUP BY
+    cr.c_birth_year
+HAVING
+    SUM(cr.total_fee) > 1000.00
+ORDER BY
+    avg_return_amt DESC
 LIMIT 100

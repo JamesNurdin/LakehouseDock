@@ -1,52 +1,55 @@
-WITH filtered_returns AS (
-    SELECT cr.cr_returned_date_sk,
-           cr.cr_item_sk,
-           cr.cr_warehouse_sk,
-           cr.cr_return_amount,
-           cr.cr_return_quantity,
-           cr.cr_net_loss
+WITH unioned AS (
+    SELECT
+        'catalog' AS source_type,
+        cr.cr_warehouse_sk AS grp_key,
+        cr.cr_net_loss AS net_loss,
+        td.t_meal_time,
+        cd_ret.cd_education_status,
+        td.t_hour
     FROM catalog_returns cr
-    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-    WHERE d.d_year = 2000
-      AND cr.cr_return_amount > 0
+    JOIN time_dim td ON cr.cr_returned_time_sk = td.t_time_sk
+    JOIN customer_demographics cd_ref ON cr.cr_refunded_cdemo_sk = cd_ref.cd_demo_sk
+    JOIN customer_demographics cd_ret ON cr.cr_returning_cdemo_sk = cd_ret.cd_demo_sk
+    WHERE td.t_meal_time = 'lunch'
+      AND cd_ret.cd_education_status = 'Advanced Degree'
+      AND cr.cr_warehouse_sk IN (7, 13)
+      AND td.t_hour BETWEEN 10 AND 14
+
+    UNION ALL
+
+    SELECT
+        'web' AS source_type,
+        wp.wp_web_page_sk AS grp_key,
+        wr.wr_net_loss AS net_loss,
+        td.t_meal_time,
+        cd_ret.cd_education_status,
+        td.t_hour
+    FROM web_returns wr
+    JOIN time_dim td ON wr.wr_returned_time_sk = td.t_time_sk
+    JOIN customer_demographics cd_ref ON wr.wr_refunded_cdemo_sk = cd_ref.cd_demo_sk
+    JOIN customer_demographics cd_ret ON wr.wr_returning_cdemo_sk = cd_ret.cd_demo_sk
+    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    WHERE td.t_meal_time = 'lunch'
+      AND cd_ret.cd_education_status = 'Advanced Degree'
+      AND wp.wp_type = 'article'
+      AND wr.wr_return_quantity > 1
+),
+agg AS (
+    SELECT
+        source_type,
+        grp_key,
+        SUM(net_loss) AS sum_net_loss,
+        AVG(net_loss) AS avg_net_loss
+    FROM unioned
+    GROUP BY source_type, grp_key
+    HAVING SUM(net_loss) > 0
 )
-SELECT 
-    w.w_warehouse_name,
-    w.w_state,
-    i.i_category,
-    COUNT(*) AS return_cnt,
-    SUM(fr.cr_return_amount) AS total_return_amount,
-    AVG(fr.cr_return_quantity) AS avg_quantity,
-    CASE 
-        WHEN SUM(fr.cr_return_amount) > 10000 THEN 'HIGH'
-        WHEN SUM(fr.cr_return_amount) > 5000 THEN 'MEDIUM'
-        ELSE 'LOW'
-    END AS amount_bucket,
-    SUBSTR(i.i_product_name, 1, 3) AS prod_prefix,
-    REGEXP_EXTRACT(i.i_item_desc, '(\\d{3,})', 1) AS numeric_code,
-    CASE 
-        WHEN REGEXP_LIKE(w.w_suite_number, '^Suite[[:space:]]*[A-Z0-9]+') THEN 'SuiteMatch'
-        ELSE 'NoMatch'
-    END AS suite_flag,
-    w.w_warehouse_name || ', ' || w.w_state AS warehouse_full
-FROM filtered_returns fr
-JOIN item i ON fr.cr_item_sk = i.i_item_sk
-JOIN warehouse w ON fr.cr_warehouse_sk = w.w_warehouse_sk
-JOIN date_dim d ON fr.cr_returned_date_sk = d.d_date_sk
-LEFT JOIN web_page wp ON wp.wp_creation_date_sk = d.d_date_sk
-WHERE 
-    REGEXP_LIKE(i.i_item_desc, '\\d{3,}')
-    AND w.w_suite_number LIKE 'Suite %'
-    AND (wp.wp_url LIKE 'http://%/catalog%' OR wp.wp_url IS NULL)
-GROUP BY 
-    w.w_warehouse_name,
-    w.w_state,
-    i.i_category,
-    SUBSTR(i.i_product_name, 1, 3),
-    REGEXP_EXTRACT(i.i_item_desc, '(\\d{3,})', 1),
-    CASE 
-        WHEN REGEXP_LIKE(w.w_suite_number, '^Suite[[:space:]]*[A-Z0-9]+') THEN 'SuiteMatch'
-        ELSE 'NoMatch'
-    END
-ORDER BY total_return_amount DESC
-LIMIT 20
+SELECT
+    source_type,
+    grp_key,
+    sum_net_loss,
+    avg_net_loss,
+    RANK() OVER (PARTITION BY source_type ORDER BY sum_net_loss DESC) AS rank_within_type
+FROM agg
+ORDER BY sum_net_loss DESC
+LIMIT 100

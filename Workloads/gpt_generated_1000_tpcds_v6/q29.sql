@@ -1,81 +1,55 @@
-WITH inventory_snapshot AS (
-    SELECT
-        w.w_warehouse_name,
-        d.d_year,
-        d.d_month_seq,
-        SUM(i.inv_quantity_on_hand) AS total_qty_on_hand
-    FROM inventory i
-    JOIN date_dim d ON i.inv_date_sk = d.d_date_sk
-    JOIN warehouse w ON i.inv_warehouse_sk = w.w_warehouse_sk
-    WHERE d.d_year = 2001
-      AND d.d_month_seq BETWEEN 1200 AND 1202  -- first quarter of 2001 (example)
-    GROUP BY w.w_warehouse_name, d.d_year, d.d_month_seq
+WITH date_2000 AS (
+    SELECT d_date_sk, d_year
+    FROM date_dim
+    WHERE d_year = 2000
 )
-SELECT
-    d_year,
-    w_warehouse_name,
-    reason_category,
-    total_return_amount,
-    return_cnt,
-    return_level
+SELECT sale_year,
+       source_type,
+       entity_name,
+       total_sales,
+       sales_category
 FROM (
-    SELECT
-        d.d_year AS d_year,
-        w.w_warehouse_name AS w_warehouse_name,
-        r.r_reason_desc AS reason_category,
-        SUM(cr.cr_return_amount) AS total_return_amount,
-        COUNT(*) AS return_cnt,
-        CASE
-            WHEN SUM(cr.cr_return_amount) > (
-                SELECT AVG(cr2.cr_return_amount)
-                FROM catalog_returns cr2
-                WHERE cr2.cr_returned_date_sk = cr.cr_returned_date_sk
-            ) THEN 'High'
-            ELSE 'Low'
-        END AS return_level
-    FROM catalog_returns cr
-    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
-    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-    WHERE d.d_year = 2001
-      AND r.r_reason_desc LIKE '%Defective%'
-      AND EXISTS (
-          SELECT 1
-          FROM inventory_snapshot inv
-          WHERE inv.w_warehouse_name = w.w_warehouse_name
-            AND inv.d_year = d.d_year
-      )
-    GROUP BY d.d_year, w.w_warehouse_name, r.r_reason_desc, cr.cr_returned_date_sk
+    SELECT d.d_year AS sale_year,
+           'Store' AS source_type,
+           s.s_store_name AS entity_name,
+           SUM(ss.ss_net_paid) AS total_sales,
+           CASE
+               WHEN SUM(ss.ss_net_paid) > 100000 THEN 'High'
+               WHEN SUM(ss.ss_net_paid) > 50000 THEN 'Medium'
+               ELSE 'Low'
+           END AS sales_category
+    FROM store_sales ss
+    INNER JOIN date_2000 d ON ss.ss_sold_date_sk = d.d_date_sk
+    INNER JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE EXISTS (
+        SELECT 1
+        FROM promotion p
+        WHERE p.p_promo_sk = ss.ss_promo_sk
+          AND p.p_discount_active = 'Y'
+    )
+    GROUP BY d.d_year, s.s_store_name
 
     UNION ALL
 
-    SELECT
-        d.d_year AS d_year,
-        w.w_warehouse_name AS w_warehouse_name,
-        r.r_reason_desc AS reason_category,
-        SUM(cr.cr_return_amount) AS total_return_amount,
-        COUNT(*) AS return_cnt,
-        CASE
-            WHEN SUM(cr.cr_return_amount) > (
-                SELECT AVG(cr2.cr_return_amount)
-                FROM catalog_returns cr2
-                WHERE cr2.cr_returned_date_sk = cr.cr_returned_date_sk
-            ) THEN 'High'
-            ELSE 'Low'
-        END AS return_level
-    FROM catalog_returns cr
-    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
-    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-    WHERE d.d_year = 2001
-      AND r.r_reason_desc LIKE '%Customer%'
-      AND EXISTS (
-          SELECT 1
-          FROM inventory_snapshot inv
-          WHERE inv.w_warehouse_name = w.w_warehouse_name
-            AND inv.d_year = d.d_year
-      )
-    GROUP BY d.d_year, w.w_warehouse_name, r.r_reason_desc, cr.cr_returned_date_sk
-) AS combined_results
-ORDER BY d_year, w_warehouse_name, total_return_amount DESC
+    SELECT d.d_year AS sale_year,
+           'Web' AS source_type,
+           w.web_name AS entity_name,
+           SUM(ws.ws_net_paid) AS total_sales,
+           CASE
+               WHEN SUM(ws.ws_net_paid) > 100000 THEN 'High'
+               WHEN SUM(ws.ws_net_paid) > 50000 THEN 'Medium'
+               ELSE 'Low'
+           END AS sales_category
+    FROM web_sales ws
+    INNER JOIN date_2000 d ON ws.ws_sold_date_sk = d.d_date_sk
+    INNER JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE EXISTS (
+        SELECT 1
+        FROM promotion p
+        WHERE p.p_promo_sk = ws.ws_promo_sk
+          AND p.p_discount_active = 'Y'
+    )
+    GROUP BY d.d_year, w.web_name
+) AS combined
+ORDER BY total_sales DESC
 LIMIT 100

@@ -1,38 +1,51 @@
-WITH sales_filtered AS (
+/*
+Goal: Compare daily net paid revenue from catalog and web sales, classify the revenue level, compute cumulative revenue per channel, rank days by revenue, and return the top 100 rows.
+*/
+WITH catalog_agg AS (
     SELECT
-        ws.ws_sold_date_sk,
-        ws.ws_bill_addr_sk,
-        ws.ws_quantity,
-        ws.ws_ext_list_price,
-        ws.ws_ext_discount_amt,
-        ws.ws_net_paid,
-        ws.ws_net_profit,
-        ws.ws_order_number
-    FROM web_sales ws
-    WHERE ws.ws_ext_list_price > 1000
-      AND ws.ws_quantity BETWEEN 2 AND 10
-      AND ws.ws_net_paid > 500
+        cs.cs_sold_date_sk AS sales_date_sk,
+        'catalog' AS source,
+        SUM(cs.cs_net_paid) AS total_net_paid,
+        CASE WHEN SUM(cs.cs_net_paid) > 100000 THEN 'high' ELSE 'medium' END AS sales_category
+    FROM tpcds.catalog_sales cs
+    JOIN tpcds.catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN tpcds.promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    WHERE cp.cp_department = 'Electronics'
+      AND p.p_discount_active = 'Y'
+    GROUP BY cs.cs_sold_date_sk
+),
+web_agg AS (
+    SELECT
+        ws.ws_sold_date_sk AS sales_date_sk,
+        'web' AS source,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        CASE WHEN SUM(ws.ws_net_paid) > 80000 THEN 'high' ELSE 'medium' END AS sales_category
+    FROM tpcds.web_sales ws
+    JOIN tpcds.web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN tpcds.promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE wp.wp_type = 'Content'
+      AND p.p_discount_active = 'Y'
+    GROUP BY ws.ws_sold_date_sk
+),
+combined AS (
+    SELECT * FROM catalog_agg
+    UNION ALL
+    SELECT * FROM web_agg
 )
-SELECT
-    COALESCE(ca.ca_state, 'UNKNOWN') AS customer_state,
-    d.d_year,
-    COUNT(DISTINCT sf.ws_order_number) AS order_cnt,
-    SUM(sf.ws_net_profit) AS total_profit,
-    AVG(sf.ws_net_profit) AS avg_profit,
-    MIN(sf.ws_net_paid) AS min_paid,
-    MAX(sf.ws_net_paid) AS max_paid,
-    (SELECT AVG(ws2.ws_net_profit) FROM web_sales ws2) AS overall_avg_profit
-FROM sales_filtered sf
-INNER JOIN date_dim d
-    ON sf.ws_sold_date_sk = d.d_date_sk
-    AND d.d_year = 2002
-    AND d.d_fy_week_seq IN (9, 13, 18)
-LEFT JOIN customer_address ca
-    ON sf.ws_bill_addr_sk = ca.ca_address_sk
-    AND ca.ca_state = 'CA'
-    AND ca.ca_zip IN ('75124', '86192')
-GROUP BY
-    COALESCE(ca.ca_state, 'UNKNOWN'),
-    d.d_year
-ORDER BY total_profit DESC
+SELECT DISTINCT
+    source,
+    sales_date_sk,
+    total_net_paid,
+    sales_category,
+    SUM(total_net_paid) OVER (
+        PARTITION BY source
+        ORDER BY sales_date_sk
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS cumulative_net_paid,
+    ROW_NUMBER() OVER (
+        PARTITION BY source
+        ORDER BY total_net_paid DESC
+    ) AS rank_per_source
+FROM combined
+ORDER BY source, total_net_paid DESC
 LIMIT 100

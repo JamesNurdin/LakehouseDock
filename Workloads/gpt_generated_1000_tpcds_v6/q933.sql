@@ -1,35 +1,67 @@
-WITH base AS (
+WITH filtered_returns AS (
     SELECT
-        cp.cp_description AS cp_description,
-        hd.hd_buy_potential AS hd_buy_potential,
-        SUM(cs.cs_net_profit) AS total_profit,
-        SUM(cr.cr_return_amount) AS total_return_amount,
-        SUM(wr.wr_return_amt) AS total_web_return_amt,
-        COUNT(DISTINCT cs.cs_order_number) AS order_cnt
-    FROM catalog_sales cs
+        cr.cr_returned_date_sk,
+        cr.cr_returned_time_sk,
+        cr.cr_item_sk,
+        cr.cr_refunded_customer_sk,
+        cr.cr_refunded_cdemo_sk,
+        cr.cr_refunded_hdemo_sk,
+        cr.cr_refunded_addr_sk,
+        cr.cr_returning_customer_sk,
+        cr.cr_returning_cdemo_sk,
+        cr.cr_returning_hdemo_sk,
+        cr.cr_returning_addr_sk,
+        cr.cr_call_center_sk,
+        cr.cr_catalog_page_sk,
+        cr.cr_ship_mode_sk,
+        cr.cr_warehouse_sk,
+        cr.cr_reason_sk,
+        cr.cr_order_number,
+        cr.cr_return_quantity,
+        cr.cr_return_amount,
+        cr.cr_return_tax,
+        cr.cr_return_amt_inc_tax,
+        cr.cr_fee,
+        cr.cr_return_ship_cost,
+        cr.cr_refunded_cash,
+        cr.cr_reversed_charge,
+        cr.cr_store_credit,
+        cr.cr_net_loss,
+        cp.cp_department,
+        cp.cp_description,
+        cp.cp_end_date_sk,
+        cp.cp_start_date_sk,
+        td.t_time,
+        td.t_second,
+        CASE WHEN cr.cr_return_amount > 100 THEN 'High' ELSE 'Low' END AS return_amount_category
+    FROM catalog_returns cr
     JOIN catalog_page cp
-        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN household_demographics hd
-        ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-    LEFT JOIN catalog_returns cr
-        ON cr.cr_order_number = cs.cs_order_number
-    LEFT JOIN web_returns wr
-        ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-    WHERE cp.cp_type = 'A'
+        ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN time_dim td
+        ON cr.cr_returned_time_sk = td.t_time_sk
+    WHERE cp.cp_department = 'Electronics'
+      AND cp.cp_end_date_sk BETWEEN 2450990 AND 2451100
       AND cp.cp_description LIKE '%store%'
-      AND cr.cr_ship_mode_sk IN (5, 9)
-      AND wr.wr_web_page_sk = 589
-      AND cs.cs_sold_date_sk BETWEEN 2450000 AND 2450100
-    GROUP BY cp.cp_description, hd.hd_buy_potential
+      AND cr.cr_store_credit > 50
+      AND cr.cr_refunded_cash BETWEEN 500 AND 2000
+      AND td.t_time IN (9, 11, 13)
+      AND td.t_second <= 8
+      AND EXISTS (
+          SELECT 1
+          FROM catalog_page cp2
+          WHERE cp2.cp_catalog_number = cp.cp_catalog_number
+            AND cp2.cp_description LIKE '%new%'
+      )
 )
 SELECT
-    cp_description,
-    hd_buy_potential,
-    total_profit,
-    total_return_amount,
-    total_web_return_amt,
-    order_cnt,
-    RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
-FROM base
-ORDER BY profit_rank
+    cp_department,
+    return_amount_category,
+    COUNT(*) AS returns_cnt,
+    SUM(cr_return_amount) AS total_return_amount,
+    AVG(cr_return_tax) AS avg_tax,
+    MAX(cr_return_quantity) AS max_quantity,
+    MIN(cr_return_amt_inc_tax) AS min_amount_inc_tax
+FROM filtered_returns
+GROUP BY cp_department, return_amount_category
+ORDER BY total_return_amount DESC
 LIMIT 100

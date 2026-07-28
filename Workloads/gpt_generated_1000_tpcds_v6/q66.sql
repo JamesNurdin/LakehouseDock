@@ -1,56 +1,63 @@
-WITH base AS (
+/* Goal: Analyze total profit and loss by customer state and promotion across both catalog and web channels, including return impacts, and rank states by profit. */
+WITH catalog_data AS (
     SELECT
-        c.c_customer_id,
-        c.c_email_address,
-        c.c_first_name,
-        c.c_last_name,
-        hd.hd_income_band_sk,
-        ib.ib_lower_bound,
-        ib.ib_upper_bound,
-        SUM(wr.wr_net_loss) AS total_net_loss,
-        COUNT(*) AS return_cnt,
-        CASE
-            WHEN SUM(wr.wr_net_loss) > 1000 THEN 'HIGH'
-            WHEN SUM(wr.wr_net_loss) > 100  THEN 'MEDIUM'
-            ELSE 'LOW'
-        END AS loss_category,
-        regexp_extract(c.c_email_address, '@([^\\.]+\\..+)$', 1) AS email_domain,
-        concat(c.c_first_name, ' ', c.c_last_name) AS full_name
-    FROM web_returns wr
-    JOIN customer c
-        ON wr.wr_refunded_customer_sk = c.c_customer_sk
-    JOIN household_demographics hd
-        ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    WHERE regexp_like(c.c_email_address, '^[A-Za-z0-9._%+-]+@example\\.com$')
-      AND c.c_birth_country = 'United States'
-    GROUP BY
-        c.c_customer_id,
-        c.c_email_address,
-        c.c_first_name,
-        c.c_last_name,
-        hd.hd_income_band_sk,
-        ib.ib_lower_bound,
-        ib.ib_upper_bound,
-        regexp_extract(c.c_email_address, '@([^\\.]+\\..+)$', 1),
-        concat(c.c_first_name, ' ', c.c_last_name)
+        ca_bill.ca_state AS state,
+        p.p_promo_name AS promo_name,
+        cs.cs_order_number AS order_number,
+        cs.cs_net_profit AS net_profit,
+        COALESCE(cr.cr_net_loss, 0) AS net_loss
+    FROM catalog_sales cs
+    JOIN catalog_page cp
+      ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN warehouse w
+      ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    JOIN promotion p
+      ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN customer_address ca_bill
+      ON cs.cs_bill_addr_sk = ca_bill.ca_address_sk
+    LEFT JOIN catalog_returns cr
+      ON cr.cr_order_number = cs.cs_order_number
+     AND cr.cr_item_sk = cs.cs_item_sk
+    LEFT JOIN customer_address ca_refund
+      ON cr.cr_refunded_addr_sk = ca_refund.ca_address_sk
+    LEFT JOIN customer_address ca_returning
+      ON cr.cr_returning_addr_sk = ca_returning.ca_address_sk
 ),
-distinct_base AS (
-    SELECT DISTINCT * FROM base
+web_data AS (
+    SELECT
+        ca_ws_bill.ca_state AS state,
+        p2.p_promo_name AS promo_name,
+        ws.ws_order_number AS order_number,
+        ws.ws_net_profit AS net_profit,
+        COALESCE(wr.wr_net_loss, 0) AS net_loss
+    FROM web_sales ws
+    JOIN warehouse w2
+      ON ws.ws_warehouse_sk = w2.w_warehouse_sk
+    JOIN promotion p2
+      ON ws.ws_promo_sk = p2.p_promo_sk
+    JOIN customer_address ca_ws_bill
+      ON ws.ws_bill_addr_sk = ca_ws_bill.ca_address_sk
+    LEFT JOIN web_returns wr
+      ON wr.wr_order_number = ws.ws_order_number
+    LEFT JOIN customer_address ca_wr_refund
+      ON wr.wr_refunded_addr_sk = ca_wr_refund.ca_address_sk
+    LEFT JOIN customer_address ca_wr_returning
+      ON wr.wr_returning_addr_sk = ca_wr_returning.ca_address_sk
 )
 SELECT
-    db.c_customer_id,
-    substring(db.c_customer_id, 1, 5) AS cust_id_prefix,
-    db.full_name,
-    db.email_domain,
-    db.ib_lower_bound,
-    db.ib_upper_bound,
-    db.total_net_loss,
-    db.return_cnt,
-    db.loss_category,
-    ROW_NUMBER() OVER (PARTITION BY db.ib_upper_bound ORDER BY db.total_net_loss DESC) AS rank_within_income_band
-FROM distinct_base db
-WHERE db.loss_category <> 'LOW'
-ORDER BY db.total_net_loss DESC
-LIMIT 100
+    state,
+    promo_name,
+    SUM(net_profit) AS total_profit,
+    SUM(net_loss) AS total_loss,
+    COUNT(DISTINCT order_number) AS order_cnt,
+    RANK() OVER (ORDER BY SUM(net_profit) DESC) AS profit_rank
+FROM (
+    SELECT * FROM catalog_data
+    UNION ALL
+    SELECT * FROM web_data
+) combined
+GROUP BY
+    state,
+    promo_name
+ORDER BY
+    total_profit DESC

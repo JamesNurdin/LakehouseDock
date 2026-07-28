@@ -1,46 +1,42 @@
-WITH sales_agg AS (
+WITH base AS (
     SELECT
-        d_sold.d_year AS sales_year,
-        hd.hd_income_band_sk,
-        i.i_category,
-        SUM(ws.ws_ext_sales_price) AS total_sales,
-        SUM(ws.ws_net_profit) AS total_profit,
-        COUNT(*) AS order_count,
-        CASE WHEN p.p_discount_active = 'Y' THEN 'Discounted' ELSE 'Regular' END AS promo_type
-    FROM web_sales ws
-    JOIN date_dim d_sold
-        ON ws.ws_sold_date_sk = d_sold.d_date_sk
-    JOIN item i
-        ON ws.ws_item_sk = i.i_item_sk
-    JOIN household_demographics hd
-        ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-    JOIN promotion p
-        ON ws.ws_promo_sk = p.p_promo_sk
-    JOIN date_dim d_promo_start
-        ON p.p_start_date_sk = d_promo_start.d_date_sk
-    JOIN catalog_page cp
-        ON cp.cp_start_date_sk = d_promo_start.d_date_sk
-    WHERE d_sold.d_year = 2001
-      AND hd.hd_income_band_sk BETWEEN 5 AND 15
-      AND p.p_channel_radio = 'N'
-    GROUP BY
-        d_sold.d_year,
-        hd.hd_income_band_sk,
-        i.i_category,
-        CASE WHEN p.p_discount_active = 'Y' THEN 'Discounted' ELSE 'Regular' END
+        s.s_store_name AS store_name,
+        i.i_category AS category,
+        d_sold.d_year AS year,
+        SUM(ss.ss_net_profit) AS total_profit,
+        SUM(ss.ss_quantity) AS total_qty,
+        CASE WHEN SUM(ss.ss_net_profit) > 0 THEN 'Positive' ELSE 'Non-Positive' END AS profit_sign
+    FROM store_sales ss
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN date_dim d_sold ON ss.ss_sold_date_sk = d_sold.d_date_sk
+    JOIN time_dim t_sold ON ss.ss_sold_time_sk = t_sold.t_time_sk
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+    JOIN catalog_page cp ON cp.cp_start_date_sk = d_sold.d_date_sk
+    JOIN web_page wp ON wp.wp_customer_sk = c.c_customer_sk
+    JOIN date_dim d_wp_access ON wp.wp_access_date_sk = d_wp_access.d_date_sk
+    LEFT JOIN store_returns sr ON sr.sr_ticket_number = ss.ss_ticket_number
+        AND sr.sr_store_sk = s.s_store_sk
+    JOIN date_dim d_return ON sr.sr_returned_date_sk = d_return.d_date_sk
+    JOIN time_dim t_return ON sr.sr_return_time_sk = t_return.t_time_sk
+    WHERE cd.cd_gender = 'F'
+      AND t_sold.t_am_pm = 'PM'
+      AND cp.cp_type = 'WEB'
+      AND wp.wp_type = 'HOME'
+      AND d_sold.d_year BETWEEN 2001 AND 2002
+      AND sr.sr_store_sk = 988
+    GROUP BY ROLLUP (s.s_store_name, i.i_category, d_sold.d_year)
 )
 SELECT
-    sales_year,
-    hd_income_band_sk,
-    i_category,
-    total_sales,
+    store_name,
+    category,
+    year,
     total_profit,
-    order_count,
-    promo_type,
-    total_sales / NULLIF(order_count, 0) AS avg_sales_per_order,
-    CASE WHEN total_profit > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_status
-FROM sales_agg
-WHERE total_sales > 10000
-  AND total_sales / NULLIF(order_count, 0) > 50
-ORDER BY total_sales DESC
+    profit_sign,
+    ROW_NUMBER() OVER (PARTITION BY category ORDER BY total_profit DESC) AS rank_in_category,
+    SUM(total_profit) OVER (PARTITION BY category) AS category_total_profit
+FROM base
+ORDER BY total_profit DESC
 LIMIT 100

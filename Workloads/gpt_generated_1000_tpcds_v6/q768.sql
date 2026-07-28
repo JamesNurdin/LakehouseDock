@@ -1,46 +1,54 @@
-WITH filtered_sales AS (
+WITH joined_data AS (
     SELECT
-        ss.ss_customer_sk,
-        ss.ss_sold_time_sk,
-        ss.ss_net_paid_inc_tax,
-        ss.ss_list_price,
-        ss.ss_promo_sk,
-        ss.ss_quantity,
-        ss.ss_ext_sales_price
-    FROM store_sales ss
-    WHERE ss.ss_net_paid_inc_tax > 1000
-      AND ss.ss_list_price >= 50
-      AND ss.ss_promo_sk IN (602, 194)
-      AND ss.ss_quantity BETWEEN 1 AND 5
+        cc.cc_call_center_id,
+        cc.cc_county,
+        cc.cc_state,
+        cc.cc_gmt_offset,
+        cp.cp_catalog_page_id,
+        cp.cp_catalog_number,
+        cp.cp_catalog_page_number,
+        wp.wp_web_page_id,
+        wp.wp_char_count,
+        wp.wp_link_count,
+        wp.wp_url,
+        d.d_date,
+        d.d_year,
+        d.d_month_seq,
+        d.d_day_name
+    FROM date_dim d
+    LEFT JOIN call_center cc
+        ON cc.cc_open_date_sk = d.d_date_sk
+    LEFT JOIN catalog_page cp
+        ON cp.cp_start_date_sk = d.d_date_sk
+    LEFT JOIN web_page wp
+        ON wp.wp_creation_date_sk = d.d_date_sk
+    WHERE d.d_year = 2001
+      AND cc.cc_county IN ('Maverick County', 'Williamson County')
+      AND cc.cc_street_type = 'Avenue'
+      AND wp.wp_char_count BETWEEN 2000 AND 6000
+      AND wp.wp_link_count >= 10
+      AND cp.cp_catalog_page_number IN (3, 11, 17)
+),
+ranked AS (
+    SELECT
+        jd.*, 
+        SUM(jd.wp_char_count) OVER (PARTITION BY jd.cc_county) AS total_char_per_county,
+        RANK() OVER (PARTITION BY jd.cc_county ORDER BY jd.wp_char_count DESC) AS char_count_rank,
+        ROW_NUMBER() OVER (PARTITION BY jd.cc_county ORDER BY jd.d_date) AS day_seq
+    FROM joined_data jd
 )
 SELECT
-    c.c_customer_id,
-    c.c_current_cdemo_sk,
-    t.t_hour,
-    SUM(fs.ss_ext_sales_price) AS total_sales,
-    AVG(fs.ss_net_paid_inc_tax) AS avg_net_paid_inc_tax,
-    COUNT(DISTINCT fs.ss_sold_time_sk) AS distinct_sale_times,
-    MIN(fs.ss_list_price) AS min_list_price,
-    MAX(fs.ss_list_price) AS max_list_price,
-    SUM(CASE WHEN wr.wr_return_amt > 200 THEN wr.wr_return_amt ELSE 0 END) AS total_high_returns,
-    ROW_NUMBER() OVER (PARTITION BY c.c_current_cdemo_sk ORDER BY c.c_customer_id) AS demo_rank
-FROM filtered_sales fs
-JOIN customer c
-    ON fs.ss_customer_sk = c.c_customer_sk
-JOIN time_dim t
-    ON fs.ss_sold_time_sk = t.t_time_sk
-JOIN web_returns wr
-    ON wr.wr_returned_time_sk = t.t_time_sk
-WHERE c.c_current_cdemo_sk = 442697
-  AND t.t_hour BETWEEN 9 AND 17
-  AND wr.wr_reversed_charge < 200
-  AND wr.wr_refunded_cash > 100
-  AND wr.wr_return_quantity > 0
-  AND wr.wr_fee < 50
-GROUP BY
-    c.c_customer_id,
-    c.c_current_cdemo_sk,
-    t.t_hour
-HAVING SUM(fs.ss_ext_sales_price) > 5000
-ORDER BY total_sales DESC, c.c_customer_id
+    cc_county,
+    cc_state,
+    d_year,
+    d_month_seq,
+    cp_catalog_page_number,
+    wp_char_count,
+    wp_link_count,
+    total_char_per_county,
+    char_count_rank,
+    day_seq
+FROM ranked
+WHERE char_count_rank <= 3
+ORDER BY total_char_per_county DESC, cc_county
 LIMIT 100

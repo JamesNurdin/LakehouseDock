@@ -1,43 +1,63 @@
-WITH profit_per_warehouse AS (
+WITH cs_agg AS (
     SELECT
-        w.w_warehouse_id,
-        w.w_city,
-        SUM(cs.cs_net_profit) AS total_profit
-    FROM catalog_sales cs
-    JOIN call_center cc
-        ON cs.cs_call_center_sk = cc.cc_call_center_sk
-    JOIN warehouse w
-        ON cs.cs_warehouse_sk = w.w_warehouse_sk
-    JOIN promotion p
-        ON cs.cs_promo_sk = p.p_promo_sk
-    WHERE p.p_discount_active = 'Y'
-      AND cc.cc_state = 'CA'
-      AND cs.cs_sales_price > 50
-      AND cs.cs_net_profit > (
-          SELECT AVG(cs2.cs_net_profit)
-          FROM catalog_sales cs2
-      )
-    GROUP BY w.w_warehouse_id, w.w_city
+        cs_item_sk,
+        cs_sold_date_sk,
+        cs_bill_customer_sk,
+        cs_warehouse_sk,
+        SUM(cs_net_profit)      AS total_cs_profit,
+        SUM(cs_quantity)        AS total_cs_quantity
+    FROM catalog_sales
+    WHERE cs_net_profit > 0
+      AND cs_quantity > 0
+    GROUP BY cs_item_sk, cs_sold_date_sk, cs_bill_customer_sk, cs_warehouse_sk
 )
-
 SELECT
-    profit.w_warehouse_id AS warehouse_id,
-    profit.w_city AS city,
-    'profit' AS metric_name,
-    CAST(profit.total_profit AS double) AS metric_value
-FROM profit_per_warehouse profit
-
-UNION ALL
-
-SELECT
-    w.w_warehouse_id AS warehouse_id,
-    w.w_city AS city,
-    'inventory' AS metric_name,
-    CAST(SUM(i.inv_quantity_on_hand) AS double) AS metric_value
-FROM inventory i
+    i.i_item_id,
+    d_sales.d_year,
+    c.c_customer_id,
+    cd.cd_gender,
+    hd.hd_vehicle_count,
+    w.w_warehouse_name,
+    cs_agg.total_cs_profit,
+    ws.ws_net_paid_inc_tax,
+    sr.sr_return_amt,
+    RANK() OVER (
+        PARTITION BY d_sales.d_year
+        ORDER BY (
+            cs_agg.total_cs_profit
+            + COALESCE(ws.ws_net_paid_inc_tax, 0)
+            - COALESCE(sr.sr_net_loss, 0)
+        ) DESC
+    ) AS profit_rank
+FROM cs_agg
+JOIN item i
+    ON cs_agg.cs_item_sk = i.i_item_sk
+JOIN customer c
+    ON cs_agg.cs_bill_customer_sk = c.c_customer_sk
+JOIN customer_demographics cd
+    ON c.c_current_cdemo_sk = cd.cd_demo_sk
+JOIN household_demographics hd
+    ON c.c_current_hdemo_sk = hd.hd_demo_sk
 JOIN warehouse w
-    ON i.inv_warehouse_sk = w.w_warehouse_sk
-WHERE i.inv_date_sk BETWEEN 2451050 AND 2451060
-GROUP BY w.w_warehouse_id, w.w_city
-
+    ON cs_agg.cs_warehouse_sk = w.w_warehouse_sk
+JOIN date_dim d_sales
+    ON cs_agg.cs_sold_date_sk = d_sales.d_date_sk
+LEFT JOIN web_sales ws
+    ON ws.ws_item_sk = i.i_item_sk
+   AND ws.ws_bill_customer_sk = c.c_customer_sk
+   AND ws.ws_sold_date_sk = d_sales.d_date_sk
+   AND ws.ws_warehouse_sk = w.w_warehouse_sk
+LEFT JOIN store_returns sr
+    ON sr.sr_item_sk = i.i_item_sk
+   AND sr.sr_customer_sk = c.c_customer_sk
+   AND sr.sr_returned_date_sk = d_sales.d_date_sk
+WHERE d_sales.d_year = 1904
+  AND i.i_current_price > 100.00
+  AND cd.cd_gender = 'M'
+  AND hd.hd_vehicle_count >= 2
+  AND w.w_gmt_offset = -5.00
+  AND ws.ws_net_paid_inc_tax > 2000.00
+  AND sr.sr_return_amt < 5000.00
+  AND cs_agg.total_cs_profit > 500.00
+ORDER BY d_sales.d_year, profit_rank
 LIMIT 100

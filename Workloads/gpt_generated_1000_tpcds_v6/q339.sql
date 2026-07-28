@@ -1,55 +1,108 @@
-WITH base AS (
-  SELECT
-    cc.cc_state,
-    cc.cc_gmt_offset,
-    cp.cp_department,
-    p.p_channel_radio,
-    p.p_channel_dmail,
-    p.p_discount_active,
-    CASE WHEN p.p_discount_active = 'Y' THEN 'Active' ELSE 'Inactive' END AS promo_status,
-    cs.cs_order_number,
-    cs.cs_net_paid_inc_ship_tax,
-    ws.ws_quantity,
-    ws.ws_net_paid,
-    cr.cr_return_amount,
-    cr.cr_return_quantity
-  FROM catalog_sales cs
-  JOIN call_center cc
-    ON cs.cs_call_center_sk = cc.cc_call_center_sk
-  JOIN catalog_page cp
-    ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-  JOIN promotion p
-    ON cs.cs_promo_sk = p.p_promo_sk
-  JOIN catalog_returns cr
-    ON cr.cr_order_number = cs.cs_order_number
-   AND cr.cr_item_sk = cs.cs_item_sk
-   AND cr.cr_call_center_sk = cc.cc_call_center_sk
-   AND cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-  JOIN web_sales ws
-    ON ws.ws_promo_sk = p.p_promo_sk
-  WHERE cc.cc_state = 'CA'
-    AND cc.cc_gmt_offset = -8.00
-    AND cp.cp_department = 'Electronics'
-    AND p.p_channel_radio = 'N'
-    AND p.p_channel_dmail = 'Y'
-    AND cs.cs_net_paid_inc_ship_tax > 2000
-    AND ws.ws_quantity > 5
-    AND cr.cr_return_quantity > 0
-)
+/*
+Goal: Compute sales, return and inventory metrics by item category and warehouse state, filtering to specific manufacturers, high‑value sales, and profitable returns, while joining all eight selected TPC‑DS tables.
+*/
+WITH
+    item_f AS (
+        SELECT i_item_sk,
+               i_category,
+               i_class,
+               i_manufact_id,
+               i_current_price
+        FROM   item
+        WHERE  i_manufact_id IN (169, 212)
+    ),
+    inv_f AS (
+        SELECT inv_item_sk,
+               inv_warehouse_sk,
+               inv_quantity_on_hand
+        FROM   inventory
+        WHERE  inv_quantity_on_hand > 600
+    ),
+    cr_f AS (
+        SELECT cr_item_sk,
+               cr_warehouse_sk,
+               cr_return_quantity,
+               cr_net_loss,
+               cr_refunded_cdemo_sk
+        FROM   catalog_returns
+        WHERE  cr_net_loss > 0
+    ),
+    ws_f AS (
+        SELECT ws_item_sk,
+               ws_warehouse_sk,
+               ws_order_number,
+               ws_ext_sales_price,
+               ws_sold_date_sk,
+               ws_ship_mode_sk,
+               ws_bill_cdemo_sk
+        FROM   web_sales
+        WHERE  ws_ext_sales_price > 100
+    ),
+    wr_f AS (
+        SELECT wr_item_sk,
+               wr_order_number,
+               wr_return_quantity,
+               wr_net_loss,
+               wr_returned_date_sk,
+               wr_refunded_cdemo_sk
+        FROM   web_returns
+        WHERE  wr_net_loss > 0
+    ),
+    cd_ref AS (
+        SELECT cd_demo_sk,
+               cd_gender,
+               cd_marital_status,
+               cd_credit_rating
+        FROM   customer_demographics
+        WHERE  cd_credit_rating = 'Excellent'
+    ),
+    ship AS (
+        SELECT sm_ship_mode_sk,
+               sm_type
+        FROM   ship_mode
+        WHERE  sm_type = 'AIR'
+    ),
+    wh AS (
+        SELECT w_warehouse_sk,
+               w_state,
+               w_city
+        FROM   warehouse
+        WHERE  w_state IN ('CA', 'TX')
+    )
 SELECT
-  cc_state,
-  cp_department,
-  promo_status,
-  SUM(cs_net_paid_inc_ship_tax) AS total_sales,
-  AVG(ws_net_paid) AS avg_web_net,
-  COUNT(DISTINCT cs_order_number) AS order_cnt,
-  MIN(cr_return_amount) AS min_return,
-  MAX(cr_return_amount) AS max_return
-FROM base
-GROUP BY ROLLUP (cc_state, cp_department, promo_status)
-HAVING SUM(cs_net_paid_inc_ship_tax) > 10000
-ORDER BY
-  cc_state,
-  cp_department,
-  total_sales DESC
-LIMIT 100
+    i_f.i_category,
+    wh.w_state,
+    COUNT(DISTINCT ws_f.ws_order_number)                           AS order_cnt,
+    SUM(ws_f.ws_ext_sales_price)                                   AS total_sales,
+    SUM(cr_f.cr_return_quantity)                                   AS total_return_qty,
+    SUM(cr_f.cr_net_loss)                                          AS total_return_loss,
+    AVG(inv_f.inv_quantity_on_hand)                                AS avg_inventory_qty,
+    (SELECT MAX(i_current_price) FROM item WHERE i_manufact_id = 169) AS max_price_manuf_169
+FROM
+    ws_f
+    JOIN item_f i_f
+        ON ws_f.ws_item_sk = i_f.i_item_sk
+    JOIN wh
+        ON ws_f.ws_warehouse_sk = wh.w_warehouse_sk
+    JOIN ship
+        ON ws_f.ws_ship_mode_sk = ship.sm_ship_mode_sk
+    JOIN cd_ref cd_bill
+        ON ws_f.ws_bill_cdemo_sk = cd_bill.cd_demo_sk
+    JOIN cr_f
+        ON cr_f.cr_item_sk = i_f.i_item_sk
+        AND cr_f.cr_warehouse_sk = wh.w_warehouse_sk
+    JOIN wr_f
+        ON wr_f.wr_item_sk = i_f.i_item_sk
+        AND wr_f.wr_order_number = ws_f.ws_order_number
+    JOIN inv_f
+        ON inv_f.inv_item_sk = i_f.i_item_sk
+        AND inv_f.inv_warehouse_sk = wh.w_warehouse_sk
+WHERE EXISTS (
+        SELECT 1
+        FROM   catalog_returns cr2
+        WHERE  cr2.cr_item_sk = ws_f.ws_item_sk
+          AND  cr2.cr_net_loss > 50
+    )
+GROUP BY ROLLUP (i_f.i_category, wh.w_state)
+HAVING SUM(ws_f.ws_ext_sales_price) > 500
+ORDER BY i_f.i_category NULLS LAST, wh.w_state NULLS LAST

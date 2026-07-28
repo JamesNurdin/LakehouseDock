@@ -1,46 +1,54 @@
 WITH
-  high_value_customers AS (
-    SELECT ws_bill_customer_sk AS customer_sk,
-           SUM(ws_ext_sales_price) AS total_sales
-    FROM web_sales
-    GROUP BY ws_bill_customer_sk
-    HAVING SUM(ws_ext_sales_price) > 10000
+  joined_data AS (
+    SELECT
+      cp.cp_department,
+      hd_bill.hd_income_band_sk,
+      cs.cs_net_profit,
+      cs.cs_quantity,
+      sr.sr_return_amt,
+      sr.sr_net_loss
+    FROM catalog_sales cs
+      JOIN catalog_page cp
+        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+      JOIN customer cust_bill
+        ON cs.cs_bill_customer_sk = cust_bill.c_customer_sk
+      JOIN household_demographics hd_bill
+        ON cs.cs_bill_hdemo_sk = hd_bill.hd_demo_sk
+      JOIN customer cust_ship
+        ON cs.cs_ship_customer_sk = cust_ship.c_customer_sk
+      JOIN household_demographics hd_ship
+        ON cs.cs_ship_hdemo_sk = hd_ship.hd_demo_sk
+      JOIN store_returns sr
+        ON sr.sr_customer_sk = cust_bill.c_customer_sk
+      JOIN household_demographics hd_ret
+        ON sr.sr_hdemo_sk = hd_ret.hd_demo_sk
+      JOIN household_demographics hd_current
+        ON cust_bill.c_current_hdemo_sk = hd_current.hd_demo_sk
+      JOIN customer cust_ship2
+        ON sr.sr_customer_sk = cust_ship2.c_customer_sk
+    WHERE cp.cp_catalog_page_number BETWEEN 5 AND 20
+      AND hd_bill.hd_income_band_sk IN (1, 5, 9, 10)
   ),
-  returns_combined AS (
-    SELECT cr.cr_item_sk AS item_sk,
-           cr.cr_refunded_customer_sk AS customer_sk,
-           cr.cr_net_loss AS net_loss
-    FROM catalog_returns cr
-    WHERE EXISTS (
-            SELECT 1
-            FROM inventory inv
-            WHERE inv.inv_item_sk = cr.cr_item_sk
-              AND inv.inv_quantity_on_hand > 0
-          )
-    UNION ALL
-    SELECT sr.sr_item_sk AS item_sk,
-           sr.sr_customer_sk AS customer_sk,
-           sr.sr_net_loss AS net_loss
-    FROM store_returns sr
-    WHERE EXISTS (
-            SELECT 1
-            FROM inventory inv
-            WHERE inv.inv_item_sk = sr.sr_item_sk
-              AND inv.inv_quantity_on_hand > 0
-          )
+  aggregated AS (
+    SELECT
+      cp_department,
+      hd_income_band_sk,
+      SUM(cs_net_profit) AS total_profit,
+      SUM(cs_quantity) AS total_quantity,
+      SUM(sr_return_amt) AS total_return_amt,
+      SUM(sr_net_loss) AS total_net_loss
+    FROM joined_data
+    GROUP BY cp_department, hd_income_band_sk
   )
 SELECT
-  i.i_category,
-  COUNT(DISTINCT c.c_customer_sk) AS distinct_customer_cnt,
-  SUM(rc.net_loss) AS total_net_loss,
-  AVG(rc.net_loss) AS avg_net_loss,
-  (SELECT AVG(sr2.sr_net_loss) FROM store_returns sr2) AS overall_avg_store_net_loss
-FROM returns_combined rc
-JOIN item i ON rc.item_sk = i.i_item_sk
-JOIN customer c ON rc.customer_sk = c.c_customer_sk
-JOIN high_value_customers hv ON rc.customer_sk = hv.customer_sk
-WHERE regexp_like(i.i_item_desc, '(?i)bike')
-  AND c.c_email_address LIKE '%@example.com'
-GROUP BY i.i_category
-ORDER BY total_net_loss DESC
+  cp_department,
+  hd_income_band_sk,
+  total_profit,
+  total_quantity,
+  total_return_amt,
+  total_net_loss,
+  SUM(total_profit) OVER (PARTITION BY cp_department ORDER BY hd_income_band_sk) AS cumulative_profit_by_income,
+  RANK() OVER (PARTITION BY cp_department ORDER BY total_profit DESC) AS profit_rank
+FROM aggregated
+ORDER BY total_profit DESC
 LIMIT 100

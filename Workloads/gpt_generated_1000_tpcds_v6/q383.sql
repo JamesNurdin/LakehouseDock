@@ -1,74 +1,59 @@
-WITH joined_data AS (
-    SELECT
-        s.s_store_id,
-        s.s_state,
-        ca.ca_state AS address_state,
-        ca.ca_location_type,
-        sr.sr_return_amt,
-        sr.sr_net_loss,
-        ws.ws_ext_sales_price,
-        ws.ws_net_profit,
-        ws.ws_quantity,
-        ws.ws_net_paid,
-        ws.ws_wholesale_cost
-    FROM store_returns sr
-    JOIN store s
-      ON sr.sr_store_sk = s.s_store_sk
-    JOIN customer_address ca
-      ON sr.sr_addr_sk = ca.ca_address_sk
-    JOIN web_sales ws
-      ON ws.ws_bill_addr_sk = ca.ca_address_sk
-    WHERE ca.ca_state IN ('TX','WA','UT','LA','OH')
-      AND ca.ca_location_type = 'single family'
-      AND sr.sr_return_amt > 100
-      AND sr.sr_net_loss > 0
-      AND ws.ws_quantity BETWEEN 1 AND 10
-      AND ws.ws_net_profit > 0
-      AND s.s_number_employees > 30
-      AND s.s_tax_percentage < 0.12
-      AND ca.ca_zip LIKE '9%'
-),
-agg AS (
-    SELECT
-        s_store_id,
-        s_state,
-        address_state,
-        ca_location_type,
-        SUM(sr_return_amt)               AS total_return_amt,
-        SUM(sr_net_loss)                 AS total_net_loss,
-        COUNT(*)                         AS return_txn_cnt,
-        SUM(ws_ext_sales_price)          AS total_sales,
-        SUM(ws_net_profit)               AS total_profit,
-        COUNT(DISTINCT ws_net_paid)      AS sales_txn_cnt,
-        SUM(CASE WHEN ws_ext_sales_price > 1000 THEN ws_ext_sales_price ELSE 0 END) AS high_value_sales
-    FROM joined_data
-    GROUP BY s_store_id, s_state, address_state, ca_location_type
+WITH sales_base AS (
+  SELECT
+    cs.cs_order_number,
+    cs.cs_item_sk,
+    i.i_item_id,
+    i.i_brand,
+    cd.cd_gender,
+    hd.hd_income_band_sk,
+    ca.ca_location_type,
+    cs.cs_net_paid,
+    cs.cs_quantity
+  FROM catalog_sales cs
+  JOIN item i
+    ON cs.cs_item_sk = i.i_item_sk
+  JOIN customer c_bill
+    ON cs.cs_bill_customer_sk = c_bill.c_customer_sk
+  JOIN customer_demographics cd
+    ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+  JOIN household_demographics hd
+    ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+  JOIN customer_address ca
+    ON cs.cs_bill_addr_sk = ca.ca_address_sk
 )
 SELECT
-    a.s_store_id,
-    a.s_state,
-    a.address_state,
-    a.ca_location_type,
-    a.total_return_amt,
-    a.total_sales,
-    a.total_profit,
-    CASE
-        WHEN a.total_profit > 50000 THEN 'High'
-        WHEN a.total_profit BETWEEN 20000 AND 50000 THEN 'Medium'
-        ELSE 'Low'
-    END AS profit_category,
-    a.total_sales - a.total_return_amt AS net_sales_minus_returns,
-    (
-        SELECT MAX(s2.s_tax_percentage)
-        FROM store s2
-        WHERE s2.s_state = a.s_state
-    ) AS max_state_tax_pct
-FROM agg a
-WHERE a.total_sales > 20000
-  AND a.high_value_sales > 5000
-  AND a.total_return_amt > 5000
-  AND a.total_profit > 10000
-  AND a.return_txn_cnt >= 5
-  AND a.sales_txn_cnt >= 5
-ORDER BY net_sales_minus_returns DESC
+  sb.i_item_id,
+  sb.i_brand,
+  sb.cd_gender,
+  ib.ib_upper_bound,
+  SUM(sb.cs_net_paid)               AS total_net_paid,
+  SUM(sb.cs_quantity)               AS total_quantity,
+  COUNT(DISTINCT sb.cs_order_number) AS distinct_orders,
+  COUNT(DISTINCT cr.cr_return_quantity) AS catalog_return_cnt,
+  SUM(cr.cr_net_loss)               AS catalog_return_loss,
+  COUNT(DISTINCT sr.sr_ticket_number)   AS store_return_cnt,
+  SUM(sr.sr_net_loss)               AS store_return_loss,
+  COUNT(DISTINCT wp.wp_web_page_id) AS web_page_visits,
+  CASE WHEN SUM(sb.cs_net_paid) > 50000 THEN 'VIP' ELSE 'REGULAR' END AS customer_segment
+FROM sales_base sb
+LEFT JOIN catalog_returns cr
+  ON cr.cr_order_number = sb.cs_order_number
+ AND cr.cr_item_sk = sb.cs_item_sk
+LEFT JOIN store_returns sr
+  ON sr.sr_item_sk = sb.cs_item_sk
+LEFT JOIN item i_store
+  ON sr.sr_item_sk = i_store.i_item_sk
+LEFT JOIN customer c_sr
+  ON sr.sr_customer_sk = c_sr.c_customer_sk
+LEFT JOIN web_page wp
+  ON wp.wp_customer_sk = c_sr.c_customer_sk
+LEFT JOIN income_band ib
+  ON sb.hd_income_band_sk = ib.ib_income_band_sk
+GROUP BY GROUPING SETS (
+  (sb.i_item_id, sb.i_brand, sb.cd_gender, ib.ib_upper_bound),
+  (sb.i_item_id, sb.i_brand, sb.cd_gender),
+  (sb.i_item_id, sb.i_brand),
+  ()
+)
+ORDER BY total_net_paid DESC
 LIMIT 100

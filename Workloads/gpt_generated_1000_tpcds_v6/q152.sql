@@ -1,49 +1,55 @@
-WITH sales_agg AS (
+WITH store_data AS (
     SELECT
-        ss.ss_item_sk,
-        i.i_brand,
-        i.i_category,
-        SUM(ss.ss_net_profit) AS total_net_profit,
-        SUM(ss.ss_quantity) AS total_quantity,
-        AVG(ss.ss_list_price) AS avg_list_price
+        d.d_year AS year,
+        'store' AS channel,
+        CASE WHEN SUM(ss.ss_net_profit) > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_category,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        SUM(ss.ss_net_profit) AS total_profit
     FROM store_sales ss
-    JOIN item i
-        ON ss.ss_item_sk = i.i_item_sk
-    JOIN time_dim td
-        ON ss.ss_sold_time_sk = td.t_time_sk
-    JOIN promotion p
-        ON ss.ss_promo_sk = p.p_promo_sk
-    WHERE td.t_shift = 'first'
-      AND ss.ss_list_price > 30
-    GROUP BY ss.ss_item_sk, i.i_brand, i.i_category
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE s.s_state = 'CA'
+      AND d.d_year BETWEEN 2001 AND 2002
+    GROUP BY d.d_year
 ),
-returns_agg AS (
+web_data AS (
     SELECT
-        wr.wr_item_sk,
-        COUNT(*) AS return_cnt,
-        SUM(wr.wr_return_amt) AS total_return_amt,
-        AVG(wr.wr_return_amt) AS avg_return_amt
-    FROM web_returns wr
-    JOIN time_dim td2
-        ON wr.wr_returned_time_sk = td2.t_time_sk
-    WHERE td2.t_shift = 'first'
-      AND wr.wr_return_amt > 100
-    GROUP BY wr.wr_item_sk
+        d.d_year AS year,
+        'web' AS channel,
+        CASE WHEN SUM(ws.ws_net_profit) > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_category,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE ws.ws_ship_customer_sk IN (
+        SELECT ws2.ws_ship_customer_sk
+        FROM web_sales ws2
+        JOIN date_dim d2 ON ws2.ws_ship_date_sk = d2.d_date_sk
+        WHERE d2.d_fy_quarter_seq = 11
+        LIMIT 10
+    )
+      AND d.d_year = 2002
+    GROUP BY d.d_year
 )
 SELECT
-    s.i_brand,
-    s.i_category,
-    s.total_net_profit,
-    COALESCE(r.total_return_amt, 0) AS total_return_amt,
-    COALESCE(r.return_cnt, 0) AS return_cnt,
-    RANK() OVER (ORDER BY s.total_net_profit DESC) AS profit_rank,
-    CASE
-        WHEN COALESCE(r.total_return_amt, 0) > 0 THEN 'HasReturns'
-        ELSE 'NoReturns'
-    END AS return_flag
-FROM sales_agg s
-LEFT JOIN returns_agg r
-    ON s.ss_item_sk = r.wr_item_sk
-WHERE s.total_quantity > 10
-ORDER BY profit_rank
+    year,
+    channel,
+    profit_category,
+    SUM(total_sales) AS total_sales,
+    SUM(total_profit) AS total_profit
+FROM (
+    SELECT * FROM store_data
+    UNION ALL
+    SELECT * FROM web_data
+) AS u
+GROUP BY GROUPING SETS (
+    (year, channel, profit_category),
+    (year, channel),
+    (year),
+    ()
+)
+ORDER BY
+    year ASC NULLS LAST,
+    channel ASC NULLS LAST,
+    profit_category ASC NULLS LAST
 LIMIT 100

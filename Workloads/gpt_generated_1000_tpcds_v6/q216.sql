@@ -1,32 +1,44 @@
-WITH promo_cost AS (
-    SELECT p_promo_sk, MAX(p_cost) AS max_cost
-    FROM promotion
-    GROUP BY p_promo_sk
+WITH filtered_sales AS (
+    SELECT
+        ss.ss_sold_date_sk,
+        ss.ss_item_sk,
+        ss.ss_store_sk,
+        ss.ss_quantity,
+        ss.ss_net_profit,
+        i.i_item_desc,
+        i.i_product_name,
+        d.d_year,
+        s.s_store_name,
+        s.s_city,
+        s.s_state
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE d.d_year = 2001
+      AND regexp_like(i.i_item_desc, '(?i)\\b(ECO|ECONOMY)\\b')
+      AND s.s_store_name LIKE '%Market%'
 )
 SELECT
-    cp.cp_department,
-    ca.ca_state,
-    td.t_hour,
-    COUNT(DISTINCT cs.cs_order_number) AS order_cnt,
-    SUM(cs.cs_net_paid) AS total_net_paid,
-    AVG(cs.cs_sales_price) AS avg_sales_price,
-    promo_cost.max_cost AS max_promo_cost
-FROM catalog_sales cs
-JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
-JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
-JOIN promo_cost ON cs.cs_promo_sk = promo_cost.p_promo_sk
-WHERE td.t_hour BETWEEN 9 AND 17
-  AND cp.cp_department = 'Electronics'
-  AND cs.cs_quantity > 2
-  AND EXISTS (
-        SELECT 1
-        FROM promotion p
-        WHERE p.p_promo_sk = cs.cs_promo_sk
-          AND p.p_discount_active = 'Y'
-          AND p.p_start_date_sk >= 2451080
-          AND p.p_start_date_sk <= 2451100
-    )
-GROUP BY cp.cp_department, ca.ca_state, td.t_hour, promo_cost.max_cost
-ORDER BY total_net_paid DESC
+    CONCAT(s.s_city, ', ', s.s_state) AS city_state,
+    s.s_store_name,
+    d.d_month_seq AS month_seq,
+    SUM(fs.ss_quantity) AS total_quantity,
+    SUM(fs.ss_net_profit) AS total_net_profit,
+    CASE
+        WHEN SUM(fs.ss_net_profit) > 100000 THEN 'High'
+        WHEN SUM(fs.ss_net_profit) > 50000 THEN 'Medium'
+        ELSE 'Low'
+    END AS profit_category,
+    REGEXP_EXTRACT(i.i_product_name, '(\\d{3,})') AS extracted_number
+FROM filtered_sales fs
+JOIN date_dim d ON fs.ss_sold_date_sk = d.d_date_sk
+JOIN store s ON fs.ss_store_sk = s.s_store_sk
+JOIN item i ON fs.ss_item_sk = i.i_item_sk
+GROUP BY
+    CONCAT(s.s_city, ', ', s.s_state),
+    s.s_store_name,
+    d.d_month_seq,
+    i.i_product_name
+ORDER BY total_net_profit DESC
 LIMIT 100

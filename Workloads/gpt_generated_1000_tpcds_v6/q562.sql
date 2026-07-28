@@ -1,69 +1,66 @@
-WITH base AS (
-    SELECT
-        s.s_store_sk AS s_store_sk,
-        s.s_market_manager AS s_market_manager,
-        i.i_manufact AS i_manufact,
-        SUM(cs.cs_net_profit) AS catalog_profit,
-        SUM(ss.ss_net_profit) AS store_profit,
-        SUM(cs.cs_net_profit + ss.ss_net_profit) AS total_profit,
-        COUNT(DISTINCT cs.cs_order_number) AS catalog_orders,
-        COUNT(DISTINCT ss.ss_ticket_number) AS store_tickets,
-        AVG(p.p_cost) AS avg_catalog_promo_cost,
-        AVG(p2.p_cost) AS avg_store_promo_cost,
-        AVG(pa.avg_promo_cost) AS avg_item_promo_cost
-    FROM catalog_sales cs
-    JOIN time_dim td
-        ON cs.cs_sold_time_sk = td.t_time_sk
-    JOIN item i
-        ON cs.cs_item_sk = i.i_item_sk
-    JOIN promotion p
-        ON cs.cs_promo_sk = p.p_promo_sk
-    JOIN call_center cc
-        ON cs.cs_call_center_sk = cc.cc_call_center_sk
-    JOIN ship_mode sm
-        ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN household_demographics hd_bill
-        ON cs.cs_bill_hdemo_sk = hd_bill.hd_demo_sk
-    JOIN household_demographics hd_ship
-        ON cs.cs_ship_hdemo_sk = hd_ship.hd_demo_sk
-    JOIN customer_address ca_bill
-        ON cs.cs_bill_addr_sk = ca_bill.ca_address_sk
-    JOIN customer_address ca_ship
-        ON cs.cs_ship_addr_sk = ca_ship.ca_address_sk
-    JOIN store_sales ss
-        ON ss.ss_sold_time_sk = td.t_time_sk
-    JOIN store s
-        ON ss.ss_store_sk = s.s_store_sk
-    JOIN promotion p2
-        ON ss.ss_promo_sk = p2.p_promo_sk
-    JOIN household_demographics hd_ss
-        ON ss.ss_hdemo_sk = hd_ss.hd_demo_sk
-    JOIN customer_address ca_ss
-        ON ss.ss_addr_sk = ca_ss.ca_address_sk
-    JOIN inventory inv
-        ON inv.inv_item_sk = i.i_item_sk
-    JOIN (
-        SELECT p_item_sk, AVG(p_cost) AS avg_promo_cost
-        FROM promotion
-        GROUP BY p_item_sk
-    ) pa
-        ON i.i_item_sk = pa.p_item_sk
-    WHERE td.t_hour BETWEEN 8 AND 20
-    GROUP BY s.s_store_sk, s.s_market_manager, i.i_manufact
+WITH max_income AS (
+    SELECT max(ib_upper_bound) AS max_ub
+    FROM income_band
 )
 SELECT
-    s_store_sk,
-    s_market_manager,
-    i_manufact,
-    catalog_profit,
-    store_profit,
-    total_profit,
-    catalog_orders,
-    store_tickets,
-    avg_catalog_promo_cost,
-    avg_store_promo_cost,
-    avg_item_promo_cost,
-    RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
-FROM base
-ORDER BY total_profit DESC
+    s.s_store_id,
+    s.s_state,
+    cc.cc_name,
+    COUNT(DISTINCT ss.ss_ticket_number) AS total_sales_transactions,
+    SUM(ss.ss_net_profit) AS total_net_profit,
+    SUM(sr.sr_net_loss) AS total_store_return_loss,
+    SUM(cr.cr_net_loss) AS total_catalog_return_loss,
+    SUM(wr.wr_net_loss) AS total_web_return_loss,
+    CASE
+        WHEN SUM(ss.ss_net_profit) > 0 THEN 'POSITIVE'
+        ELSE 'NON_POSITIVE'
+    END AS profit_flag,
+    (SELECT max_ub FROM max_income) AS max_income_upper_bound
+FROM store s
+JOIN store_sales ss
+    ON ss.ss_store_sk = s.s_store_sk
+JOIN customer c_sales
+    ON ss.ss_customer_sk = c_sales.c_customer_sk
+JOIN customer_demographics cd_sales
+    ON ss.ss_cdemo_sk = cd_sales.cd_demo_sk
+JOIN household_demographics hd_sales
+    ON ss.ss_hdemo_sk = hd_sales.hd_demo_sk
+JOIN customer_address ca_sales
+    ON ss.ss_addr_sk = ca_sales.ca_address_sk
+JOIN promotion p
+    ON ss.ss_promo_sk = p.p_promo_sk
+JOIN store_returns sr
+    ON sr.sr_store_sk = s.s_store_sk
+    AND sr.sr_ticket_number = ss.ss_ticket_number
+JOIN reason r_store_ret
+    ON sr.sr_reason_sk = r_store_ret.r_reason_sk
+JOIN customer c_ret
+    ON sr.sr_customer_sk = c_ret.c_customer_sk
+JOIN customer_demographics cd_ret
+    ON sr.sr_cdemo_sk = cd_ret.cd_demo_sk
+JOIN household_demographics hd_ret
+    ON sr.sr_hdemo_sk = hd_ret.hd_demo_sk
+JOIN customer_address ca_ret
+    ON sr.sr_addr_sk = ca_ret.ca_address_sk
+JOIN catalog_returns cr
+    ON cr.cr_refunded_customer_sk = c_sales.c_customer_sk
+JOIN call_center cc
+    ON cr.cr_call_center_sk = cc.cc_call_center_sk
+JOIN catalog_page cp
+    ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+JOIN reason r_cat_ret
+    ON cr.cr_reason_sk = r_cat_ret.r_reason_sk
+JOIN web_returns wr
+    ON wr.wr_refunded_customer_sk = c_sales.c_customer_sk
+JOIN reason r_web_ret
+    ON wr.wr_reason_sk = r_web_ret.r_reason_sk
+JOIN household_demographics hd_income
+    ON hd_sales.hd_income_band_sk = hd_income.hd_income_band_sk
+JOIN income_band ib
+    ON hd_income.hd_income_band_sk = ib.ib_income_band_sk
+GROUP BY
+    s.s_store_id,
+    s.s_state,
+    cc.cc_name
+ORDER BY total_net_profit DESC
 LIMIT 100

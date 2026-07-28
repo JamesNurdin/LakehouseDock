@@ -1,74 +1,59 @@
-WITH sales_base AS (
+WITH sales_data AS (
     SELECT
-        ss.ss_ticket_number,
-        ss.ss_sold_date_sk,
-        ss.ss_item_sk,
-        ss.ss_customer_sk,
-        ss.ss_store_sk,
-        ss.ss_promo_sk,
-        ss.ss_quantity,
-        ss.ss_ext_sales_price,
-        ss.ss_ext_wholesale_cost,
-        ss.ss_ext_discount_amt,
-        ss.ss_net_profit,
-        d.d_year,
-        d.d_month_seq,
-        p.p_promo_name,
-        p.p_discount_active,
-        ca.ca_state,
-        ca.ca_city,
-        CASE
-            WHEN ss.ss_ext_discount_amt > 0 THEN 'Discounted'
-            ELSE 'Full Price'
-        END AS price_category
-    FROM store_sales ss
-    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
-    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
-    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
-    WHERE d.d_year BETWEEN 2001 AND 2002
-      AND ss.ss_ext_sales_price > 0
-      AND ss.ss_quantity >= 1
-      AND p.p_discount_active = 'Y'
-      AND ca.ca_state IN ('CA', 'TX', 'NY')
-      AND p.p_channel_event <> 'Y'
+        cp.cp_department AS cp_department,
+        td.t_hour AS t_hour,
+        SUM(cs.cs_net_profit) AS total_profit,
+        COUNT(*) AS sales_cnt,
+        RANK() OVER (PARTITION BY cp.cp_department ORDER BY SUM(cs.cs_net_profit) DESC) AS profit_rank
+    FROM catalog_sales cs
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
+    WHERE cp.cp_department = 'DEPARTMENT'
+    GROUP BY cp.cp_department, td.t_hour
+    HAVING SUM(cs.cs_net_profit) > 0
 ),
-returns_check AS (
-    SELECT DISTINCT sr.sr_ticket_number
-    FROM store_returns sr
-    WHERE sr.sr_net_loss > 0
+returns_data AS (
+    SELECT
+        cp.cp_department AS cp_department,
+        td.t_hour AS t_hour,
+        SUM(cr.cr_net_loss) AS total_loss,
+        COUNT(*) AS returns_cnt
+    FROM catalog_returns cr
+    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN time_dim td ON cr.cr_returned_time_sk = td.t_time_sk
+    WHERE EXISTS (
+        SELECT 1
+        FROM catalog_sales cs2
+        WHERE cs2.cs_order_number = cr.cr_order_number
+          AND cs2.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    )
+    GROUP BY cp.cp_department, td.t_hour
 )
 SELECT
-    sb.d_year,
-    sb.d_month_seq,
-    sb.ss_ticket_number,
-    sb.ss_item_sk,
-    sb.ss_quantity,
-    sb.ss_ext_sales_price,
-    sb.price_category,
-    sb.ss_net_profit,
-    cc.cc_name AS call_center_name,
-    inv.inv_quantity_on_hand,
-    sr.sr_return_quantity,
-    sr.sr_net_loss,
-    ROW_NUMBER() OVER (PARTITION BY sb.d_year ORDER BY sb.ss_net_profit DESC) AS profit_rank,
-    AVG(sb.ss_net_profit) OVER (
-        PARTITION BY sb.d_year
-        ORDER BY sb.ss_ticket_number
-        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
-    ) AS avg_net_profit_last3
-FROM sales_base sb
-JOIN call_center cc
-    ON cc.cc_open_date_sk = sb.ss_sold_date_sk
-JOIN inventory inv
-    ON inv.inv_date_sk = sb.ss_sold_date_sk
-LEFT JOIN store_returns sr
-    ON sr.sr_ticket_number = sb.ss_ticket_number
-   AND sr.sr_item_sk = sb.ss_item_sk
-WHERE EXISTS (
-        SELECT 1 FROM returns_check rc WHERE rc.sr_ticket_number = sb.ss_ticket_number
-    )
-  AND inv.inv_quantity_on_hand > 0
-  AND cc.cc_state = 'CA'
-  AND sb.ss_net_profit <> 0
-ORDER BY sb.d_year, profit_rank
+    department,
+    hour,
+    source_type,
+    metric_value,
+    metric_cnt,
+    CASE WHEN source_type = 'sale' THEN metric_value ELSE -metric_value END AS signed_metric,
+    ROW_NUMBER() OVER (PARTITION BY department ORDER BY metric_value DESC) AS dept_metric_rank
+FROM (
+    SELECT
+        cp_department AS department,
+        t_hour AS hour,
+        'sale' AS source_type,
+        total_profit AS metric_value,
+        sales_cnt AS metric_cnt
+    FROM sales_data
+    UNION ALL
+    SELECT
+        cp_department AS department,
+        t_hour AS hour,
+        'return' AS source_type,
+        total_loss AS metric_value,
+        returns_cnt AS metric_cnt
+    FROM returns_data
+) combined
+WHERE metric_value > 100
+ORDER BY department, signed_metric DESC
 LIMIT 100

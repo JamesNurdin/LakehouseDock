@@ -1,48 +1,33 @@
-/*
-Goal: Calculate warehouse‑level return and sales performance by return reason during business hours, 
-filtering to US warehouses on avenues, high‑value returns, and product web pages. The query joins all
-selected tables, applies multiple selective predicates, uses an EXISTS semi‑join, aggregates, 
-filters groups with HAVING, includes a DISTINCT count, and orders the results.
-*/
+WITH date_range AS (
+    SELECT d_date_sk, d_date
+    FROM tpcds.date_dim
+    WHERE d_date BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+)
 SELECT
-    w.w_warehouse_name,
-    r.r_reason_desc,
-    td.t_hour,
-    COUNT(DISTINCT cr.cr_order_number) AS distinct_return_orders,
-    SUM(cr.cr_return_amount)           AS total_return_amount,
-    SUM(cs.cs_ext_sales_price)         AS total_sales_amount,
-    AVG(cs.cs_net_profit)              AS avg_sales_profit,
-    MIN(ws.ws_net_profit)              AS min_web_profit,
-    MAX(ws.ws_net_profit)              AS max_web_profit
-FROM catalog_returns cr
-JOIN catalog_sales cs
-  ON cr.cr_order_number = cs.cs_order_number
- AND cr.cr_item_sk      = cs.cs_item_sk
-JOIN warehouse w
-  ON cr.cr_warehouse_sk = w.w_warehouse_sk
- AND cs.cs_warehouse_sk = w.w_warehouse_sk
-JOIN web_sales ws
-  ON ws.ws_warehouse_sk = w.w_warehouse_sk
-JOIN time_dim td
-  ON cr.cr_returned_time_sk = td.t_time_sk
- AND cs.cs_sold_time_sk    = td.t_time_sk
- AND ws.ws_sold_time_sk    = td.t_time_sk
-JOIN reason r
-  ON cr.cr_reason_sk = r.r_reason_sk
-WHERE w.w_country      = 'United States'
-  AND w.w_street_type = 'Avenue'
-  AND r.r_reason_desc LIKE '%time%'
-  AND td.t_hour BETWEEN 9 AND 17
-  AND cr.cr_return_amount > 100.00
-  AND cs.cs_quantity       > 5
-  AND ws.ws_quantity       > 2
-  AND EXISTS (
-        SELECT 1
-        FROM web_page wp
-        WHERE wp.wp_web_page_sk = ws.ws_web_page_sk
-          AND wp.wp_type = 'Product'
-      )
-GROUP BY w.w_warehouse_name, r.r_reason_desc, td.t_hour
-HAVING SUM(cr.cr_return_amount) > 1000
-ORDER BY total_return_amount DESC
+    i.i_item_id,
+    dr.d_date,
+    'sales'      AS record_type,
+    SUM(ws.ws_quantity)        AS total_quantity,
+    SUM(ws.ws_net_profit)      AS total_amount
+FROM tpcds.web_sales ws
+JOIN date_range dr         ON ws.ws_sold_date_sk = dr.d_date_sk
+JOIN tpcds.item i          ON ws.ws_item_sk = i.i_item_sk
+WHERE i.i_brand_id = 1003001
+GROUP BY i.i_item_id, dr.d_date
+
+UNION ALL
+
+SELECT
+    i.i_item_id,
+    dr.d_date,
+    'returns'    AS record_type,
+    SUM(wr.wr_return_quantity) AS total_quantity,
+    SUM(wr.wr_net_loss)        AS total_amount
+FROM tpcds.web_returns wr
+JOIN date_range dr          ON wr.wr_returned_date_sk = dr.d_date_sk
+JOIN tpcds.item i           ON wr.wr_item_sk = i.i_item_sk
+WHERE i.i_brand_id = 1003001
+GROUP BY i.i_item_id, dr.d_date
+
+ORDER BY total_amount DESC
 LIMIT 100

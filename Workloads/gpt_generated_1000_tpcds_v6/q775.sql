@@ -1,56 +1,60 @@
-WITH sales_agg AS (
-        SELECT
-            ss_sold_date_sk,
-            COUNT(DISTINCT ss_ticket_number) AS tickets_sold,
-            SUM(ss_net_paid)               AS total_net_paid,
-            SUM(ss_net_profit)             AS total_profit,
-            SUM(ss_quantity)               AS total_quantity
-        FROM store_sales
-        GROUP BY ss_sold_date_sk
-    ),
-    returns_agg AS (
-        SELECT
-            sr_returned_date_sk,
-            SUM(sr_return_amt)        AS total_return_amt,
-            AVG(sr_store_credit)      AS avg_store_credit,
-            MAX(sr_return_quantity)   AS max_return_qty
-        FROM store_returns
-        GROUP BY sr_returned_date_sk
-    ),
-    web_returns_agg AS (
-        SELECT
-            wr_returned_date_sk,
-            SUM(wr_return_amt) AS total_web_return_amt
-        FROM web_returns
-        GROUP BY wr_returned_date_sk
-    )
+WITH promo_set AS (
+    SELECT p_promo_sk FROM promotion WHERE p_discount_active = 'Y'
+    UNION
+    SELECT p_promo_sk FROM promotion WHERE p_channel_tv = 'Y'
+)
 SELECT
-    d.d_year,
-    d.d_month_seq,
-    cp.cp_catalog_page_number,
-    s.tickets_sold,
-    s.total_net_paid,
-    r.total_return_amt,
-    r.avg_store_credit,
-    r.max_return_qty,
-    w.total_web_return_amt,
-    s.total_profit - COALESCE(r.total_return_amt, 0) - COALESCE(w.total_web_return_amt, 0) AS net_profit_after_all_returns
-FROM date_dim d
-JOIN sales_agg s
-    ON s.ss_sold_date_sk = d.d_date_sk
-LEFT JOIN returns_agg r
-    ON r.sr_returned_date_sk = d.d_date_sk
-LEFT JOIN web_returns_agg w
-    ON w.wr_returned_date_sk = d.d_date_sk
-JOIN catalog_page cp
-    ON cp.cp_end_date_sk = d.d_date_sk
+    s.s_store_id,
+    s.s_store_name,
+    i.i_category,
+    t.t_sub_shift,
+    COUNT(DISTINCT cs.cs_order_number) AS orders_count,
+    SUM(cs.cs_net_paid) AS total_sales,
+    SUM(sr.sr_return_amt) AS total_returns,
+    SUM(CASE WHEN r.r_reason_desc = 'Damaged' THEN sr.sr_return_amt ELSE 0 END) AS damaged_returns,
+    AVG(cs.cs_quantity) AS avg_quantity,
+    MIN(cs.cs_sales_price) AS min_sales_price,
+    MAX(cs.cs_sales_price) AS max_sales_price,
+    (SELECT MAX(p_cost) FROM promotion WHERE p_discount_active = 'Y') AS max_active_promo_cost
+FROM
+    store s
+    JOIN store_sales ss
+        ON ss.ss_store_sk = s.s_store_sk
+    JOIN time_dim t
+        ON ss.ss_sold_time_sk = t.t_time_sk
+    JOIN item i
+        ON ss.ss_item_sk = i.i_item_sk
+    JOIN customer_demographics cd
+        ON ss.ss_cdemo_sk = cd.cd_demo_sk
+    JOIN promo_set ps
+        ON ss.ss_promo_sk = ps.p_promo_sk
+    LEFT JOIN store_returns sr
+        ON sr.sr_ticket_number = ss.ss_ticket_number
+        AND sr.sr_return_time_sk = t.t_time_sk
+        AND sr.sr_item_sk = ss.ss_item_sk
+    LEFT JOIN reason r
+        ON sr.sr_reason_sk = r.r_reason_sk
+    JOIN catalog_sales cs
+        ON cs.cs_item_sk = i.i_item_sk
+        AND cs.cs_sold_time_sk = t.t_time_sk
+    JOIN catalog_page cp
+        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN catalog_returns cr
+        ON cr.cr_order_number = cs.cs_order_number
+        AND cr.cr_item_sk = i.i_item_sk
+        AND cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+        AND cr.cr_reason_sk = r.r_reason_sk
+        AND cr.cr_returned_time_sk = t.t_time_sk
 WHERE
-    d.d_year = 2002
-    AND d.d_quarter_seq = 14
-    AND cp.cp_catalog_page_number IN (12, 16)
-    AND s.total_quantity > 1000
-    AND r.avg_store_credit > 20.00
-ORDER BY
-    d.d_year,
-    d.d_month_seq,
-    s.total_net_paid DESC
+    i.i_manufact_id IN (460, 117)
+    AND i.i_color = 'Red'
+    AND s.s_state = 'CA'
+    AND t.t_sub_shift = 'morning'
+    AND cp.cp_type = 'A'
+GROUP BY
+    s.s_store_id,
+    s.s_store_name,
+    i.i_category,
+    t.t_sub_shift
+ORDER BY total_sales DESC
+LIMIT 100

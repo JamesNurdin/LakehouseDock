@@ -1,31 +1,70 @@
-WITH page_stats AS (
+WITH
+  overall_avg AS (
+    SELECT AVG(cs_net_profit) AS avg_profit
+    FROM catalog_sales
+  ),
+
+  bill_sales AS (
     SELECT
-        wp.wp_customer_sk,
-        REGEXP_EXTRACT(wp.wp_url, 'https?://([^/]+)/', 1) AS domain,
-        COUNT(DISTINCT wp.wp_web_page_id) AS distinct_pages,
-        SUM(wp.wp_char_count) AS total_char_count,
-        MAX(wp.wp_char_count) AS max_char_count
-    FROM web_page wp
-    WHERE wp.wp_type LIKE 'article%'
-      AND REGEXP_LIKE(wp.wp_url, '^https?://.*sports.*$')
-    GROUP BY wp.wp_customer_sk, REGEXP_EXTRACT(wp.wp_url, 'https?://([^/]+)/', 1)
-)
+      promotion.p_promo_id,
+      'Bill' AS link_type,
+      SUM(catalog_sales.cs_net_profit) AS total_profit,
+      CASE WHEN SUM(catalog_sales.cs_net_profit) > 10000 THEN 'High' ELSE 'Low' END AS profit_category,
+      COUNT(DISTINCT catalog_sales.cs_order_number) AS distinct_orders,
+      overall_avg.avg_profit
+    FROM catalog_sales
+    JOIN promotion
+      ON catalog_sales.cs_promo_sk = promotion.p_promo_sk
+    JOIN household_demographics
+      ON catalog_sales.cs_bill_hdemo_sk = household_demographics.hd_demo_sk
+    CROSS JOIN overall_avg
+    WHERE promotion.p_channel_catalog = 'Y'
+      AND catalog_sales.cs_ext_ship_cost > 0
+      AND household_demographics.hd_vehicle_count >= 0
+      AND NOT EXISTS (
+        SELECT 1
+        FROM promotion p2
+        WHERE p2.p_promo_sk = catalog_sales.cs_promo_sk
+          AND p2.p_discount_active = 'Y'
+      )
+    GROUP BY promotion.p_promo_id, overall_avg.avg_profit
+  ),
+
+  ship_sales AS (
+    SELECT
+      promotion.p_promo_id,
+      'Ship' AS link_type,
+      SUM(catalog_sales.cs_net_profit) AS total_profit,
+      CASE WHEN SUM(catalog_sales.cs_net_profit) > 10000 THEN 'High' ELSE 'Low' END AS profit_category,
+      COUNT(DISTINCT catalog_sales.cs_order_number) AS distinct_orders,
+      overall_avg.avg_profit
+    FROM catalog_sales
+    JOIN promotion
+      ON catalog_sales.cs_promo_sk = promotion.p_promo_sk
+    JOIN household_demographics
+      ON catalog_sales.cs_ship_hdemo_sk = household_demographics.hd_demo_sk
+    CROSS JOIN overall_avg
+    WHERE promotion.p_channel_event = 'Y'
+      AND catalog_sales.cs_ext_ship_cost = 0
+      AND household_demographics.hd_dep_count IN (
+        SELECT hd_dep_count
+        FROM household_demographics
+        WHERE hd_vehicle_count = 0
+      )
+    GROUP BY promotion.p_promo_id, overall_avg.avg_profit
+  )
+
 SELECT
-    c.c_customer_id,
-    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
-    ps.distinct_pages,
-    ps.total_char_count,
-    ps.max_char_count,
-    ps.domain,
-    (
-        SELECT COUNT(*)
-        FROM web_page wp2
-        WHERE wp2.wp_customer_sk = c.c_customer_sk
-          AND wp2.wp_char_count > ps.max_char_count
-    ) AS higher_char_pages
-FROM customer c
-JOIN page_stats ps
-    ON ps.wp_customer_sk = c.c_customer_sk
-WHERE c.c_preferred_cust_flag = 'Y'
-ORDER BY ps.total_char_count DESC
+  combined.p_promo_id,
+  combined.link_type,
+  combined.total_profit,
+  combined.profit_category,
+  combined.distinct_orders,
+  combined.avg_profit
+FROM (
+  SELECT p_promo_id, link_type, total_profit, profit_category, distinct_orders, avg_profit FROM bill_sales
+  UNION ALL
+  SELECT p_promo_id, link_type, total_profit, profit_category, distinct_orders, avg_profit FROM ship_sales
+) AS combined
+ORDER BY combined.total_profit DESC
 LIMIT 100

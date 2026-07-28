@@ -1,35 +1,40 @@
-WITH filtered_returns AS (
-    SELECT *
-    FROM web_returns wr
-    WHERE wr.wr_returning_addr_sk IN (1581503, 541063)
-      AND wr.wr_reversed_charge > 100
-      AND EXISTS (
-          SELECT 1
-          FROM web_returns wr2
-          WHERE wr2.wr_returning_addr_sk = wr.wr_returning_addr_sk
-            AND wr2.wr_return_amt > 50
-      )
+WITH filtered_sales AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        ws.ws_quantity,
+        d.d_year,
+        d.d_fy_week_seq,
+        sm.sm_type,
+        sm.sm_carrier,
+        wsite.web_name,
+        wsite.web_class
+    FROM web_sales ws
+    JOIN date_dim d
+      ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN ship_mode sm
+      ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN web_site wsite
+      ON ws.ws_web_site_sk = wsite.web_site_sk
+    WHERE d.d_year = 2002
+      AND d.d_fy_week_seq BETWEEN 10 AND 20
+      AND regexp_like(sm.sm_type, '^AIR')
+      AND wsite.web_name LIKE '%Shop%'
 )
 SELECT
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    hd.hd_buy_potential,
-    SUM(fr.wr_return_amt) AS total_return_amount,
-    AVG(fr.wr_return_tax) AS avg_return_tax,
-    COUNT(DISTINCT fr.wr_order_number) AS distinct_orders,
-    MAX(fr.wr_return_quantity) AS max_quantity,
-    (
-        SELECT MAX(ib2.ib_upper_bound)
-        FROM income_band ib2
-        WHERE ib2.ib_lower_bound = ib.ib_lower_bound
-    ) AS max_upper_for_lower
-FROM filtered_returns fr
-JOIN household_demographics hd
-    ON fr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-JOIN income_band ib
-    ON hd.hd_income_band_sk = ib.ib_income_band_sk
-WHERE hd.hd_dep_count <= 3
-  AND ib.ib_upper_bound = 120000
-GROUP BY ib.ib_lower_bound, ib.ib_upper_bound, hd.hd_buy_potential
-ORDER BY total_return_amount DESC
+    sm_type,
+    sm_carrier,
+    substring(web_class, 1, 3) AS class_prefix,
+    regexp_extract(web_name, '([A-Za-z]+)') AS first_word,
+    COUNT(DISTINCT ws_order_number) AS orders,
+    SUM(ws_quantity) AS total_quantity,
+    SUM(ws_net_profit) AS total_profit,
+    any_value(concat(cast(ws_order_number AS varchar), '-', sm_type)) AS sample_label
+FROM filtered_sales
+GROUP BY
+    sm_type,
+    sm_carrier,
+    substring(web_class, 1, 3),
+    regexp_extract(web_name, '([A-Za-z]+)')
+ORDER BY total_profit DESC
 LIMIT 100

@@ -1,37 +1,61 @@
-WITH warehouse_avg AS (
-   SELECT w.w_warehouse_sk,
-          avg(cs.cs_net_paid) AS avg_net_paid
-   FROM catalog_sales cs
-   JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
-   GROUP BY w.w_warehouse_sk
+WITH filtered AS (
+    SELECT
+        sr.sr_customer_sk,
+        sr.sr_return_amt,
+        sr.sr_return_ship_cost,
+        sr.sr_return_quantity,
+        hd.hd_vehicle_count,
+        hd.hd_dep_count,
+        hd.hd_buy_potential,
+        ca.ca_state,
+        ca.ca_city,
+        ca.ca_suite_number,
+        ca.ca_zip
+    FROM store_returns sr
+    JOIN household_demographics hd
+        ON sr.sr_hdemo_sk = hd.hd_demo_sk
+    JOIN customer_address ca
+        ON sr.sr_addr_sk = ca.ca_address_sk
+    WHERE sr.sr_return_ship_cost > 0
+      AND hd.hd_vehicle_count >= 1
+      AND ca.ca_suite_number LIKE 'Suite %'
+      AND hd.hd_buy_potential = '0-500'
+),
+state_metrics AS (
+    SELECT
+        ca_state AS region,
+        'state' AS region_type,
+        COUNT(*) AS returns_cnt,
+        SUM(sr_return_amt) AS total_return_amt,
+        AVG(sr_return_amt) AS avg_return_amt,
+        ROW_NUMBER() OVER (ORDER BY AVG(sr_return_amt) DESC) AS rank_num
+    FROM filtered
+    GROUP BY ca_state
+),
+city_metrics AS (
+    SELECT
+        ca_city AS region,
+        'city' AS region_type,
+        COUNT(*) AS returns_cnt,
+        SUM(sr_return_amt) AS total_return_amt,
+        AVG(sr_return_amt) AS avg_return_amt,
+        ROW_NUMBER() OVER (ORDER BY AVG(sr_return_amt) DESC) AS rank_num
+    FROM filtered
+    GROUP BY ca_city
 )
-SELECT
-   concat(cp.cp_department, '-', cp.cp_type) AS dept_type,
-   w.w_warehouse_name,
-   SUM(cs.cs_net_paid) AS total_net_paid,
-   COUNT(*) AS order_cnt,
-   AVG(cs.cs_net_paid) AS avg_net_paid,
-   (SUM(cs.cs_net_paid) / COUNT(*)) - wa.avg_net_paid AS diff_from_warehouse_avg
-FROM catalog_sales cs
-JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
-JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
-JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
-JOIN warehouse_avg wa ON wa.w_warehouse_sk = w.w_warehouse_sk
-WHERE
-   regexp_like(cp.cp_description, '(?i)new|sale')
-   AND ca.ca_city LIKE 'San%'
-   AND d.d_fy_year = 1903
-   AND w.w_warehouse_name IN (
-       SELECT w2.w_warehouse_name
-       FROM warehouse w2
-       WHERE w2.w_city LIKE 'New%'
-   )
-GROUP BY
-   concat(cp.cp_department, '-', cp.cp_type),
-   w.w_warehouse_name,
-   wa.avg_net_paid
-HAVING
-   SUM(cs.cs_net_paid) > 10000
-ORDER BY total_net_paid DESC
-LIMIT 10
+SELECT DISTINCT
+    region,
+    region_type,
+    returns_cnt,
+    total_return_amt,
+    avg_return_amt,
+    rank_num
+FROM (
+    SELECT region, region_type, returns_cnt, total_return_amt, avg_return_amt, rank_num
+    FROM state_metrics
+    UNION ALL
+    SELECT region, region_type, returns_cnt, total_return_amt, avg_return_amt, rank_num
+    FROM city_metrics
+) combined
+WHERE returns_cnt > 5
+ORDER BY rank_num, region_type, region

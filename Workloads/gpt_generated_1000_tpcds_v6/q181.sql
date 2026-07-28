@@ -1,59 +1,32 @@
-WITH
-    /* Join catalog_returns to its dimension tables */
-    cr_join AS (
-        SELECT
-            cr.cr_reason_sk,
-            cp.cp_department,
-            cr.cr_return_amount,
-            cr.cr_net_loss,
-            cr.cr_order_number,
-            r.r_reason_desc,
-            sm.sm_type,
-            ca1.ca_state,
-            hd1.hd_vehicle_count
-        FROM catalog_returns cr
-        JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-        JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-        JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-        JOIN customer_address ca1 ON cr.cr_refunded_addr_sk = ca1.ca_address_sk
-        JOIN household_demographics hd1 ON cr.cr_refunded_hdemo_sk = hd1.hd_demo_sk
-        WHERE r.r_reason_desc LIKE 'Did not %'
-          AND sm.sm_type = 'AIR'
-          AND cp.cp_department = 'Electronics'
-          AND hd1.hd_vehicle_count >= 0
-          AND cr.cr_return_amount > 100
-    ),
-    /* Join web_returns to its dimension tables */
-    wr_join AS (
-        SELECT
-            wr.wr_reason_sk,
-            r.r_reason_desc,
-            wr.wr_return_amt_inc_tax,
-            wr.wr_net_loss,
-            wr.wr_order_number,
-            ca2.ca_state AS wr_state,
-            hd2.hd_vehicle_count AS wr_vehicle_count
-        FROM web_returns wr
-        JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
-        JOIN customer_address ca2 ON wr.wr_refunded_addr_sk = ca2.ca_address_sk
-        JOIN household_demographics hd2 ON wr.wr_refunded_hdemo_sk = hd2.hd_demo_sk
-        WHERE r.r_reason_desc LIKE 'Did not %'
-          AND hd2.hd_vehicle_count >= 0
-          AND wr.wr_return_amt_inc_tax > 100
-    )
-SELECT
-    r.r_reason_desc,
-    cr.cp_department,
-    SUM(cr.cr_net_loss) AS total_catalog_net_loss,
-    SUM(wr.wr_net_loss) AS total_web_net_loss,
-    SUM(cr.cr_net_loss) + SUM(wr.wr_net_loss) AS total_net_loss,
-    COUNT(DISTINCT cr.cr_order_number) AS catalog_returns_cnt,
-    COUNT(DISTINCT wr.wr_order_number) AS web_returns_cnt,
-    ROW_NUMBER() OVER (PARTITION BY r.r_reason_desc ORDER BY SUM(cr.cr_net_loss) + SUM(wr.wr_net_loss) DESC) AS rn
-FROM cr_join cr
-JOIN wr_join wr ON cr.cr_reason_sk = wr.wr_reason_sk
-JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-GROUP BY r.r_reason_desc, cr.cp_department
-HAVING SUM(cr.cr_net_loss) + SUM(wr.wr_net_loss) > 500
-ORDER BY total_net_loss DESC
+WITH filtered_sales AS (
+    SELECT
+        ca.ca_city,
+        ca.ca_state,
+        wp.wp_url,
+        ws.ws_net_profit
+    FROM web_sales ws
+    JOIN customer_address ca ON ws.ws_bill_addr_sk = ca.ca_address_sk
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE d.d_year = 2000
+      AND regexp_like(ca.ca_city, '(?i)field')
+      AND wp.wp_type LIKE 'p%'
+      AND i.i_category = 'Electronics'
+),
+agg AS (
+    SELECT
+        concat(ca_city, ', ', ca_state) AS city_state,
+        regexp_extract(wp_url, '^https?://([^/]+)/', 1) AS domain,
+        sum(ws_net_profit) AS total_profit
+    FROM filtered_sales
+    GROUP BY 1, 2
+)
+SELECT DISTINCT
+    city_state,
+    domain,
+    total_profit,
+    rank() OVER (ORDER BY total_profit DESC) AS profit_rank
+FROM agg
+ORDER BY total_profit DESC
 LIMIT 100

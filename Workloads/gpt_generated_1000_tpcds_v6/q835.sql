@@ -1,57 +1,103 @@
-WITH sales_agg AS ( 
-    SELECT 
-        cc.cc_call_center_sk,
-        cc.cc_company_name,
-        cp.cp_department,
-        hd.hd_demo_sk,
-        SUM(cs.cs_net_profit) AS total_profit,
-        COUNT(*) AS sales_cnt,
-        AVG(cs.cs_net_paid) AS avg_paid,
-        SUM(cs.cs_quantity) AS total_quantity
-    FROM catalog_sales cs
-    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
-    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-    WHERE cc.cc_hours = '8AM-4PM'
-      AND cc.cc_company_name IN ('able', 'pri')
-      AND cp.cp_department = 'Electronics'
-      AND cs.cs_sold_date_sk BETWEEN 2450000 AND 2451000
+WITH base AS (
+    SELECT
+        ss.ss_customer_sk,
+        ss.ss_ticket_number,
+        i.i_item_sk,
+        i.i_category,
+        i.i_current_price,
+        i.i_brand,
+        ca.ca_state,
+        ca.ca_country,
+        hd.hd_vehicle_count,
+        ib.ib_upper_bound,
+        p_ss.p_discount_active,
+        sm.sm_code,
+        w.w_warehouse_name,
+        w.w_warehouse_sq_ft,
+        ss.ss_net_paid AS store_net_paid,
+        ss.ss_net_profit AS store_net_profit,
+        sr.sr_return_amt AS store_return_amt,
+        ws.ws_net_paid AS web_net_paid,
+        ws.ws_net_profit AS web_net_profit,
+        wp.wp_type,
+        web.web_name,
+        wr.wr_return_amt AS web_return_amt,
+        ws.ws_sold_date_sk
+    FROM store_sales ss
+    JOIN item i
+        ON ss.ss_item_sk = i.i_item_sk
+    JOIN customer_address ca
+        ON ss.ss_addr_sk = ca.ca_address_sk
+    JOIN household_demographics hd
+        ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib
+        ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN promotion p_ss
+        ON ss.ss_promo_sk = p_ss.p_promo_sk
+    JOIN store_returns sr
+        ON sr.sr_ticket_number = ss.ss_ticket_number
+        AND sr.sr_item_sk = ss.ss_item_sk
+    JOIN inventory inv
+        ON inv.inv_item_sk = i.i_item_sk
+    JOIN warehouse w
+        ON inv.inv_warehouse_sk = w.w_warehouse_sk
+    JOIN web_sales ws
+        ON ws.ws_item_sk = i.i_item_sk
+    JOIN promotion p_ws
+        ON ws.ws_promo_sk = p_ws.p_promo_sk
+    JOIN ship_mode sm
+        ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN web_page wp
+        ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN web_site web
+        ON ws.ws_web_site_sk = web.web_site_sk
+    JOIN warehouse w_ws
+        ON ws.ws_warehouse_sk = w_ws.w_warehouse_sk
+    JOIN web_returns wr
+        ON wr.wr_order_number = ws.ws_order_number
+        AND wr.wr_item_sk = i.i_item_sk
+    WHERE i.i_current_price > 100
+      AND ca.ca_state = 'CA'
       AND hd.hd_vehicle_count >= 1
-      AND cs.cs_quantity > 0
-    GROUP BY cc.cc_call_center_sk, cc.cc_company_name, cp.cp_department, hd.hd_demo_sk
+      AND ib.ib_upper_bound = 130000
+      AND sm.sm_code = 'AIR'
+      AND ws.ws_sold_date_sk BETWEEN 2451545 AND 2451910
+      AND p_ss.p_discount_active = 'Y'
+      AND w.w_warehouse_sq_ft > 100000
+      AND i.i_item_sk IN (SELECT inv_item_sk FROM inventory WHERE inv_quantity_on_hand > 500)
 ),
-returns_agg AS ( 
-    SELECT 
-        wr.wr_refunded_hdemo_sk,
-        r.r_reason_desc,
-        wp.wp_autogen_flag,
-        COUNT(*) AS return_cnt,
-        SUM(wr.wr_return_amt) AS total_return_amt
-    FROM web_returns wr
-    JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
-    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    JOIN household_demographics hd ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-    WHERE r.r_reason_desc LIKE '%color%'
-      AND wp.wp_autogen_flag = 'N'
-      AND wp.wp_image_count >= 4
-      AND wr.wr_return_quantity > 0
-      AND wr.wr_return_amt > 0
-      AND wr.wr_returned_date_sk BETWEEN 2450000 AND 2452000
-    GROUP BY wr.wr_refunded_hdemo_sk, r.r_reason_desc, wp.wp_autogen_flag
+aggregated AS (
+    SELECT
+        i_category,
+        ca_state,
+        sm_code,
+        w_warehouse_name,
+        COUNT(DISTINCT ss_customer_sk) AS distinct_customers,
+        SUM(store_net_paid) AS total_store_sales,
+        SUM(web_net_paid) AS total_web_sales,
+        SUM(store_return_amt) AS total_store_returns,
+        SUM(web_return_amt) AS total_web_returns,
+        AVG(i_current_price) AS avg_item_price,
+        MIN(store_net_paid) AS min_store_sale,
+        MAX(web_net_paid) AS max_web_sale
+    FROM base
+    GROUP BY i_category, ca_state, sm_code, w_warehouse_name
 )
-SELECT 
-    s.cc_company_name,
-    s.cp_department,
-    s.total_profit,
-    s.sales_cnt,
-    COALESCE(r.return_cnt, 0) AS return_cnt,
-    COALESCE(r.total_return_amt, 0) AS total_return_amt,
-    CASE WHEN s.total_profit > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_flag,
-    RANK() OVER (ORDER BY s.total_profit DESC) AS profit_rank,
-    (SELECT AVG(total_profit) FROM sales_agg) AS avg_profit_all_cc
-FROM sales_agg s
-LEFT JOIN returns_agg r ON s.hd_demo_sk = r.wr_refunded_hdemo_sk
-WHERE s.total_quantity > 10
-  AND s.total_profit IS NOT NULL
-ORDER BY profit_rank
+SELECT
+    a.i_category,
+    a.ca_state,
+    a.sm_code,
+    a.w_warehouse_name,
+    a.distinct_customers,
+    a.total_store_sales,
+    a.total_web_sales,
+    a.total_store_returns,
+    a.total_web_returns,
+    a.avg_item_price,
+    a.min_store_sale,
+    a.max_web_sale,
+    RANK() OVER (ORDER BY a.total_store_sales DESC) AS sales_rank,
+    SUM(a.total_store_sales) OVER (PARTITION BY a.ca_state) AS state_total_store_sales
+FROM aggregated a
+ORDER BY a.total_store_sales DESC
 LIMIT 100

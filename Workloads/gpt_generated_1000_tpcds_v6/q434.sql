@@ -1,35 +1,64 @@
-WITH high_profit_sales AS (
-    SELECT
-        c.c_customer_id AS customer_id,
-        d.d_date AS sale_date,
-        p.p_promo_name AS promo_name,
-        ss.ss_net_profit AS net_profit
-    FROM tpcds.store_sales ss
-    INNER JOIN tpcds.date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
-    INNER JOIN tpcds.customer c ON ss.ss_customer_sk = c.c_customer_sk
-    INNER JOIN tpcds.promotion p ON ss.ss_promo_sk = p.p_promo_sk
-    WHERE d.d_year = 2002
-      AND p.p_channel_demo = 'N'
-      AND ss.ss_net_profit > 0
+WITH filtered_returns AS (
+   SELECT
+       wr.wr_returned_date_sk,
+       wr.wr_refunded_hdemo_sk,
+       wr.wr_returning_hdemo_sk,
+       wr.wr_reason_sk,
+       wr.wr_return_amt_inc_tax,
+       wr.wr_return_tax,
+       wr.wr_fee,
+       wr.wr_net_loss,
+       wr.wr_return_quantity
+   FROM web_returns wr
+   WHERE wr.wr_return_amt_inc_tax > 200
+     AND wr.wr_return_quantity >= 1
+     AND wr.wr_fee < 20
+     AND wr.wr_return_tax BETWEEN 5 AND 50
+     AND wr.wr_net_loss > 0
 ),
-birthday_sales AS (
-    SELECT
-        c.c_customer_id AS customer_id,
-        d.d_date AS sale_date,
-        p.p_promo_name AS promo_name,
-        ss.ss_net_profit AS net_profit
-    FROM tpcds.store_sales ss
-    INNER JOIN tpcds.date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
-    INNER JOIN tpcds.customer c ON ss.ss_customer_sk = c.c_customer_sk
-    INNER JOIN tpcds.promotion p ON ss.ss_promo_sk = p.p_promo_sk
-    WHERE c.c_birth_month = 12
-      AND c.c_birth_day = 27
-      AND ss.ss_coupon_amt > 0
+agg AS (
+   SELECT
+       d.d_year,
+       d.d_month_seq,
+       hd_refunded.hd_buy_potential,
+       r.r_reason_desc,
+       SUM(fr.wr_return_amt_inc_tax) AS total_return_inc_tax,
+       AVG(fr.wr_return_tax) AS avg_return_tax,
+       COUNT(*) AS return_count,
+       MIN(fr.wr_return_quantity) AS min_quantity,
+       MAX(fr.wr_return_quantity) AS max_quantity
+   FROM filtered_returns fr
+   JOIN date_dim d
+     ON fr.wr_returned_date_sk = d.d_date_sk
+    AND d.d_moy = 11
+    AND d.d_current_year = 'Y'
+   JOIN household_demographics hd_refunded
+     ON fr.wr_refunded_hdemo_sk = hd_refunded.hd_demo_sk
+    AND hd_refunded.hd_dep_count <= 2
+   JOIN household_demographics hd_returning
+     ON fr.wr_returning_hdemo_sk = hd_returning.hd_demo_sk
+    AND hd_returning.hd_vehicle_count >= 1
+   JOIN reason r
+     ON fr.wr_reason_sk = r.r_reason_sk
+    AND r.r_reason_desc LIKE '%damaged%'
+   GROUP BY
+       d.d_year,
+       d.d_month_seq,
+       hd_refunded.hd_buy_potential,
+       r.r_reason_desc
 )
-SELECT customer_id, sale_date, promo_name, net_profit
-FROM high_profit_sales
-UNION ALL
-SELECT customer_id, sale_date, promo_name, net_profit
-FROM birthday_sales
-ORDER BY net_profit DESC, sale_date ASC
+SELECT
+   a.d_year,
+   a.d_month_seq,
+   a.hd_buy_potential,
+   a.r_reason_desc,
+   a.total_return_inc_tax,
+   a.avg_return_tax,
+   a.return_count,
+   a.min_quantity,
+   a.max_quantity,
+   SUM(a.total_return_inc_tax) OVER (PARTITION BY a.d_year) AS yearly_total_return_inc_tax,
+   ROW_NUMBER() OVER (PARTITION BY a.d_year ORDER BY a.total_return_inc_tax DESC) AS rank_within_year
+FROM agg a
+ORDER BY a.total_return_inc_tax DESC
 LIMIT 100

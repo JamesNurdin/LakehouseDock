@@ -1,39 +1,18 @@
-WITH closed_by_year AS (
-    SELECT
-        s.s_state AS state,
-        d.d_year AS year,
-        COUNT(*) AS store_cnt,
-        AVG(s.s_tax_percentage) AS avg_tax,
-        'YearRange' AS source
-    FROM store s
-    JOIN date_dim d ON s.s_closed_date_sk = d.d_date_sk
-    WHERE d.d_year BETWEEN 2000 AND 2005
-    GROUP BY s.s_state, d.d_year
-),
-closed_on_weekend AS (
-    SELECT
-        s.s_state AS state,
-        d.d_year AS year,
-        COUNT(*) AS store_cnt,
-        AVG(s.s_tax_percentage) AS avg_tax,
-        'Weekend' AS source
-    FROM store s
-    JOIN date_dim d ON s.s_closed_date_sk = d.d_date_sk
-    WHERE d.d_weekend = 'Y'
-    GROUP BY s.s_state, d.d_year
-)
-SELECT state,
-       year,
-       store_cnt,
-       avg_tax,
-       source
-FROM closed_by_year
-UNION ALL
-SELECT state,
-       year,
-       store_cnt,
-       avg_tax,
-       source
-FROM closed_on_weekend
-ORDER BY state, year, source
+SELECT
+    CONCAT(SUBSTRING(ws.web_name, 1, 5), '-', w.w_warehouse_name) AS site_warehouse_label,
+    SUM(ws_sales.ws_net_profit) AS total_profit,
+    COUNT(*) AS order_count,
+    AVG(ws_sales.ws_net_profit) AS avg_profit
+FROM tpcds.web_sales ws_sales
+JOIN tpcds.date_dim d
+  ON ws_sales.ws_sold_date_sk = d.d_date_sk
+JOIN tpcds.web_site ws
+  ON ws_sales.ws_web_site_sk = ws.web_site_sk
+JOIN tpcds.warehouse w
+  ON ws_sales.ws_warehouse_sk = w.w_warehouse_sk
+WHERE d.d_year = 2022
+  AND regexp_like(ws.web_name, '^.*[0-9]{2}.*$')
+  AND ws.web_name LIKE '%Market%'
+GROUP BY CONCAT(SUBSTRING(ws.web_name, 1, 5), '-', w.w_warehouse_name)
+ORDER BY total_profit DESC
 LIMIT 100

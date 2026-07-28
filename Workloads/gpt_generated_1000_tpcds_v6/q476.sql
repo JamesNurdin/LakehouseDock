@@ -1,30 +1,71 @@
-WITH usps_warehouse_profit AS (
+WITH catalog_data AS (
     SELECT
-        w.w_city AS location,
-        'USPS' AS source_type,
-        SUM(ws.ws_net_profit) AS total_profit
-    FROM web_sales ws
-    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
-    WHERE sm.sm_carrier = 'USPS'
-      AND sm.sm_contract = 'Ek'
-    GROUP BY w.w_city
+        'catalog' AS source,
+        date_dim.d_year,
+        item.i_category,
+        SUM(catalog_sales.cs_ext_sales_price) AS total_sales,
+        SUM(catalog_sales.cs_net_profit) AS total_profit,
+        CASE WHEN SUM(catalog_sales.cs_net_profit) > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_flag,
+        (SELECT avg(i2.i_current_price)
+         FROM item i2
+         WHERE i2.i_category = item.i_category) AS avg_price_category
+    FROM catalog_sales
+    JOIN date_dim ON catalog_sales.cs_sold_date_sk = date_dim.d_date_sk
+    JOIN item ON catalog_sales.cs_item_sk = item.i_item_sk
+    JOIN customer ON catalog_sales.cs_bill_customer_sk = customer.c_customer_sk
+    WHERE date_dim.d_date BETWEEN DATE '2001-01-01' AND DATE '2001-12-31'
+      AND item.i_category = 'Sports'
+      AND EXISTS (
+          SELECT 1
+          FROM customer_demographics cd
+          WHERE cd.cd_demo_sk = customer.c_current_cdemo_sk
+            AND cd.cd_gender = 'F'
+      )
+    GROUP BY date_dim.d_year, item.i_category
 ),
-web_site_profit AS (
+web_data AS (
     SELECT
-        ws_site.web_name AS location,
-        'WebSite' AS source_type,
-        SUM(ws.ws_net_profit) AS total_profit
-    FROM web_sales ws
-    JOIN web_site ws_site ON ws.ws_web_site_sk = ws_site.web_site_sk
-    WHERE ws_site.web_mkt_class LIKE '%Broad%'
-      AND ws_site.web_class = 'Unknown'
-    GROUP BY ws_site.web_name
+        'web' AS source,
+        date_dim.d_year,
+        item.i_category,
+        SUM(web_sales.ws_ext_sales_price) AS total_sales,
+        SUM(web_sales.ws_net_profit) AS total_profit,
+        CASE WHEN SUM(web_sales.ws_net_profit) > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_flag,
+        (SELECT avg(i2.i_current_price)
+         FROM item i2
+         WHERE i2.i_category = item.i_category) AS avg_price_category
+    FROM web_sales
+    JOIN date_dim ON web_sales.ws_sold_date_sk = date_dim.d_date_sk
+    JOIN item ON web_sales.ws_item_sk = item.i_item_sk
+    JOIN customer ON web_sales.ws_bill_customer_sk = customer.c_customer_sk
+    WHERE date_dim.d_date BETWEEN DATE '2001-01-01' AND DATE '2001-12-31'
+      AND item.i_category = 'Sports'
+      AND EXISTS (
+          SELECT 1
+          FROM customer_demographics cd
+          WHERE cd.cd_demo_sk = customer.c_current_cdemo_sk
+            AND cd.cd_gender = 'F'
+      )
+    GROUP BY date_dim.d_year, item.i_category
 )
-SELECT location, source_type, total_profit
-FROM usps_warehouse_profit
+SELECT
+    source,
+    d_year,
+    i_category,
+    total_sales,
+    total_profit,
+    profit_flag,
+    avg_price_category
+FROM catalog_data
 UNION ALL
-SELECT location, source_type, total_profit
-FROM web_site_profit
-ORDER BY total_profit DESC
+SELECT
+    source,
+    d_year,
+    i_category,
+    total_sales,
+    total_profit,
+    profit_flag,
+    avg_price_category
+FROM web_data
+ORDER BY total_sales DESC
 LIMIT 100

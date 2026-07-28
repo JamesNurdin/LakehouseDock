@@ -1,22 +1,36 @@
+WITH sales AS (
+    SELECT
+        i.i_item_id AS item_id,
+        i.i_product_name AS product_name,
+        'sales' AS metric_type,
+        SUM(cs.cs_ext_sales_price) AS amount
+    FROM catalog_sales cs
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year >= 1980
+    GROUP BY i.i_item_id, i.i_product_name
+),
+returns AS (
+    SELECT
+        i.i_item_id AS item_id,
+        i.i_product_name AS product_name,
+        'returns' AS metric_type,
+        SUM(cr.cr_return_amount) AS amount
+    FROM catalog_returns cr
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN customer c ON cr.cr_refunded_customer_sk = c.c_customer_sk
+    WHERE cr.cr_return_amount > 100
+    GROUP BY i.i_item_id, i.i_product_name
+)
 SELECT
-    i.i_brand AS brand,
-    ca.ca_state AS state,
-    COUNT(*) AS returns_count,
-    SUM(sr.sr_return_amt) AS total_return_amount,
-    AVG(sr.sr_net_loss) AS avg_net_loss,
-    MIN(sr.sr_reversed_charge) AS min_reversed_charge,
-    MAX(sr.sr_reversed_charge) AS max_reversed_charge
-FROM store_returns AS sr
-JOIN item AS i
-  ON sr.sr_item_sk = i.i_item_sk
-JOIN customer_address AS ca
-  ON sr.sr_addr_sk = ca.ca_address_sk
-WHERE sr.sr_cdemo_sk IN (1568019, 1571148)
-  AND sr.sr_reversed_charge > 100.00
-  AND sr.sr_net_loss BETWEEN 50.00 AND 300.00
-  AND ca.ca_gmt_offset = -5.00
-  AND ca.ca_street_type = 'Ave'
-  AND i.i_manufact_id = 212
-GROUP BY i.i_brand, ca.ca_state
-ORDER BY total_return_amount DESC
+    item_id,
+    product_name,
+    metric_type,
+    amount
+FROM (
+    SELECT * FROM sales
+    UNION ALL
+    SELECT * FROM returns
+) AS combined
+ORDER BY amount DESC
 LIMIT 100

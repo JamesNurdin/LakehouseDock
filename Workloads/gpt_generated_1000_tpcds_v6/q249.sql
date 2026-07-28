@@ -1,48 +1,32 @@
-WITH sales AS (
-   SELECT
-       i.i_product_name AS product,
-       cs.cs_sold_date_sk AS date_key,
-       cs.cs_ext_sales_price AS amount,
-       'sale' AS txn_type
-   FROM catalog_sales cs
-   JOIN item i ON cs.cs_item_sk = i.i_item_sk
-   JOIN time_dim t ON cs.cs_sold_time_sk = t.t_time_sk
-   JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
-   WHERE t.t_meal_time = 'dinner'
-     AND cs.cs_ext_sales_price > 100
-),
-returns AS (
-   SELECT
-       i.i_product_name AS product,
-       sr.sr_returned_date_sk AS date_key,
-       -sr.sr_return_amt AS amount,
-       'return' AS txn_type
-   FROM store_returns sr
-   JOIN item i ON sr.sr_item_sk = i.i_item_sk
-   JOIN time_dim t ON sr.sr_return_time_sk = t.t_time_sk
-   JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
-   WHERE t.t_meal_time = 'dinner'
-     AND sr.sr_return_amt > 50
-     AND EXISTS (
-         SELECT 1
-         FROM catalog_sales cs2
-         JOIN item i2 ON cs2.cs_item_sk = i2.i_item_sk
-         WHERE i2.i_item_sk = sr.sr_item_sk
-           AND cs2.cs_ext_sales_price > 200
-     )
+WITH qualified_customers AS (
+    SELECT
+        c.c_customer_sk,
+        concat(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        c.c_email_address
+    FROM tpcds.customer c
+    WHERE regexp_like(c.c_email_address, '^.+@example\\.com$')
+      AND substr(c.c_first_name, 1, 1) = substr(c.c_last_name, 1, 1)
 )
 SELECT
-    product,
-    date_key,
-    amount,
-    txn_type
-FROM sales
-UNION ALL
-SELECT
-    product,
-    date_key,
-    amount,
-    txn_type
-FROM returns
-ORDER BY amount DESC, product ASC
-LIMIT 100
+    w.w_city,
+    COUNT(DISTINCT ws.ws_order_number) AS order_count,
+    SUM(ws.ws_net_profit) AS total_profit
+FROM tpcds.web_sales ws
+JOIN qualified_customers qc
+    ON ws.ws_bill_customer_sk = qc.c_customer_sk
+JOIN tpcds.warehouse w
+    ON ws.ws_warehouse_sk = w.w_warehouse_sk
+JOIN tpcds.time_dim td
+    ON ws.ws_sold_time_sk = td.t_time_sk
+WHERE w.w_city LIKE 'S%'
+  AND td.t_hour BETWEEN 9 AND 17
+  AND EXISTS (
+        SELECT 1
+        FROM tpcds.web_sales ws2
+        WHERE ws2.ws_bill_customer_sk = qc.c_customer_sk
+          AND ws2.ws_net_profit > 1000
+        LIMIT 1
+  )
+GROUP BY w.w_city
+ORDER BY total_profit DESC
+LIMIT 10

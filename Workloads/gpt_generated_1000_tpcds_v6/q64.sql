@@ -1,43 +1,58 @@
-WITH returns_2022 AS (
+WITH joined AS (
     SELECT
-        c.c_customer_id AS customer_id,
-        d.d_year AS year,
-        hd.hd_buy_potential AS buy_potential,
-        wp.wp_type AS page_type,
-        SUM(wr.wr_return_amt) AS total_return_amount
-    FROM web_returns wr
-    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
-    JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
-    JOIN household_demographics hd ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    WHERE d.d_year = 2022
-    GROUP BY c.c_customer_id, d.d_year, hd.hd_buy_potential, wp.wp_type
-),
-returns_2023 AS (
-    SELECT
-        c.c_customer_id AS customer_id,
-        d.d_year AS year,
-        hd.hd_buy_potential AS buy_potential,
-        wp.wp_type AS page_type,
-        SUM(wr.wr_return_amt) AS total_return_amount
-    FROM web_returns wr
-    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
-    JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
-    JOIN household_demographics hd ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    WHERE d.d_year = 2023
-    GROUP BY c.c_customer_id, d.d_year, hd.hd_buy_potential, wp.wp_type
+        cc.cc_name AS cc_name,
+        cc.cc_state AS cc_state,
+        ca.ca_state AS ca_state,
+        p.p_promo_name AS p_promo_name,
+        p.p_discount_active AS p_discount_active,
+        ss.ss_net_paid AS ss_net_paid,
+        ss.ss_quantity AS ss_quantity,
+        ss.ss_ticket_number AS ss_ticket_number,
+        ws.ws_net_paid AS ws_net_paid,
+        ws.ws_quantity AS ws_quantity,
+        ws.ws_order_number AS ws_order_number,
+        cr.cr_return_amount AS cr_return_amount
+    FROM call_center cc
+    JOIN catalog_returns cr
+        ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    JOIN customer c
+        ON cr.cr_refunded_customer_sk = c.c_customer_sk
+    JOIN customer_address ca
+        ON cr.cr_refunded_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd
+        ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
+    JOIN store_sales ss
+        ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN promotion p
+        ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN web_sales ws
+        ON ws.ws_bill_customer_sk = c.c_customer_sk
+        AND ws.ws_promo_sk = p.p_promo_sk
 )
 SELECT
-    customer_id,
-    year,
-    buy_potential,
-    page_type,
-    total_return_amount
-FROM (
-    SELECT * FROM returns_2022
-    UNION ALL
-    SELECT * FROM returns_2023
-) AS combined
-ORDER BY year DESC, total_return_amount DESC
+    cc_name,
+    p_promo_name,
+    ca_state,
+    SUM(ss_net_paid) AS total_store_sales,
+    SUM(ws_net_paid) AS total_web_sales,
+    SUM(cr_return_amount) AS total_return_amount,
+    COUNT(DISTINCT ss_ticket_number) AS distinct_store_tickets,
+    COUNT(DISTINCT ws_order_number) AS distinct_web_orders
+FROM joined
+WHERE
+    cc_state = 'CA'
+    AND ca_state = 'TX'
+    AND p_discount_active = 'Y'
+    AND ss_quantity > 2
+    AND ws_quantity > 1
+    AND cr_return_amount > 500
+GROUP BY
+    cc_name,
+    p_promo_name,
+    ca_state
+HAVING
+    SUM(ss_net_paid) > 10000
+ORDER BY
+    total_store_sales DESC,
+    total_web_sales DESC
 LIMIT 100

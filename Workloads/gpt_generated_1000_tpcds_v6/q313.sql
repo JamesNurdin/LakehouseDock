@@ -1,53 +1,69 @@
-WITH combined AS (
-    -- Catalog returns side
+WITH
+  sub1 AS (
     SELECT
-        cr.cr_returned_date_sk AS date_sk,
-        cr.cr_return_amount AS return_amount,
-        r.r_reason_desc AS reason_desc,
-        cd.cd_gender AS gender,
-        CASE WHEN cr.cr_return_amount > 1000 THEN 'High' ELSE 'Low' END AS amount_category
-    FROM catalog_returns cr
-    JOIN customer_demographics cd
-        ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-    JOIN reason r
-        ON cr.cr_reason_sk = r.r_reason_sk
-    WHERE cr.cr_fee > 50.00
-      AND r.r_reason_id = 'AAAAAAAAPAAAAAAA'
-
+      cc.cc_company,
+      cc.cc_company_name,
+      cp.cp_catalog_page_id,
+      SUM(cr.cr_return_amount) AS total_return_amount,
+      SUM(cr.cr_return_tax) AS total_return_tax,
+      COUNT(*) AS return_cnt
+    FROM tpcds.catalog_returns cr
+    JOIN tpcds.call_center cc
+      ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    JOIN tpcds.catalog_page cp
+      ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    WHERE cc.cc_company = 1
+      AND cc.cc_class = 'large'
+      AND cp.cp_end_date_sk BETWEEN 2450900 AND 2451100
+      AND cr.cr_fee > 20
+      AND cr.cr_return_amount > 0
+    GROUP BY cc.cc_company, cc.cc_company_name, cp.cp_catalog_page_id
+  ),
+  sub2 AS (
+    SELECT
+      cc.cc_company,
+      cc.cc_company_name,
+      cp.cp_catalog_page_id,
+      SUM(cr.cr_return_amount) AS total_return_amount,
+      SUM(cr.cr_return_tax) AS total_return_tax,
+      COUNT(*) AS return_cnt
+    FROM tpcds.catalog_returns cr
+    JOIN tpcds.call_center cc
+      ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    JOIN tpcds.catalog_page cp
+      ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    WHERE cc.cc_company = 2
+      AND cc.cc_class = 'medium'
+      AND cp.cp_end_date_sk BETWEEN 2451000 AND 2451200
+      AND cr.cr_fee BETWEEN 10 AND 30
+      AND cr.cr_return_quantity >= 1
+    GROUP BY cc.cc_company, cc.cc_company_name, cp.cp_catalog_page_id
+  ),
+  combined AS (
+    SELECT * FROM sub1
     UNION ALL
-
-    -- Store returns side
-    SELECT
-        sr.sr_returned_date_sk AS date_sk,
-        sr.sr_return_amt AS return_amount,
-        r.r_reason_desc AS reason_desc,
-        cd.cd_gender AS gender,
-        CASE WHEN sr.sr_return_amt > 1000 THEN 'High' ELSE 'Low' END AS amount_category
-    FROM store_returns sr
-    JOIN customer_demographics cd
-        ON sr.sr_cdemo_sk = cd.cd_demo_sk
-    JOIN reason r
-        ON sr.sr_reason_sk = r.r_reason_sk
-    WHERE sr.sr_fee > 30.00
-      AND r.r_reason_desc LIKE '%purchase%'
-)
+    SELECT * FROM sub2
+  )
 SELECT
-    c.date_sk,
-    c.return_amount,
-    c.reason_desc,
-    c.gender,
-    c.amount_category,
-    (
-        SELECT AVG(c2.return_amount)
-        FROM combined c2
-        WHERE c2.reason_desc = c.reason_desc
-    ) AS avg_return_amount_for_reason
-FROM combined c
-WHERE EXISTS (
-    SELECT 1
-    FROM reason r_chk
-    WHERE r_chk.r_reason_desc = c.reason_desc
-      AND r_chk.r_reason_id = 'AAAAAAAAPAAAAAAA'
-)
-ORDER BY c.return_amount DESC
-LIMIT 100
+  cc_company,
+  cc_company_name,
+  cp_catalog_page_id,
+  total_return_amount,
+  total_return_tax,
+  return_cnt,
+  SUM(total_return_amount) OVER (
+    PARTITION BY cc_company
+    ORDER BY total_return_amount DESC
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) AS running_total_return_amount,
+  RANK() OVER (
+    PARTITION BY cc_company
+    ORDER BY total_return_amount DESC
+  ) AS amount_rank,
+  CASE
+    WHEN total_return_amount > 1000 THEN 'High'
+    WHEN total_return_amount > 500 THEN 'Medium'
+    ELSE 'Low'
+  END AS amount_category
+FROM combined
+ORDER BY cc_company, amount_rank

@@ -1,39 +1,50 @@
-WITH store_profit AS (
-  SELECT
-    p.p_promo_name AS promo_name,
-    d.d_year AS year,
-    SUM(ss.ss_net_profit) AS net_profit,
-    'store' AS sales_channel
-  FROM tpcds.store_sales ss
-  JOIN tpcds.date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
-  JOIN tpcds.promotion p ON ss.ss_promo_sk = p.p_promo_sk
-  WHERE d.d_year = 2020
-    AND p.p_channel_email = 'Y'
-  GROUP BY p.p_promo_name, d.d_year
-),
-web_profit AS (
-  SELECT
-    p.p_promo_name AS promo_name,
-    d.d_year AS year,
-    SUM(ws.ws_net_profit) AS net_profit,
-    'web' AS sales_channel
-  FROM tpcds.web_sales ws
-  JOIN tpcds.date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
-  JOIN tpcds.promotion p ON ws.ws_promo_sk = p.p_promo_sk
-  JOIN tpcds.web_site w ON ws.ws_web_site_sk = w.web_site_sk
-  WHERE d.d_year = 2020
-    AND p.p_channel_email = 'Y'
-    AND w.web_county = 'Williamson County'
-  GROUP BY p.p_promo_name, d.d_year
+WITH base AS (
+    SELECT
+        cc.cc_state,
+        cp.cp_department,
+        ib.ib_income_band_sk,
+        cr.cr_return_amount,
+        cr.cr_return_tax,
+        cr.cr_order_number,
+        sr.sr_return_amt,
+        sr.sr_ticket_number
+    FROM tpcds.catalog_returns cr
+    JOIN tpcds.call_center cc
+        ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    JOIN tpcds.catalog_page cp
+        ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN tpcds.warehouse w
+        ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    JOIN tpcds.household_demographics hd
+        ON cr.cr_returning_hdemo_sk = hd.hd_demo_sk
+    JOIN tpcds.store_returns sr
+        ON sr.sr_hdemo_sk = hd.hd_demo_sk
+    JOIN tpcds.income_band ib
+        ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE cc.cc_state = 'CA'
+      AND ib.ib_upper_bound >= 100000
+      AND cr.cr_return_tax > 10.0
+      AND sr.sr_return_amt > 50.0
 )
-SELECT DISTINCT
-  promo_name,
-  year,
-  sales_channel,
-  net_profit
-FROM (
-  SELECT * FROM store_profit
-  UNION ALL
-  SELECT * FROM web_profit
-) combined
-ORDER BY promo_name, year, sales_channel
+SELECT
+    cc_state,
+    cp_department,
+    ib_income_band_sk,
+    SUM(cr_return_amount)      AS total_catalog_return_amount,
+    SUM(sr_return_amt)         AS total_store_return_amount,
+    COUNT(DISTINCT cr_order_number) AS catalog_orders,
+    COUNT(DISTINCT sr_ticket_number) AS store_tickets,
+    AVG(cr_return_tax)         AS avg_catalog_return_tax
+FROM base
+GROUP BY GROUPING SETS (
+    (cc_state, cp_department, ib_income_band_sk),
+    (cc_state, cp_department),
+    (cc_state, ib_income_band_sk),
+    (cp_department, ib_income_band_sk),
+    (cc_state),
+    (cp_department),
+    (ib_income_band_sk),
+    ()
+)
+ORDER BY total_catalog_return_amount DESC
+LIMIT 100

@@ -1,68 +1,65 @@
-WITH catalog_agg AS (
-  SELECT
-    cs.cs_bill_customer_sk,
-    cs.cs_call_center_sk,
-    cs.cs_catalog_page_sk,
-    SUM(cs.cs_net_profit) AS catalog_profit
-  FROM catalog_sales cs
-  WHERE cs.cs_net_profit > 0
-    AND cs.cs_quantity >= 1
-    AND cs.cs_call_center_sk IS NOT NULL
-    AND cs.cs_catalog_page_sk IS NOT NULL
-    AND cs.cs_sold_date_sk BETWEEN 2450000 AND 2455000
-    AND cs.cs_ship_mode_sk IS NOT NULL
-  GROUP BY cs.cs_bill_customer_sk, cs.cs_call_center_sk, cs.cs_catalog_page_sk
+WITH catalog_data AS (
+    SELECT
+        c.c_customer_id AS customer_id,
+        d.d_year AS sales_year,
+        CASE WHEN SUM(cs.cs_net_profit) > 0 THEN 'Positive' ELSE 'Non-positive' END AS profit_flag,
+        SUM(cs.cs_net_profit) AS total_net_profit,
+        (SELECT AVG(cs2.cs_net_profit)
+         FROM catalog_sales cs2
+         JOIN date_dim d2 ON cs2.cs_sold_date_sk = d2.d_date_sk
+         WHERE d2.d_year = d.d_year) AS avg_year_profit
+    FROM catalog_sales cs
+    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+    WHERE d.d_year = 2001
+      AND hd.hd_income_band_sk >= 8
+      AND NOT EXISTS (
+          SELECT 1
+          FROM store_sales ss
+          WHERE ss.ss_customer_sk = c.c_customer_sk
+            AND ss.ss_sold_date_sk = d.d_date_sk
+      )
+    GROUP BY c.c_customer_id, d.d_year
 ),
-web_agg AS (
-  SELECT
-    ws.ws_bill_customer_sk,
-    ws.ws_web_page_sk,
-    SUM(ws.ws_net_profit) AS web_profit
-  FROM web_sales ws
-  WHERE ws.ws_net_profit > 0
-    AND ws.ws_quantity >= 1
-    AND ws.ws_web_page_sk IS NOT NULL
-    AND ws.ws_sold_date_sk BETWEEN 2450000 AND 2455000
-  GROUP BY ws.ws_bill_customer_sk, ws.ws_web_page_sk
+store_data AS (
+    SELECT
+        c.c_customer_id AS customer_id,
+        d.d_year AS sales_year,
+        CASE WHEN SUM(ss.ss_net_profit) > 0 THEN 'Positive' ELSE 'Non-positive' END AS profit_flag,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        (SELECT AVG(ss2.ss_net_profit)
+         FROM store_sales ss2
+         JOIN date_dim d2 ON ss2.ss_sold_date_sk = d2.d_date_sk
+         WHERE d2.d_year = d.d_year) AS avg_year_profit
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    WHERE d.d_year = 2001
+      AND hd.hd_income_band_sk <= 5
+      AND NOT EXISTS (
+          SELECT 1
+          FROM catalog_sales cs
+          WHERE cs.cs_bill_customer_sk = c.c_customer_sk
+            AND cs.cs_sold_date_sk = d.d_date_sk
+      )
+    GROUP BY c.c_customer_id, d.d_year
 )
 SELECT
-  c.c_customer_id,
-  ca.ca_city,
-  ca.ca_state,
-  cc.cc_name AS call_center_name,
-  cp.cp_type,
-  wp.wp_url,
-  (SELECT MAX(cs2.cs_sold_date_sk)
-     FROM catalog_sales cs2
-     WHERE cs2.cs_bill_customer_sk = c.c_customer_sk) AS max_catalog_sold_date_sk,
-  (SELECT MAX(ws2.ws_sold_date_sk)
-     FROM web_sales ws2
-     WHERE ws2.ws_bill_customer_sk = c.c_customer_sk) AS max_web_sold_date_sk,
-  caa.catalog_profit,
-  wa.web_profit,
-  (caa.catalog_profit + wa.web_profit) AS total_profit,
-  CASE
-    WHEN (caa.catalog_profit + wa.web_profit) > 20000 THEN 'HIGH'
-    WHEN (caa.catalog_profit + wa.web_profit) > 0 THEN 'MEDIUM'
-    ELSE 'LOW'
-  END AS profit_category
-FROM customer c
-JOIN customer_address ca
-  ON c.c_current_addr_sk = ca.ca_address_sk
-JOIN catalog_agg caa
-  ON c.c_customer_sk = caa.cs_bill_customer_sk
-JOIN call_center cc
-  ON caa.cs_call_center_sk = cc.cc_call_center_sk
-JOIN catalog_page cp
-  ON caa.cs_catalog_page_sk = cp.cp_catalog_page_sk
-JOIN web_agg wa
-  ON c.c_customer_sk = wa.ws_bill_customer_sk
-JOIN web_page wp
-  ON wa.ws_web_page_sk = wp.wp_web_page_sk
-WHERE c.c_birth_year BETWEEN 1960 AND 1980
-  AND ca.ca_state = 'TX'
-  AND cc.cc_state = 'CA'
-  AND cp.cp_type = 'monthly'
-  AND wp.wp_link_count > 10
-ORDER BY total_profit DESC
+    customer_id,
+    sales_year,
+    profit_flag,
+    total_net_profit,
+    avg_year_profit
+FROM catalog_data
+UNION ALL
+SELECT
+    customer_id,
+    sales_year,
+    profit_flag,
+    total_net_profit,
+    avg_year_profit
+FROM store_data
+ORDER BY total_net_profit DESC
 LIMIT 100

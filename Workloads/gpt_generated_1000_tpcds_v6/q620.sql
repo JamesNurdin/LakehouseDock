@@ -1,45 +1,42 @@
-/* goal: Identify high‑value customers who received refunds on web pages of type 'Content' within a specific period, summarizing their return amounts and ranking them per customer */
-WITH returns_agg AS (
-    SELECT
-        wr_refunded_customer_sk AS customer_sk,
-        wr_web_page_sk AS web_page_sk,
-        SUM(wr_return_amt) AS total_return_amt,
-        AVG(wr_return_amt) AS avg_return_amt,
-        COUNT(*) AS cnt_returns,
-        MIN(wr_return_amt) AS min_return_amt,
-        MAX(wr_return_amt) AS max_return_amt
-    FROM web_returns
-    WHERE wr_return_amt > 100
-      AND wr_return_quantity >= 1
-      AND wr_returned_date_sk BETWEEN 2450000 AND 2453000
-    GROUP BY wr_refunded_customer_sk, wr_web_page_sk
+WITH avg_sales AS (
+    SELECT 'store' AS channel,
+           avg(ss.ss_net_paid) AS avg_paid
+    FROM store_sales ss
+    UNION ALL
+    SELECT 'web' AS channel,
+           avg(ws.ws_net_paid) AS avg_paid
+    FROM web_sales ws
+),
+combined AS (
+    SELECT c.c_customer_id AS customer_id,
+           sum(ss.ss_net_paid) AS total_paid
+    FROM store_sales ss
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE s.s_state = 'CA'
+      AND ss.ss_net_paid > (SELECT avg_paid FROM avg_sales WHERE channel = 'store')
+    GROUP BY c.c_customer_id
+
+    UNION ALL
+
+    SELECT c.c_customer_id AS customer_id,
+           sum(ws.ws_net_paid) AS total_paid
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    WHERE wp.wp_type = 'HOME'
+      AND ws.ws_net_paid > (SELECT avg_paid FROM avg_sales WHERE channel = 'web')
+    GROUP BY c.c_customer_id
 )
-SELECT
-    c.c_customer_id,
-    c.c_first_name,
-    c.c_last_name,
-    wp.wp_url,
-    wp.wp_type,
-    ra.total_return_amt,
-    ra.avg_return_amt,
-    ra.cnt_returns,
-    ra.min_return_amt,
-    ra.max_return_amt,
-    ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY ra.total_return_amt DESC) AS rn
-FROM returns_agg ra
-JOIN customer c
-  ON c.c_customer_sk = ra.customer_sk
-JOIN web_page wp
-  ON wp.wp_web_page_sk = ra.web_page_sk
-WHERE c.c_birth_year = 1975
-  AND c.c_preferred_cust_flag = 'Y'
-  AND wp.wp_rec_end_date = DATE '2000-09-02'
-  AND wp.wp_link_count >= 20
-  AND EXISTS (
-        SELECT 1
-        FROM web_page wp_sub
-        WHERE wp_sub.wp_web_page_sk = ra.web_page_sk
-          AND wp_sub.wp_type = 'Content'
-    )
-ORDER BY ra.total_return_amt DESC, rn
+SELECT comb.customer_id,
+       sum(comb.total_paid) AS combined_total_paid
+FROM combined comb
+JOIN customer c ON c.c_customer_id = comb.customer_id
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM catalog_returns cr
+    WHERE cr.cr_returning_customer_sk = c.c_customer_sk
+)
+GROUP BY comb.customer_id
+ORDER BY combined_total_paid DESC
 LIMIT 100

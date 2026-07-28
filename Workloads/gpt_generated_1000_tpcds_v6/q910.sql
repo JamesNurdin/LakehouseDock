@@ -1,37 +1,54 @@
-WITH agg AS (
+WITH
+  sales AS (
     SELECT
-        cs.cs_ship_mode_sk,
-        hd.hd_buy_potential,
-        SUM(cs.cs_net_profit) AS total_profit,
-        COUNT(*) AS order_cnt,
-        AVG(cs.cs_sales_price) AS avg_price
-    FROM tpcds.catalog_sales cs
-    JOIN tpcds.household_demographics hd
-        ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-    JOIN tpcds.ship_mode sm
-        ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-    WHERE cs.cs_sales_price > 50
-      AND cs.cs_coupon_amt BETWEEN 100 AND 2000
-      AND cs.cs_quantity >= 2
-      AND cs.cs_net_paid_inc_tax > 100
-      AND hd.hd_dep_count <= 5
-      AND hd.hd_buy_potential IN ('>10000', '5001-10000')
-    GROUP BY cs.cs_ship_mode_sk, hd.hd_buy_potential
-)
+      cs.cs_order_number AS order_number,
+      cs.cs_item_sk AS item_sk,
+      d.d_date AS event_date,
+      cs.cs_ext_sales_price AS amount,
+      CASE WHEN cs.cs_net_profit > 0 THEN 'PROFIT' ELSE 'LOSS' END AS flag,
+      'SALE' AS record_type,
+      regexp_extract(d.d_day_name, '(\\w+)', 1) AS day_prefix
+    FROM catalog_sales cs
+    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    WHERE regexp_like(d.d_day_name, '^Mon|Tue')
+      AND d.d_year = 2001
+  ),
+  returns AS (
+    SELECT
+      cr.cr_order_number AS order_number,
+      cr.cr_item_sk AS item_sk,
+      d.d_date AS event_date,
+      cr.cr_return_amount AS amount,
+      CASE WHEN cr.cr_net_loss > 0 THEN 'LOSS' ELSE 'NO_LOSS' END AS flag,
+      'RETURN' AS record_type,
+      regexp_extract(d.d_holiday, '(\\w+)', 1) AS holiday_prefix
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    WHERE d.d_holiday LIKE '%Holiday%'
+      AND d.d_year = 2001
+  ),
+  combined AS (
+    SELECT order_number, item_sk, event_date, amount, flag, record_type
+    FROM sales
+    UNION ALL
+    SELECT order_number, item_sk, event_date, amount, flag, record_type
+    FROM returns
+  )
 SELECT
-    sm.sm_ship_mode_id,
-    agg.hd_buy_potential,
-    agg.total_profit,
-    agg.order_cnt,
-    CASE WHEN agg.total_profit > 100000 THEN 'High' ELSE 'Medium' END AS profit_category
-FROM agg
-JOIN tpcds.ship_mode sm
-    ON agg.cs_ship_mode_sk = sm.sm_ship_mode_sk
-WHERE agg.order_cnt > 10
-  AND EXISTS (
-        SELECT 1
-        FROM tpcds.catalog_sales cs2
-        WHERE cs2.cs_ship_mode_sk = agg.cs_ship_mode_sk
-          AND cs2.cs_coupon_amt > 500
-    )
-ORDER BY profit_category DESC, agg.total_profit DESC
+  c.order_number,
+  c.item_sk,
+  c.event_date,
+  c.amount,
+  c.flag,
+  c.record_type,
+  concat('ORD-', cast(c.order_number AS varchar)) AS order_key,
+  substring(cast(c.amount AS varchar), 1, 5) AS amount_prefix
+FROM combined c
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM web_returns wr
+  JOIN date_dim dwr ON wr.wr_returned_date_sk = dwr.d_date_sk
+  WHERE wr.wr_order_number = c.order_number
+)
+ORDER BY c.amount DESC, c.event_date
+LIMIT 100

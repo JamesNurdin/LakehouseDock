@@ -1,42 +1,54 @@
-WITH promo_sales AS (
+WITH returns_detail AS (
     SELECT
-        ss.ss_promo_sk,
-        SUM(ss.ss_ext_sales_price) AS promo_sales_total,
-        COUNT(*) AS promo_txn_cnt
-    FROM store_sales ss
-    WHERE ss.ss_sales_price > 20
-      AND ss.ss_ext_discount_amt > 5
-    GROUP BY ss.ss_promo_sk
+        cr.cr_return_amount,
+        cr.cr_net_loss,
+        cr.cr_returned_date_sk,
+        cp.cp_catalog_page_id,
+        cp.cp_description,
+        cp.cp_type,
+        d.d_year,
+        r.r_reason_desc,
+        w.w_warehouse_name,
+        w.w_warehouse_sk,
+        d.d_date_sk
+    FROM catalog_returns cr
+    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    WHERE cp.cp_description LIKE '%sale%'
+      AND regexp_like(cp.cp_description, '(?i)discount')
+      AND r.r_reason_desc LIKE '%damage%'
+      AND EXISTS (
+          SELECT 1
+          FROM inventory inv
+          WHERE inv.inv_warehouse_sk = w.w_warehouse_sk
+            AND inv.inv_date_sk = d.d_date_sk
+            AND inv.inv_quantity_on_hand > 0
+      )
+),
+aggregated AS (
+    SELECT
+        rd.cp_catalog_page_id,
+        rd.d_year,
+        rd.w_warehouse_name,
+        rd.r_reason_desc,
+        COUNT(*) AS return_cnt,
+        AVG(rd.cr_return_amount) AS avg_return_amount,
+        SUM(rd.cr_net_loss) AS total_net_loss
+    FROM returns_detail rd
+    GROUP BY rd.cp_catalog_page_id, rd.d_year, rd.w_warehouse_name, rd.r_reason_desc
+    HAVING COUNT(*) > 5
 )
 SELECT
-    cd.cd_gender,
-    cd.cd_education_status,
-    p.p_channel_email,
-    SUM(ss.ss_ext_sales_price) AS total_sales,
-    AVG(ss.ss_net_profit) AS avg_profit,
-    COUNT(DISTINCT ss.ss_ticket_number) AS unique_tickets,
-    promo_sales.promo_sales_total,
-    promo_sales.promo_txn_cnt,
-    (SELECT AVG(ss2.ss_ext_sales_price) FROM store_sales ss2) AS overall_avg_sales
-FROM store_sales ss
-JOIN customer_demographics cd
-    ON ss.ss_cdemo_sk = cd.cd_demo_sk
-JOIN promotion p
-    ON ss.ss_promo_sk = p.p_promo_sk
-JOIN promo_sales
-    ON ss.ss_promo_sk = promo_sales.ss_promo_sk
-WHERE cd.cd_gender = 'M'
-  AND cd.cd_marital_status = 'S'
-  AND cd.cd_dep_count <= 2
-  AND p.p_discount_active = 'Y'
-  AND p.p_response_target >= 1
-  AND ss.ss_sold_date_sk BETWEEN 2450000 AND 2450100
-  AND p.p_channel_email = 'Y'
-GROUP BY
-    cd.cd_gender,
-    cd.cd_education_status,
-    p.p_channel_email,
-    promo_sales.promo_sales_total,
-    promo_sales.promo_txn_cnt
-ORDER BY total_sales DESC
+    a.cp_catalog_page_id,
+    a.d_year,
+    a.return_cnt,
+    a.avg_return_amount,
+    a.total_net_loss,
+    ROW_NUMBER() OVER (PARTITION BY a.d_year ORDER BY a.avg_return_amount DESC) AS rank_in_year,
+    (SELECT AVG(cr2.cr_return_amount) FROM catalog_returns cr2) AS overall_avg_return_amount,
+    CONCAT(a.w_warehouse_name, ' - ', a.r_reason_desc) AS warehouse_reason
+FROM aggregated a
+ORDER BY a.d_year DESC, a.avg_return_amount DESC
 LIMIT 100

@@ -1,66 +1,82 @@
-SELECT
-    s.s_store_name,
-    i.i_category,
-    d_date.d_year,
-    p.p_promo_name,
-    SUM(ss.ss_ext_sales_price) AS store_sales_amount,
-    SUM(cs.cs_ext_sales_price) AS catalog_sales_amount,
-    SUM(ss.ss_net_profit) + SUM(cs.cs_net_profit) AS total_profit,
-    AVG(ss.ss_ext_discount_amt) AS avg_store_discount,
-    COUNT(DISTINCT ss.ss_ticket_number) AS store_transactions,
-    COUNT(DISTINCT cs.cs_order_number) AS catalog_orders
-FROM
-    store_sales ss
-JOIN date_dim d_date
-    ON ss.ss_sold_date_sk = d_date.d_date_sk
-JOIN time_dim t_ss
-    ON ss.ss_sold_time_sk = t_ss.t_time_sk
-JOIN item i
-    ON ss.ss_item_sk = i.i_item_sk
-JOIN customer c
-    ON ss.ss_customer_sk = c.c_customer_sk
-JOIN customer_demographics cd_cust
-    ON ss.ss_cdemo_sk = cd_cust.cd_demo_sk
-JOIN store s
-    ON ss.ss_store_sk = s.s_store_sk
-JOIN promotion p
-    ON ss.ss_promo_sk = p.p_promo_sk
-JOIN catalog_sales cs
-    ON cs.cs_sold_date_sk = d_date.d_date_sk
-   AND cs.cs_item_sk = i.i_item_sk
-   AND cs.cs_promo_sk = p.p_promo_sk
-JOIN date_dim d_ship_date
-    ON cs.cs_ship_date_sk = d_ship_date.d_date_sk
-JOIN time_dim t_cs
-    ON cs.cs_sold_time_sk = t_cs.t_time_sk
-JOIN call_center cc
-    ON cs.cs_call_center_sk = cc.cc_call_center_sk
-JOIN catalog_page cp
-    ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-JOIN ship_mode sm
-    ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN warehouse w
-    ON cs.cs_warehouse_sk = w.w_warehouse_sk
-JOIN customer c_bill
-    ON cs.cs_bill_customer_sk = c_bill.c_customer_sk
-JOIN customer_demographics cd_bill
-    ON cs.cs_bill_cdemo_sk = cd_bill.cd_demo_sk
-JOIN customer c_ship
-    ON cs.cs_ship_customer_sk = c_ship.c_customer_sk
-JOIN customer_demographics cd_ship
-    ON cs.cs_ship_cdemo_sk = cd_ship.cd_demo_sk
-WHERE EXISTS (
-    SELECT 1
-    FROM catalog_sales cs2
-    WHERE cs2.cs_item_sk = ss.ss_item_sk
-      AND cs2.cs_sold_date_sk = ss.ss_sold_date_sk
-      AND cs2.cs_ext_sales_price > 1000
+WITH joined_data AS (
+   SELECT
+      ss.ss_ticket_number,
+      ss.ss_sold_date_sk,
+      ss.ss_sold_time_sk,
+      ss.ss_item_sk,
+      ss.ss_cdemo_sk,
+      ss.ss_hdemo_sk,
+      ss.ss_quantity,
+      ss.ss_ext_sales_price,
+      ss.ss_coupon_amt,
+      ss.ss_net_paid,
+      ss.ss_net_profit,
+      sr.sr_return_quantity,
+      sr.sr_return_amt,
+      sr.sr_net_loss AS store_return_loss,
+      i.i_category,
+      i.i_brand,
+      cd.cd_gender,
+      cd.cd_marital_status,
+      cd.cd_purchase_estimate,
+      hd.hd_income_band_sk,
+      td.t_time,
+      td.t_sub_shift,
+      ws.ws_ext_sales_price AS ws_ext_sales_price,
+      ws.ws_net_profit AS ws_net_profit,
+      cr.cr_net_loss,
+      cc.cc_name
+   FROM store_sales ss
+   JOIN time_dim td
+     ON ss.ss_sold_time_sk = td.t_time_sk
+   JOIN item i
+     ON ss.ss_item_sk = i.i_item_sk
+   JOIN customer_demographics cd
+     ON ss.ss_cdemo_sk = cd.cd_demo_sk
+   JOIN household_demographics hd
+     ON ss.ss_hdemo_sk = hd.hd_demo_sk
+   JOIN store_returns sr
+     ON sr.sr_ticket_number = ss.ss_ticket_number
+    AND sr.sr_item_sk = ss.ss_item_sk
+   JOIN web_sales ws
+     ON ws.ws_item_sk = i.i_item_sk
+    AND ws.ws_sold_time_sk = td.t_time_sk
+   JOIN web_returns wr
+     ON wr.wr_order_number = ws.ws_order_number
+    AND wr.wr_item_sk = i.i_item_sk
+   JOIN catalog_returns cr
+     ON cr.cr_item_sk = i.i_item_sk
+    AND cr.cr_returned_time_sk = td.t_time_sk
+   JOIN call_center cc
+     ON cr.cr_call_center_sk = cc.cc_call_center_sk
+   WHERE cd.cd_purchase_estimate BETWEEN 3000 AND 10000
+     AND cd.cd_marital_status = 'M'
+     AND td.t_sub_shift = 'morning'
+     AND td.t_time >= 6
+     AND ss.ss_coupon_amt > 1000
+     AND i.i_brand = 'BrandX'
+),
+union_sales AS (
+   SELECT i_category,
+          SUM(ss_ext_sales_price) AS sales,
+          'store' AS channel
+   FROM joined_data
+   GROUP BY i_category
+   UNION ALL
+   SELECT i_category,
+          SUM(ws_ext_sales_price) AS sales,
+          'web' AS channel
+   FROM joined_data
+   GROUP BY i_category
 )
-GROUP BY
-    s.s_store_name,
-    i.i_category,
-    d_date.d_year,
-    p.p_promo_name
-ORDER BY
-    store_sales_amount DESC
+SELECT
+   us.i_category,
+   us.channel,
+   us.sales,
+   ROW_NUMBER() OVER (PARTITION BY us.channel ORDER BY us.sales DESC) AS rank_in_channel,
+   (SELECT AVG(cd3.cd_purchase_estimate) FROM customer_demographics cd3) AS overall_avg_purchase_estimate,
+   (SELECT MAX(jd.store_return_loss) FROM joined_data jd WHERE jd.i_category = us.i_category) AS max_store_return_loss,
+   (SELECT MIN(jd.ws_net_profit) FROM joined_data jd WHERE jd.i_category = us.i_category) AS min_web_profit
+FROM union_sales us
+ORDER BY us.sales DESC
 LIMIT 100

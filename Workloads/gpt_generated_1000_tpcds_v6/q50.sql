@@ -1,50 +1,65 @@
-WITH base AS (
+WITH filtered_sales AS (
     SELECT
         cs.cs_sold_date_sk,
-        cs.cs_bill_addr_sk,
-        cs.cs_warehouse_sk,
-        cs.cs_quantity,
-        cs.cs_net_profit,
+        cs.cs_ship_date_sk,
+        cs.cs_bill_customer_sk,
+        cs.cs_ship_customer_sk,
+        cs.cs_item_sk,
+        cs.cs_promo_sk,
         cs.cs_ext_sales_price,
-        cs.cs_order_number,
-        d.d_year,
-        ca.ca_state,
-        w.w_state,
-        ws.ws_order_number,
-        ws.ws_net_paid,
-        site.web_state,
-        sr.sr_net_loss
+        cs.cs_net_profit,
+        cs.cs_quantity,
+        cs.cs_order_number
     FROM catalog_sales cs
-    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
-    JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
-    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
-    JOIN web_sales ws ON ws.ws_warehouse_sk = w.w_warehouse_sk
-    JOIN web_site site ON ws.ws_web_site_sk = site.web_site_sk
-    JOIN web_returns wr ON wr.wr_order_number = ws.ws_order_number
-    JOIN store_returns sr ON sr.sr_addr_sk = ca.ca_address_sk
-    WHERE d.d_year = 2001
-      AND ca.ca_country = 'United States'
-      AND w.w_state = 'WA'
-      AND cs.cs_quantity > 5
-      AND cs.cs_net_profit > (
-          SELECT AVG(cs2.cs_net_profit)
-          FROM catalog_sales cs2
-          WHERE cs2.cs_sold_date_sk = cs.cs_sold_date_sk
-      )
+    WHERE cs.cs_ext_sales_price > (
+        SELECT avg(cs2.cs_ext_sales_price)
+        FROM catalog_sales cs2
+    )
 )
 SELECT
-    d_year,
-    ca_state,
-    w_state,
-    web_state,
-    COUNT(DISTINCT cs_order_number) AS orders_cnt,
-    SUM(cs_ext_sales_price) AS total_sales,
-    SUM(sr_net_loss) AS total_return_loss,
-    AVG(ws_net_paid) AS avg_net_paid,
-    MAX(cs_net_profit) AS max_profit,
-    MIN(cs_net_profit) AS min_profit
-FROM base
-GROUP BY d_year, ca_state, w_state, web_state
-HAVING SUM(cs_ext_sales_price) > 100000
-ORDER BY total_sales DESC
+    dd_sold.d_year,
+    dd_sold.d_month_seq,
+    i.i_item_id,
+    i.i_product_name,
+    p.p_promo_name,
+    cust_bill.c_customer_id   AS bill_customer_id,
+    cust_ship.c_customer_id   AS ship_customer_id,
+    SUM(fs.cs_ext_sales_price) AS total_sales,
+    SUM(fs.cs_net_profit)      AS total_profit,
+    COUNT(DISTINCT fs.cs_order_number) AS distinct_orders,
+    RANK() OVER (PARTITION BY dd_sold.d_year, dd_sold.d_month_seq ORDER BY SUM(fs.cs_ext_sales_price) DESC) AS sales_rank
+FROM filtered_sales fs
+-- join for the sold date
+JOIN date_dim dd_sold ON fs.cs_sold_date_sk = dd_sold.d_date_sk
+-- join for the ship date
+JOIN date_dim dd_ship ON fs.cs_ship_date_sk = dd_ship.d_date_sk
+-- billing customer
+JOIN customer cust_bill ON fs.cs_bill_customer_sk = cust_bill.c_customer_sk
+-- shipping customer
+JOIN customer cust_ship ON fs.cs_ship_customer_sk = cust_ship.c_customer_sk
+-- item dimension (first usage)
+JOIN item i ON fs.cs_item_sk = i.i_item_sk
+-- promotion dimension
+JOIN promotion p ON fs.cs_promo_sk = p.p_promo_sk
+-- promotion start date
+JOIN date_dim dd_promo_start ON p.p_start_date_sk = dd_promo_start.d_date_sk
+-- promotion end date
+JOIN date_dim dd_promo_end ON p.p_end_date_sk = dd_promo_end.d_date_sk
+-- web site dimension (open date)
+JOIN web_site ws ON ws.web_open_date_sk = dd_sold.d_date_sk
+-- web site close date
+JOIN date_dim dd_web_close ON ws.web_close_date_sk = dd_web_close.d_date_sk
+-- second item alias for promotion‑item relationship
+JOIN item i2 ON p.p_item_sk = i2.i_item_sk
+WHERE dd_sold.d_year = 2001
+  AND i.i_color = 'BLUE'
+GROUP BY GROUPING SETS (
+    (dd_sold.d_year, dd_sold.d_month_seq, i.i_item_id, i.i_product_name, p.p_promo_name, cust_bill.c_customer_id, cust_ship.c_customer_id),
+    (dd_sold.d_year, dd_sold.d_month_seq),
+    ()
+)
+HAVING SUM(fs.cs_ext_sales_price) > 1000
+ORDER BY dd_sold.d_year,
+         dd_sold.d_month_seq,
+         total_sales DESC
 LIMIT 100

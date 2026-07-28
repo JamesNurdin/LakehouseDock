@@ -1,31 +1,48 @@
-WITH returns_filtered AS (
+SELECT DISTINCT
+    store_id,
+    year,
+    total_sales,
+    total_profit,
+    profit_category,
+    promo_channel
+FROM (
     SELECT
-        cr.cr_return_amount,
-        w.w_county,
-        cp.cp_department,
-        ca.ca_zip,
-        ca.ca_suite_number,
-        t.t_hour
-    FROM catalog_returns cr
-    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
-    JOIN time_dim t ON cr.cr_returned_time_sk = t.t_time_sk
-    JOIN customer_address ca ON cr.cr_refunded_addr_sk = ca.ca_address_sk
-    WHERE REGEXP_LIKE(w.w_street_type, '.*way$')
-      AND ca.ca_suite_number LIKE 'Suite%'
-      AND ca.ca_zip LIKE '1%'
-      AND t.t_hour BETWEEN 8 AND 12
-)
-SELECT
-    w_county,
-    cp_department,
-    REGEXP_EXTRACT(ca_zip, '(\\d{3})') AS zip_prefix,
-    SUM(cr_return_amount) AS total_return_amount,
-    COUNT(*) AS return_count
-FROM returns_filtered
-GROUP BY
-    w_county,
-    cp_department,
-    REGEXP_EXTRACT(ca_zip, '(\\d{3})')
-ORDER BY total_return_amount DESC
+        s.s_store_id AS store_id,
+        d.d_year AS year,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        SUM(ss.ss_net_profit) AS total_profit,
+        CASE
+            WHEN SUM(ss.ss_net_profit) > 100000 THEN 'High'
+            WHEN SUM(ss.ss_net_profit) > 50000 THEN 'Medium'
+            ELSE 'Low'
+        END AS profit_category,
+        'Email' AS promo_channel
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    WHERE p.p_channel_email = 'Y'
+    GROUP BY s.s_store_id, d.d_year
+
+    UNION ALL
+
+    SELECT
+        s.s_store_id AS store_id,
+        d.d_year AS year,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        SUM(ss.ss_net_profit) AS total_profit,
+        CASE
+            WHEN SUM(ss.ss_net_profit) > 80000 THEN 'High'
+            WHEN SUM(ss.ss_net_profit) > 30000 THEN 'Medium'
+            ELSE 'Low'
+        END AS profit_category,
+        'TV' AS promo_channel
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    WHERE p.p_channel_tv = 'Y'
+    GROUP BY s.s_store_id, d.d_year
+) AS combined
+ORDER BY total_sales DESC
 LIMIT 100

@@ -1,87 +1,67 @@
-WITH sales_data AS (
+WITH joined_data AS (
     SELECT
-        ws.ws_order_number,
-        ws.ws_net_paid_inc_ship,
-        ws.ws_quantity,
-        ws.ws_ext_discount_amt,
-        ws.ws_net_profit,
+        cr.cr_returning_customer_sk,
+        c_ret.c_customer_id AS returning_customer_id,
+        cr.cr_returned_date_sk,
+        d_ret.d_date AS return_date,
+        d_ret.d_year,
+        cr.cr_return_amount,
+        cr.cr_return_quantity,
         i.i_item_id,
-        i.i_product_name,
-        i.i_brand,
-        i.i_category,
-        p.p_promo_name,
-        sm.sm_code,
-        sm.sm_type,
-        cd.cd_gender,
-        cd.cd_marital_status,
-        ws.ws_ship_mode_sk,
-        ws.ws_promo_sk
-    FROM web_sales ws
-    JOIN item i ON ws.ws_item_sk = i.i_item_sk
-    LEFT JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
-    LEFT JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-    LEFT JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-    WHERE ws.ws_net_paid_inc_ship >= 500
+        i.i_current_price,
+        cp.cp_catalog_page_id,
+        w.w_warehouse_id,
+        w.w_state,
+        r.r_reason_desc,
+        t.t_hour,
+        hd_returning.hd_income_band_sk,
+        ib_returning.ib_lower_bound,
+        CASE WHEN cr.cr_return_quantity > 5 THEN 'Large' ELSE 'Small' END AS return_size
+    FROM catalog_returns cr
+    JOIN date_dim d_ret ON cr.cr_returned_date_sk = d_ret.d_date_sk
+    JOIN time_dim t ON cr.cr_returned_time_sk = t.t_time_sk
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+    JOIN customer c_ret ON cr.cr_returning_customer_sk = c_ret.c_customer_sk
+    JOIN household_demographics hd_returning ON cr.cr_returning_hdemo_sk = hd_returning.hd_demo_sk
+    JOIN income_band ib_returning ON hd_returning.hd_income_band_sk = ib_returning.ib_income_band_sk
+    -- Join the refunded side to satisfy "join all tables" requirement
+    JOIN customer c_ref ON cr.cr_refunded_customer_sk = c_ref.c_customer_sk
+    JOIN household_demographics hd_ref ON cr.cr_refunded_hdemo_sk = hd_ref.hd_demo_sk
+    JOIN income_band ib_ref ON hd_ref.hd_income_band_sk = ib_ref.ib_income_band_sk
+    -- Join catalog page start/end dates
+    JOIN date_dim d_start ON cp.cp_start_date_sk = d_start.d_date_sk
+    JOIN date_dim d_end ON cp.cp_end_date_sk = d_end.d_date_sk
+    WHERE d_ret.d_year = 2001
+      AND i.i_current_price > 20.00
+      AND t.t_hour BETWEEN 9 AND 17
+      AND w.w_state = 'CA'
+),
+customer_returns AS (
+    SELECT
+        returning_customer_id,
+        COUNT(*) AS num_returns,
+        SUM(cr_return_amount) AS total_return_amount,
+        AVG(cr_return_amount) AS avg_return_amount,
+        SUM(CASE WHEN return_size = 'Large' THEN 1 ELSE 0 END) AS large_returns,
+        MAX(i_current_price) AS max_item_price,
+        (SELECT AVG(cr_return_amount) FROM catalog_returns) AS overall_avg_return_amount
+    FROM joined_data
+    GROUP BY returning_customer_id
+    HAVING SUM(cr_return_amount) > 1000
 )
 SELECT
-    brand,
-    product_prefix,
-    sales_cnt,
-    total_profit,
-    avg_profit,
-    promo_label,
-    avg_discount_for_promo
-FROM (
-    -- Sales with a promotion whose name contains "Discount"
-    SELECT
-        sd.i_brand AS brand,
-        REGEXP_EXTRACT(sd.i_product_name, '^(\\w+)', 1) AS product_prefix,
-        COUNT(*) AS sales_cnt,
-        SUM(sd.ws_net_profit) AS total_profit,
-        AVG(sd.ws_net_profit) AS avg_profit,
-        CONCAT('Promo-', COALESCE(sd.p_promo_name, 'NONE')) AS promo_label,
-        (
-            SELECT AVG(inner_ws.ws_ext_discount_amt)
-            FROM web_sales inner_ws
-            WHERE inner_ws.ws_promo_sk = sd.ws_promo_sk
-        ) AS avg_discount_for_promo
-    FROM sales_data sd
-    WHERE sd.p_promo_name IS NOT NULL
-      AND REGEXP_LIKE(sd.p_promo_name, '.*Discount.*')
-      AND sd.sm_code LIKE 'AIR%'
-      AND EXISTS (
-          SELECT 1
-          FROM ship_mode sm2
-          WHERE sm2.sm_ship_mode_sk = sd.ws_ship_mode_sk
-            AND sm2.sm_type LIKE 'OVER%'
-      )
-    GROUP BY
-        sd.i_brand,
-        REGEXP_EXTRACT(sd.i_product_name, '^(\\w+)', 1),
-        sd.p_promo_name,
-        sd.ws_promo_sk
-    UNION ALL
-    -- Sales without a matching "Discount" promotion (or no promotion at all)
-    SELECT
-        sd.i_brand AS brand,
-        REGEXP_EXTRACT(sd.i_product_name, '^(\\w+)', 1) AS product_prefix,
-        COUNT(*) AS sales_cnt,
-        SUM(sd.ws_net_profit) AS total_profit,
-        AVG(sd.ws_net_profit) AS avg_profit,
-        'NoPromo' AS promo_label,
-        NULL AS avg_discount_for_promo
-    FROM sales_data sd
-    WHERE (sd.p_promo_name IS NULL OR NOT REGEXP_LIKE(sd.p_promo_name, '.*Discount.*'))
-      AND sd.sm_code LIKE 'AIR%'
-      AND EXISTS (
-          SELECT 1
-          FROM ship_mode sm2
-          WHERE sm2.sm_ship_mode_sk = sd.ws_ship_mode_sk
-            AND sm2.sm_type LIKE 'OVER%'
-      )
-    GROUP BY
-        sd.i_brand,
-        REGEXP_EXTRACT(sd.i_product_name, '^(\\w+)', 1)
-) combined
-ORDER BY total_profit DESC, sales_cnt DESC
+    returning_customer_id,
+    num_returns,
+    total_return_amount,
+    avg_return_amount,
+    large_returns,
+    max_item_price,
+    overall_avg_return_amount,
+    ROW_NUMBER() OVER (ORDER BY total_return_amount DESC) AS return_rank,
+    CASE WHEN total_return_amount > overall_avg_return_amount * 2 THEN 'High' ELSE 'Normal' END AS return_category
+FROM customer_returns
+ORDER BY total_return_amount DESC
 LIMIT 100

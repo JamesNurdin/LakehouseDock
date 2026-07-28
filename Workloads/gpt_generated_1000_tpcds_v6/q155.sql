@@ -1,87 +1,54 @@
-WITH promo_agg AS (
-   SELECT
-       p_promo_name,
-       COUNT(*) AS promo_cnt,
-       SUM(p_cost) AS total_cost,
-       AVG(p_cost) AS avg_cost
-   FROM promotion
-   WHERE p_channel_radio = 'N'
-     AND p_response_target = 1
-   GROUP BY p_promo_name
-),
-page_union AS (
-   SELECT
-       cp.cp_catalog_page_id,
-       cp.cp_department,
-       cp.cp_catalog_number,
-       cp.cp_description,
-       d_start.d_year,
-       d_start.d_month_seq,
-       d_end.d_year AS end_year,
-       p.p_promo_name,
-       p.p_cost,
-       CASE WHEN p.p_cost > 1000 THEN 'High' ELSE 'Low' END AS cost_category
-   FROM catalog_page cp
-   JOIN date_dim d_start ON cp.cp_start_date_sk = d_start.d_date_sk
-   JOIN date_dim d_end   ON cp.cp_end_date_sk = d_end.d_date_sk
-   JOIN promotion p ON p.p_start_date_sk = d_start.d_date_sk
-   WHERE cp.cp_department = 'Electronics'
-     AND d_start.d_year = 2000
-     AND d_start.d_month_seq = 1
-     AND p.p_channel_radio = 'N'
-   UNION ALL
-   SELECT
-       cp.cp_catalog_page_id,
-       cp.cp_department,
-       cp.cp_catalog_number,
-       cp.cp_description,
-       d_start.d_year,
-       d_start.d_month_seq,
-       d_end.d_year AS end_year,
-       p.p_promo_name,
-       p.p_cost,
-       CASE WHEN p.p_cost > 1000 THEN 'High' ELSE 'Low' END AS cost_category
-   FROM catalog_page cp
-   JOIN date_dim d_start ON cp.cp_start_date_sk = d_start.d_date_sk
-   JOIN date_dim d_end   ON cp.cp_end_date_sk = d_end.d_date_sk
-   JOIN promotion p ON p.p_start_date_sk = d_start.d_date_sk
-   WHERE cp.cp_department = 'Books'
-     AND d_start.d_year = 2000
-     AND d_start.d_month_seq = 1
-     AND p.p_channel_radio = 'N'
+WITH joined_data AS (
+    SELECT
+        sr.sr_returned_date_sk,
+        sr.sr_return_quantity,
+        sr.sr_return_amt,
+        sr.sr_net_loss,
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_brand,
+        i.i_category,
+        i.i_current_price,
+        hd.hd_income_band_sk,
+        hd.hd_dep_count,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_location_type,
+        p.p_promo_name,
+        p.p_channel_dmail,
+        p.p_channel_press,
+        cr.cr_return_amount,
+        cr.cr_net_loss
+    FROM store_returns sr
+    JOIN item i ON sr.sr_item_sk = i.i_item_sk
+    JOIN household_demographics hd ON sr.sr_hdemo_sk = hd.hd_demo_sk
+    JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
+    JOIN catalog_returns cr ON cr.cr_item_sk = i.i_item_sk
+        AND cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
+        AND cr.cr_refunded_addr_sk = ca.ca_address_sk
+    JOIN promotion p ON p.p_item_sk = i.i_item_sk
+    WHERE ca.ca_state IN ('CA', 'TX', 'NY')
+      AND ca.ca_zip LIKE '9%'
+      AND ca.ca_location_type = 'single family'
+      AND hd.hd_dep_count BETWEEN 1 AND 5
+      AND hd.hd_income_band_sk IN (5, 6, 10)
+      AND p.p_channel_dmail = 'Y'
 )
 SELECT
-    pu.cp_catalog_page_id,
-    pu.cp_department,
-    pu.cp_catalog_number,
-    pu.d_year,
-    pu.end_year,
-    pu.p_promo_name,
-    SUM(pu.p_cost) AS total_page_promo_cost,
-    COUNT(*) AS cnt_page_promo,
-    MAX(CASE WHEN pu.cost_category = 'High' THEN pu.p_cost END) AS max_high_cost,
-    pa.promo_cnt,
-    pa.total_cost,
-    pa.avg_cost,
-    (SELECT COUNT(*) FROM promotion) AS total_promotions
-FROM page_union pu
-JOIN promo_agg pa ON pu.p_promo_name = pa.p_promo_name
-WHERE EXISTS (
-    SELECT 1
-    FROM promotion p2
-    WHERE p2.p_promo_name = pu.p_promo_name
-      AND p2.p_cost > pu.p_cost
-)
-GROUP BY
-    pu.cp_catalog_page_id,
-    pu.cp_department,
-    pu.cp_catalog_number,
-    pu.d_year,
-    pu.end_year,
-    pu.p_promo_name,
-    pa.promo_cnt,
-    pa.total_cost,
-    pa.avg_cost
-HAVING SUM(pu.p_cost) > 500
-ORDER BY total_page_promo_cost DESC
+    jd.i_brand,
+    jd.ca_state,
+    SUM(jd.sr_return_amt) AS total_store_return_amount,
+    SUM(jd.cr_return_amount) AS total_catalog_return_amount,
+    SUM(jd.sr_net_loss) + SUM(jd.cr_net_loss) AS total_net_loss,
+    COUNT(*) AS transaction_count,
+    ROW_NUMBER() OVER (PARTITION BY jd.i_brand ORDER BY SUM(jd.sr_return_amt) DESC) AS brand_state_rank,
+    (
+        SELECT AVG(cr2.cr_return_amount)
+        FROM catalog_returns cr2
+        WHERE cr2.cr_item_sk = jd.i_item_sk
+    ) AS avg_item_catalog_return_amount
+FROM joined_data jd
+GROUP BY jd.i_brand, jd.ca_state, jd.i_item_sk
+HAVING SUM(jd.sr_return_amt) > 1000
+ORDER BY total_net_loss DESC
 LIMIT 100

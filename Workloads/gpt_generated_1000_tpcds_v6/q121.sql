@@ -1,45 +1,54 @@
-WITH ws_promo AS (
-    SELECT
-        ws.ws_sold_date_sk,
-        ws.ws_bill_addr_sk,
-        ws.ws_ship_addr_sk,
-        ws.ws_promo_sk,
-        ws.ws_order_number,
-        ws.ws_quantity,
-        ws.ws_ext_sales_price,
-        ws.ws_net_paid_inc_ship_tax,
-        ws.ws_net_profit,
-        p.p_cost,
-        p.p_channel_demo,
-        p.p_promo_name
-    FROM web_sales ws
-    JOIN promotion p
-        ON ws.ws_promo_sk = p.p_promo_sk
-    WHERE p.p_cost > 500
-        AND p.p_channel_demo = 'N'
-        AND ws.ws_net_paid_inc_ship_tax > 1500
-)
+/*
+  Goal: Identify the top‑selling items in 2001 for customers born in May, excluding any items that were ever returned (store or catalog returns). The query combines sales from brick‑and‑mortar stores and the web channel using UNION ALL, applies anti‑joins (NOT EXISTS), uses DISTINCT, a scalar sub‑query for a comparative threshold, aggregates the results, orders by total net paid and limits to 100 rows.
+*/
 SELECT
-    ca.ca_state,
-    ca.ca_city,
-    ca.ca_street_name,
-    ws.ws_order_number,
-    ws.ws_quantity,
-    ws.ws_ext_sales_price,
-    ws.ws_net_paid_inc_ship_tax,
-    CASE WHEN ws.ws_net_profit > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_flag,
-    ROW_NUMBER() OVER (PARTITION BY ca.ca_state ORDER BY ws.ws_net_paid_inc_ship_tax DESC) AS state_sales_rank
-FROM ws_promo ws
-JOIN customer_address ca
-    ON ws.ws_bill_addr_sk = ca.ca_address_sk
-WHERE EXISTS (
-        SELECT 1
-        FROM store_returns sr
-        WHERE sr.sr_addr_sk = ca.ca_address_sk
-          AND sr.sr_return_quantity > 0
-          AND sr.sr_return_amt > 100
-    )
-  AND ca.ca_state IN ('CA', 'NY', 'TX')
-  AND ws.ws_quantity > 1
-ORDER BY ca.ca_state, state_sales_rank
+  combined.item_id,
+  combined.product_name,
+  combined.year,
+  SUM(combined.net_paid) AS total_net_paid
+FROM (
+    SELECT DISTINCT
+      i.i_item_id        AS item_id,
+      i.i_product_name   AS product_name,
+      d.d_year           AS year,
+      ss.ss_net_paid     AS net_paid
+    FROM store_sales ss
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    WHERE d.d_year = 2001
+      AND c.c_birth_month = 5
+      AND NOT EXISTS (
+            SELECT 1
+            FROM store_returns sr
+            WHERE sr.sr_item_sk = i.i_item_sk
+              AND sr.sr_ticket_number = ss.ss_ticket_number
+      )
+    UNION ALL
+    SELECT DISTINCT
+      i.i_item_id,
+      i.i_product_name,
+      d.d_year,
+      ws.ws_net_paid
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE d.d_year = 2001
+      AND c.c_birth_month = 5
+      AND NOT EXISTS (
+            SELECT 1
+            FROM catalog_returns cr
+            WHERE cr.cr_item_sk = i.i_item_sk
+              AND cr.cr_order_number = ws.ws_order_number
+      )
+) AS combined
+GROUP BY combined.item_id, combined.product_name, combined.year
+HAVING SUM(combined.net_paid) > (
+    SELECT AVG(ss2.ss_net_paid)
+    FROM store_sales ss2
+    JOIN date_dim d2 ON ss2.ss_sold_date_sk = d2.d_date_sk
+    WHERE d2.d_year = 2001
+)
+ORDER BY total_net_paid DESC
 LIMIT 100

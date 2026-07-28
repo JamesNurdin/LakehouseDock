@@ -1,35 +1,23 @@
-WITH combined AS (
-    SELECT
-        d.d_year,
-        d.d_qoy,
-        d.d_current_week,
-        cr.cr_return_amount,
-        cr.cr_refunded_cash,
-        sr.sr_return_amt,
-        wr.wr_return_amt,
-        wp.wp_max_ad_count,
-        CASE WHEN cr.cr_return_amount > 100 THEN 'High' ELSE 'Low' END AS return_category
-    FROM catalog_returns cr
-    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN store_returns sr ON sr.sr_returned_date_sk = d.d_date_sk
-    JOIN web_returns wr ON wr.wr_returned_date_sk = d.d_date_sk
-    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    WHERE d.d_qoy = 2
-      AND d.d_current_week = 'N'
-      AND wp.wp_max_ad_count >= 2
-      AND cr.cr_refunded_cash > 100
-)
 SELECT
-    d_year,
-    d_qoy,
-    return_category,
-    COUNT(*) AS cnt,
-    SUM(cr_return_amount) AS total_cr_return,
-    SUM(sr_return_amt) AS total_sr_return,
-    SUM(wr_return_amt) AS total_wr_return,
-    AVG(cr_refunded_cash) AS avg_refunded_cash
-FROM combined
-GROUP BY d_year, d_qoy, return_category
-HAVING SUM(cr_return_amount) > 500
-ORDER BY total_cr_return DESC
+    CONCAT(w.w_city, ', ', w.w_state) AS location,
+    cp.cp_department,
+    regexp_extract(cp.cp_description, '^(\\w+)', 1) AS first_word,
+    SUM(cr.cr_return_amount) AS total_return_amount,
+    COUNT(*) AS return_cnt
+FROM catalog_returns AS cr
+JOIN catalog_page AS cp
+  ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+JOIN reason AS r
+  ON cr.cr_reason_sk = r.r_reason_sk
+JOIN warehouse AS w
+  ON cr.cr_warehouse_sk = w.w_warehouse_sk
+WHERE regexp_like(cp.cp_description, '\\d{2,}')
+  AND lower(r.r_reason_desc) LIKE '%did not%'
+GROUP BY
+    CONCAT(w.w_city, ', ', w.w_state),
+    cp.cp_department,
+    regexp_extract(cp.cp_description, '^(\\w+)', 1)
+HAVING SUM(cr.cr_return_amount) > 1000
+   AND COUNT(*) >= 5
+ORDER BY total_return_amount DESC
 LIMIT 100

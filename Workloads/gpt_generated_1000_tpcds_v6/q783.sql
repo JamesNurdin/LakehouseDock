@@ -1,110 +1,66 @@
-WITH catalog_unified AS (
+WITH join_all AS (
     SELECT
-        cr.cr_returned_time_sk AS time_sk,
-        td.t_hour AS hour,
-        cr.cr_returned_date_sk AS date_sk,
-        cr.cr_return_amount AS return_amount,
-        cr.cr_net_loss AS net_loss,
-        cr.cr_refunded_customer_sk AS customer_sk,
-        cr.cr_refunded_hdemo_sk AS hd_demo_sk,
-        cr.cr_refunded_addr_sk AS addr_sk,
-        'catalog' AS return_source
-    FROM catalog_returns cr
-    JOIN time_dim td ON cr.cr_returned_time_sk = td.t_time_sk
-    JOIN customer c ON cr.cr_refunded_customer_sk = c.c_customer_sk
-    JOIN customer_demographics cd ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-    JOIN household_demographics hd ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN customer_address ca ON cr.cr_refunded_addr_sk = ca.ca_address_sk
-    WHERE td.t_hour BETWEEN 9 AND 17                                   -- business hours
-      AND c.c_salutation = 'Mr.'                                      -- salutation filter
-      AND ca.ca_zip LIKE '9%'                                         -- zip‑code filter
-      AND hd.hd_vehicle_count >= 1                                    -- at least one vehicle
-      AND hd.hd_income_band_sk IN (10, 17, 20)                         -- income band filter
-),
-store_unified AS (
-    SELECT
-        sr.sr_return_time_sk AS time_sk,
-        td.t_hour AS hour,
-        sr.sr_returned_date_sk AS date_sk,
-        sr.sr_return_amt AS return_amount,
-        sr.sr_net_loss AS net_loss,
-        sr.sr_customer_sk AS customer_sk,
-        sr.sr_hdemo_sk AS hd_demo_sk,
-        sr.sr_addr_sk AS addr_sk,
-        'store' AS return_source
+        s.s_store_sk,
+        s.s_store_name,
+        s.s_state,
+        s.s_closed_date_sk,
+        d1.d_year AS return_year,
+        sr.sr_return_amt,
+        sr.sr_refunded_cash,
+        sr.sr_net_loss,
+        cd1.cd_gender,
+        ca1.ca_state AS cust_state,
+        ca1.ca_country,
+        hd1.hd_buy_potential,
+        wp.wp_type,
+        wp.wp_char_count,
+        wr.wr_return_amt,
+        wr.wr_account_credit
     FROM store_returns sr
-    JOIN time_dim td ON sr.sr_return_time_sk = td.t_time_sk
-    JOIN customer c ON sr.sr_customer_sk = c.c_customer_sk
-    JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
-    JOIN household_demographics hd ON sr.sr_hdemo_sk = hd.hd_demo_sk
-    JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
-    WHERE td.t_hour BETWEEN 9 AND 17
-      AND c.c_salutation = 'Mr.'
-      AND ca.ca_zip LIKE '9%'
-      AND hd.hd_vehicle_count >= 1
-      AND hd.hd_income_band_sk IN (10, 17, 20)
-),
-web_unified AS (
-    SELECT
-        wr.wr_returned_time_sk AS time_sk,
-        td.t_hour AS hour,
-        wr.wr_returned_date_sk AS date_sk,
-        wr.wr_return_amt AS return_amount,
-        wr.wr_net_loss AS net_loss,
-        wr.wr_refunded_customer_sk AS customer_sk,
-        wr.wr_refunded_hdemo_sk AS hd_demo_sk,
-        wr.wr_refunded_addr_sk AS addr_sk,
-        'web' AS return_source
-    FROM web_returns wr
-    JOIN time_dim td ON wr.wr_returned_time_sk = td.t_time_sk
-    JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
-    JOIN customer_demographics cd ON wr.wr_refunded_cdemo_sk = cd.cd_demo_sk
-    JOIN household_demographics hd ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN customer_address ca ON wr.wr_refunded_addr_sk = ca.ca_address_sk
+    JOIN date_dim d1 ON sr.sr_returned_date_sk = d1.d_date_sk
+    JOIN store s ON sr.sr_store_sk = s.s_store_sk
+    JOIN customer_demographics cd1 ON sr.sr_cdemo_sk = cd1.cd_demo_sk
+    JOIN customer_address ca1 ON sr.sr_addr_sk = ca1.ca_address_sk
+    JOIN household_demographics hd1 ON sr.sr_hdemo_sk = hd1.hd_demo_sk
+    JOIN date_dim d3 ON d1.d_date_sk = d3.d_date_sk
+    JOIN web_returns wr ON wr.wr_returned_date_sk = d3.d_date_sk
     JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    WHERE td.t_hour BETWEEN 9 AND 17
-      AND c.c_salutation = 'Mr.'
-      AND ca.ca_zip LIKE '9%'
-      AND hd.hd_vehicle_count >= 1
-      AND hd.hd_income_band_sk IN (10, 17, 20)
-      AND wp.wp_type = 'content'                     -- only content pages
-      AND wr.wr_reversed_charge > 100                -- sizable reversed charge
+    WHERE d1.d_year = 2002
+      AND s.s_state = 'CA'
+      AND ca1.ca_country = 'United States'
+      AND cd1.cd_gender = 'F'
+      AND hd1.hd_buy_potential = '500-1000'
+      AND sr.sr_return_amt > 50
+      AND wp.wp_type = 'product'
+      AND EXISTS (
+          SELECT 1 FROM web_page wp2
+          WHERE wp2.wp_web_page_sk = wp.wp_web_page_sk
+            AND wp2.wp_char_count > 1000
+      )
 ),
-all_returns AS (
-    SELECT * FROM catalog_unified
-    UNION ALL
-    SELECT * FROM store_unified
-    UNION ALL
-    SELECT * FROM web_unified
-),
-aggregated AS (
+agg AS (
     SELECT
-        ur.hour,
-        c.c_salutation,
-        ur.return_source,
-        SUM(ur.return_amount) AS total_return_amount,
-        SUM(ur.net_loss) AS total_net_loss,
-        COUNT(*) AS cnt_returns
-    FROM all_returns ur
-    JOIN customer c ON ur.customer_sk = c.c_customer_sk
-    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
-    JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
-    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
-    GROUP BY GROUPING SETS (
-        (ur.hour, c.c_salutation, ur.return_source),
-        (ur.hour, ur.return_source),
-        (c.c_salutation, ur.return_source),
-        (ur.return_source)
-    )
+        s_store_sk,
+        s_store_name,
+        return_year,
+        SUM(sr_return_amt) AS total_store_return,
+        SUM(wr_return_amt) AS total_web_return,
+        COUNT(*) AS txn_cnt,
+        (
+            SELECT MAX(d_closed.d_year)
+            FROM date_dim d_closed
+            WHERE d_closed.d_date_sk = s_closed_date_sk
+        ) AS store_closed_year
+    FROM join_all
+    GROUP BY s_store_sk, s_store_name, return_year, s_closed_date_sk
 )
 SELECT
-    hour,
-    c_salutation,
-    return_source,
-    total_return_amount,
-    total_net_loss,
-    cnt_returns,
-    RANK() OVER (PARTITION BY return_source ORDER BY total_net_loss DESC) AS loss_rank
-FROM aggregated
-ORDER BY total_net_loss DESC
+    s_store_name,
+    store_closed_year,
+    AVG(total_store_return + total_web_return) AS avg_total_return,
+    SUM(txn_cnt) AS total_txns
+FROM agg
+GROUP BY s_store_name, store_closed_year
+HAVING AVG(total_store_return + total_web_return) > 1000
+ORDER BY avg_total_return DESC
 LIMIT 100

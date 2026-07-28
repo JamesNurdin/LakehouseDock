@@ -1,41 +1,39 @@
-WITH sales_agg AS (
+WITH filtered_customers AS (
     SELECT
-        cs.cs_call_center_sk,
-        cs.cs_warehouse_sk,
-        cs.cs_catalog_page_sk,
-        SUM(cs.cs_net_profit) AS total_profit,
-        SUM(cs.cs_quantity) AS total_quantity
+        c.c_customer_sk,
+        c.c_email_address,
+        c.c_first_name,
+        c.c_last_name,
+        regexp_extract(c.c_email_address, '@([^.]*)\\.', 1) AS email_domain,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name
+    FROM tpcds.customer c
+    WHERE c.c_email_address LIKE '%@example.com'
+      AND regexp_like(c.c_email_address, '^.*@example\\.com$')
+      AND c.c_first_name LIKE 'A%'
+),
+high_value_items AS (
+    SELECT cs.cs_item_sk
     FROM tpcds.catalog_sales cs
-    GROUP BY cs.cs_call_center_sk, cs.cs_warehouse_sk, cs.cs_catalog_page_sk
+    WHERE cs.cs_ext_sales_price > 1000
 )
-
 SELECT
-    cc.cc_name               AS entity_name,
-    w.w_warehouse_name       AS location,
-    sa.total_profit,
-    sa.total_quantity
-FROM sales_agg sa
-JOIN tpcds.call_center cc
-  ON sa.cs_call_center_sk = cc.cc_call_center_sk
-JOIN tpcds.warehouse w
-  ON sa.cs_warehouse_sk = w.w_warehouse_sk
-WHERE sa.total_profit > (SELECT AVG(total_profit) FROM sales_agg)
-  AND EXISTS (
-        SELECT 1
-        FROM tpcds.warehouse w2
-        WHERE w2.w_city = w.w_city
-          AND w2.w_state = w.w_state
-      )
-UNION ALL
-SELECT
-    cp.cp_catalog_page_id    AS entity_name,
-    cp.cp_description        AS location,
-    sa.total_profit,
-    sa.total_quantity
-FROM sales_agg sa
-JOIN tpcds.catalog_page cp
-  ON sa.cs_catalog_page_sk = cp.cp_catalog_page_sk
-WHERE sa.total_quantity > 1000
-  AND cp.cp_type = 'A'
-ORDER BY total_profit DESC
+    s.s_store_id,
+    s.s_store_name,
+    fc.email_domain,
+    SUM(ss.ss_net_profit) AS total_net_profit,
+    RANK() OVER (ORDER BY SUM(ss.ss_net_profit) DESC) AS profit_rank
+FROM tpcds.store_sales ss
+JOIN tpcds.store s
+    ON ss.ss_store_sk = s.s_store_sk
+JOIN filtered_customers fc
+    ON ss.ss_customer_sk = fc.c_customer_sk
+JOIN tpcds.time_dim td
+    ON ss.ss_sold_time_sk = td.t_time_sk
+WHERE td.t_hour BETWEEN 9 AND 17
+  AND ss.ss_item_sk IN (SELECT cs_item_sk FROM high_value_items)
+GROUP BY
+    s.s_store_id,
+    s.s_store_name,
+    fc.email_domain
+ORDER BY total_net_profit DESC
 LIMIT 100

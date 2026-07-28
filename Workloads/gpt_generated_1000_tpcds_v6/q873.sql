@@ -1,46 +1,66 @@
-WITH agg_returns AS (
-    SELECT
-        cr.cr_call_center_sk,
-        cc.cc_name,
-        d.d_year,
-        t.t_am_pm,
-        SUM(cr.cr_return_amount) AS total_return
-    FROM catalog_returns cr
-    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN time_dim t ON cr.cr_returned_time_sk = t.t_time_sk
-    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    WHERE d.d_year IN (1999, 2000)
-    GROUP BY cr.cr_call_center_sk, cc.cc_name, d.d_year, t.t_am_pm
+WITH sales AS (
+    SELECT DISTINCT
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_category,
+        cs.cs_ext_sales_price AS total_amount,
+        'sale' AS transaction_type,
+        ca.ca_state
+    FROM catalog_sales cs
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
+    WHERE i.i_current_price > (SELECT avg(i2.i_current_price) FROM item i2)
+      AND w.w_state = 'CA'
+      AND EXISTS (
+          SELECT 1 FROM warehouse w2
+          WHERE w2.w_state = ca.ca_state
+            AND w2.w_warehouse_sq_ft > 200000
+      )
 ),
-combined AS (
-    SELECT
-        cr_call_center_sk,
-        cc_name,
-        d_year,
-        t_am_pm,
-        total_return
-    FROM agg_returns
-    WHERE t_am_pm = 'AM'
-      AND total_return > (SELECT AVG(total_return) FROM agg_returns)
-    UNION ALL
-    SELECT
-        cr_call_center_sk,
-        cc_name,
-        d_year,
-        t_am_pm,
-        total_return
-    FROM agg_returns
-    WHERE t_am_pm = 'PM'
-      AND total_return > (SELECT AVG(total_return) FROM agg_returns) * 1.5
+returns AS (
+    SELECT DISTINCT
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_category,
+        wr.wr_return_amt AS total_amount,
+        'return' AS transaction_type,
+        ca.ca_state
+    FROM web_returns wr
+    JOIN item i ON wr.wr_item_sk = i.i_item_sk
+    JOIN household_demographics hd ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
+    JOIN customer_address ca ON wr.wr_refunded_addr_sk = ca.ca_address_sk
+    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    WHERE wp.wp_type = 'product'
+      AND EXISTS (
+          SELECT 1 FROM warehouse w3
+          WHERE w3.w_state = ca.ca_state
+            AND w3.w_warehouse_sq_ft > 200000
+      )
 )
 SELECT
-    c.cr_call_center_sk,
-    c.cc_name,
-    c.d_year,
-    SUM(c.total_return) AS total_return_sum,
-    COUNT(DISTINCT c.t_am_pm) AS am_pm_covered
-FROM combined c
-GROUP BY c.cr_call_center_sk, c.cc_name, c.d_year
-HAVING SUM(c.total_return) > 50000
-ORDER BY total_return_sum DESC
-LIMIT 50
+    item_id,
+    item_desc,
+    category,
+    total_amount,
+    transaction_type
+FROM (
+    SELECT
+        i_item_id AS item_id,
+        i_item_desc AS item_desc,
+        i_category AS category,
+        total_amount,
+        transaction_type
+    FROM sales
+    UNION ALL
+    SELECT
+        i_item_id,
+        i_item_desc,
+        i_category,
+        total_amount,
+        transaction_type
+    FROM returns
+) AS combined
+ORDER BY total_amount DESC
+LIMIT 100

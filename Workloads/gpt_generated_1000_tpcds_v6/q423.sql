@@ -1,52 +1,50 @@
-WITH high_spenders AS (
-    SELECT c.c_customer_sk
-    FROM catalog_sales cs
-    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
-    WHERE cs.cs_net_paid_inc_ship > 3000
-    GROUP BY c.c_customer_sk
-    HAVING COUNT(*) >= 2
+WITH warehouse_returns AS (
+    SELECT
+        cr.cr_warehouse_sk,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        COUNT(*) AS return_cnt
+    FROM catalog_returns cr
+    GROUP BY cr.cr_warehouse_sk
 )
 SELECT
-    r.customer_id,
-    r.activity_type,
-    SUM(r.amount) AS total_amount,
-    CASE WHEN SUM(r.amount) > 5000 THEN 'High' ELSE 'Low' END AS amount_category,
-    COUNT(DISTINCT r.activity_date) AS distinct_days
-FROM (
-    -- Catalog sales side
-    SELECT
-        c.c_customer_id AS customer_id,
-        'sale' AS activity_type,
-        cs.cs_net_paid_inc_ship AS amount,
-        DATE '2022-01-01' + INTERVAL '1' DAY * cs.cs_sold_date_sk AS activity_date
-    FROM catalog_sales cs
-    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
-    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-    WHERE cp.cp_catalog_number IN (10, 11, 16)
-      AND cs.cs_sold_date_sk BETWEEN 2450000 AND 2450100
-      AND EXISTS (
-          SELECT 1
-          FROM promotion p
-          WHERE p.p_promo_sk = cs.cs_promo_sk
-            AND p.p_discount_active = 'Y'
-      )
-      AND c.c_customer_sk IN (SELECT c_customer_sk FROM high_spenders)
-
-    UNION ALL
-
-    -- Web returns side
-    SELECT
-        c.c_customer_id AS customer_id,
-        'return' AS activity_type,
-        -wr.wr_return_amt AS amount,
-        DATE '2022-01-01' + INTERVAL '1' DAY * wr.wr_returned_date_sk AS activity_date
-    FROM web_returns wr
-    JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
-    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    WHERE wp.wp_type = 'content'
-      AND wr.wr_returned_date_sk BETWEEN 2450000 AND 2450100
-      AND c.c_customer_sk IN (SELECT c_customer_sk FROM high_spenders)
-) AS r
-GROUP BY r.customer_id, r.activity_type
-ORDER BY total_amount DESC
+    w.w_warehouse_name,
+    w.w_city,
+    rr.total_return_amount,
+    rr.return_cnt,
+    r.r_reason_desc,
+    d.d_year,
+    p.p_promo_name
+FROM warehouse_returns rr
+JOIN warehouse w
+    ON rr.cr_warehouse_sk = w.w_warehouse_sk
+JOIN catalog_returns cr
+    ON cr.cr_warehouse_sk = w.w_warehouse_sk
+JOIN reason r
+    ON cr.cr_reason_sk = r.r_reason_sk
+JOIN date_dim d
+    ON cr.cr_returned_date_sk = d.d_date_sk
+LEFT JOIN promotion p
+    ON p.p_start_date_sk = d.d_date_sk
+LEFT JOIN customer cu_refunded
+    ON cr.cr_refunded_customer_sk = cu_refunded.c_customer_sk
+LEFT JOIN customer_demographics cd_refunded
+    ON cr.cr_refunded_cdemo_sk = cd_refunded.cd_demo_sk
+LEFT JOIN customer cu_returning
+    ON cr.cr_returning_customer_sk = cu_returning.c_customer_sk
+LEFT JOIN customer_demographics cd_returning
+    ON cr.cr_returning_cdemo_sk = cd_returning.cd_demo_sk
+WHERE d.d_year = 2002
+  AND w.w_warehouse_sq_ft > 600000
+  AND r.r_reason_desc LIKE '%color%'
+  AND p.p_promo_name = 'Holiday Discount'
+  AND cu_refunded.c_preferred_cust_flag = 'Y'
+GROUP BY
+    w.w_warehouse_name,
+    w.w_city,
+    rr.total_return_amount,
+    rr.return_cnt,
+    r.r_reason_desc,
+    d.d_year,
+    p.p_promo_name
+ORDER BY rr.total_return_amount DESC
 LIMIT 100

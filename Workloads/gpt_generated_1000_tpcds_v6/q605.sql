@@ -1,32 +1,33 @@
-WITH avg_catalog AS (
-    SELECT avg(cs_net_paid_inc_tax) AS avg_net_paid
-    FROM catalog_sales
+WITH catalog_agg AS (
+    SELECT
+        ca.ca_state AS state,
+        SUM(cs.cs_ext_sales_price) AS total_sales,
+        'catalog' AS channel
+    FROM tpcds.catalog_sales cs
+    JOIN tpcds.customer c
+        ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN tpcds.customer_address ca
+        ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cs.cs_ext_sales_price > 1000
+    GROUP BY ca.ca_state
+),
+web_agg AS (
+    SELECT
+        ca.ca_state AS state,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        'web' AS channel
+    FROM tpcds.web_sales ws
+    JOIN tpcds.customer c
+        ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN tpcds.customer_address ca
+        ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE ws.ws_ext_sales_price > 1000
+    GROUP BY ca.ca_state
 )
-SELECT
-    ca.ca_zip AS zip_code,
-    'catalog' AS sales_source,
-    SUM(cs.cs_net_paid_inc_tax) AS total_net_paid_inc_tax
-FROM catalog_sales cs
-JOIN customer_address ca
-  ON cs.cs_bill_addr_sk = ca.ca_address_sk
-WHERE cs.cs_net_paid_inc_tax > 500
-  AND ca.ca_state = 'TX'
-  AND cs.cs_net_paid_inc_tax > (SELECT avg_net_paid FROM avg_catalog)
-GROUP BY ca.ca_zip
-
+SELECT *
+FROM catalog_agg
 UNION ALL
-
-SELECT
-    ca.ca_zip AS zip_code,
-    'store' AS sales_source,
-    SUM(ss.ss_net_paid_inc_tax) AS total_net_paid_inc_tax
-FROM store_sales ss
-JOIN customer_address ca
-  ON ss.ss_addr_sk = ca.ca_address_sk
-WHERE ss.ss_net_paid_inc_tax > 500
-  AND ca.ca_state = 'TX'
-  AND ss.ss_net_paid_inc_tax > (SELECT avg_net_paid FROM avg_catalog)
-GROUP BY ca.ca_zip
-
-ORDER BY total_net_paid_inc_tax DESC
-LIMIT 100
+SELECT *
+FROM web_agg
+ORDER BY total_sales DESC
+LIMIT 50

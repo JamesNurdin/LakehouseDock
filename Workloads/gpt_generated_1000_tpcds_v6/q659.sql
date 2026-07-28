@@ -1,48 +1,33 @@
-WITH per_customer_return AS (
+WITH sales_agg AS (
     SELECT
-        ca.ca_county AS county,
-        ib.ib_lower_bound AS income_lower,
-        ib.ib_upper_bound AS income_upper,
-        cd.cd_gender AS gender,
-        c.c_salutation AS salutation,
-        SUM(sr.sr_return_amt) AS total_return_amt,
-        COUNT(*) AS return_cnt,
-        AVG(sr.sr_return_amt) AS avg_return_amt,
-        SUM(CASE WHEN sr.sr_return_amt > 100 THEN sr.sr_return_amt ELSE 0 END) AS high_return_sum
-    FROM store_returns sr
-    JOIN customer c
-        ON sr.sr_customer_sk = c.c_customer_sk
-    JOIN customer_demographics cd
-        ON sr.sr_cdemo_sk = cd.cd_demo_sk
-    JOIN household_demographics hd
-        ON sr.sr_hdemo_sk = hd.hd_demo_sk
-    JOIN customer_address ca
-        ON sr.sr_addr_sk = ca.ca_address_sk
-    JOIN income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    WHERE ca.ca_county = 'Maricopa County'
-      AND ib.ib_lower_bound >= 50000
-      AND cd.cd_gender = 'F'
-      AND c.c_salutation = 'Ms.'
-      AND sr.sr_return_amt > 0
-    GROUP BY ca.ca_county, ib.ib_lower_bound, ib.ib_upper_bound, cd.cd_gender, c.c_salutation
+        i.i_category AS category,
+        i.i_brand AS brand,
+        wp.wp_type AS page_type,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(*) AS order_cnt
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    WHERE i.i_category_id IN (1, 2, 8)
+      AND i.i_units IN ('Case', 'Bundle')
+      AND wp.wp_image_count >= 4
+      AND ws.ws_ext_discount_amt BETWEEN 0 AND 5000
+      AND ws.ws_ext_wholesale_cost > 300
+    GROUP BY ROLLUP (i.i_category, i.i_brand, wp.wp_type)
 )
 SELECT
-    county,
-    income_lower,
-    income_upper,
-    gender,
-    salutation,
-    total_return_amt,
-    return_cnt,
-    avg_return_amt,
-    high_return_sum,
+    category,
+    brand,
+    page_type,
+    total_sales,
+    total_profit,
+    order_cnt,
+    ROW_NUMBER() OVER (PARTITION BY category ORDER BY total_sales DESC) AS sales_rank,
     CASE
-        WHEN total_return_amt > 10000 THEN 'High'
-        WHEN total_return_amt BETWEEN 5000 AND 10000 THEN 'Medium'
-        ELSE 'Low'
-    END AS return_category
-FROM per_customer_return
-WHERE return_cnt >= 5
-ORDER BY total_return_amt DESC
+        WHEN total_profit > 0 THEN 'Profitable'
+        ELSE 'Loss'
+    END AS profit_status
+FROM sales_agg
+ORDER BY category, sales_rank
 LIMIT 100

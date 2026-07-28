@@ -1,63 +1,105 @@
-WITH sales_data AS (
+WITH base AS (
     SELECT
-        ss.ss_sold_date_sk,
-        ss.ss_customer_sk,
-        ss.ss_addr_sk,
-        ss.ss_store_sk,
-        ss.ss_promo_sk,
-        ss.ss_ticket_number,
-        ss.ss_quantity,
-        ss.ss_net_profit,
-        ss.ss_net_paid,
-        ss.ss_ext_sales_price,
-        CASE WHEN ss.ss_quantity > 5 THEN 'Bulk' ELSE 'Single' END AS sale_type,
-        sr.sr_return_quantity,
-        sr.sr_return_amt,
-        sr.sr_reason_sk,
-        c.c_first_name,
-        c.c_last_name,
-        c.c_customer_sk,
-        ca.ca_city,
-        s.s_store_name,
+        cs.cs_sold_date_sk,
+        cs.cs_ship_date_sk,
+        cs.cs_net_profit,
+        cs.cs_ext_list_price,
+        cs.cs_quantity,
+        d_sold.d_year,
+        d_sold.d_date,
         p.p_promo_name,
-        d_sales.d_year AS sales_year,
-        d_return.d_year AS return_year,
-        r.r_reason_desc
-    FROM store_sales ss
-    JOIN store s ON ss.ss_store_sk = s.s_store_sk
-    JOIN date_dim d_sales ON ss.ss_sold_date_sk = d_sales.d_date_sk
-    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
-    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
-    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
-    LEFT JOIN store_returns sr ON sr.sr_ticket_number = ss.ss_ticket_number
-    LEFT JOIN date_dim d_return ON sr.sr_returned_date_sk = d_return.d_date_sk
-    LEFT JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+        sm.sm_type,
+        hd_bill.hd_buy_potential,
+        CASE 
+            WHEN cs.cs_net_profit > 1000 THEN 'HIGH'
+            WHEN cs.cs_net_profit > 0 THEN 'MEDIUM'
+            ELSE 'LOW'
+        END AS profit_category,
+        inv.inv_quantity_on_hand,
+        wr.wr_return_amt
+    FROM catalog_sales cs
+    JOIN date_dim d_sold
+        ON cs.cs_sold_date_sk = d_sold.d_date_sk
+    JOIN date_dim d_ship
+        ON cs.cs_ship_date_sk = d_ship.d_date_sk
+    JOIN household_demographics hd_bill
+        ON cs.cs_bill_hdemo_sk = hd_bill.hd_demo_sk
+    JOIN household_demographics hd_ship
+        ON cs.cs_ship_hdemo_sk = hd_ship.hd_demo_sk
+    JOIN ship_mode sm
+        ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN promotion p
+        ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN store_sales ss
+        ON ss.ss_sold_date_sk = d_sold.d_date_sk
+    JOIN household_demographics hd_store
+        ON ss.ss_hdemo_sk = hd_store.hd_demo_sk
+    JOIN promotion p2
+        ON ss.ss_promo_sk = p2.p_promo_sk
+    JOIN inventory inv
+        ON inv.inv_date_sk = d_sold.d_date_sk
+    JOIN web_returns wr
+        ON wr.wr_returned_date_sk = d_sold.d_date_sk
+    JOIN household_demographics hd_refunded
+        ON wr.wr_refunded_hdemo_sk = hd_refunded.hd_demo_sk
+    JOIN household_demographics hd_returning
+        ON wr.wr_returning_hdemo_sk = hd_returning.hd_demo_sk
+    JOIN web_page wp
+        ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    JOIN reason r
+        ON wr.wr_reason_sk = r.r_reason_sk
+    JOIN date_dim d_wp_creation
+        ON wp.wp_creation_date_sk = d_wp_creation.d_date_sk
+    JOIN date_dim d_wp_access
+        ON wp.wp_access_date_sk = d_wp_access.d_date_sk
+    WHERE EXISTS (
+        SELECT 1
+        FROM reason r2
+        WHERE r2.r_reason_sk = wr.wr_reason_sk
+          AND r2.r_reason_desc = 'Customer Not Satisfied'
+    )
+),
+agg AS (
+    SELECT
+        d_year,
+        p_promo_name,
+        sm_type,
+        hd_buy_potential,
+        profit_category,
+        SUM(cs_net_profit) AS total_profit,
+        AVG(inv_quantity_on_hand) AS avg_inventory_on_hand,
+        COUNT(DISTINCT cs_sold_date_sk) AS days_sold,
+        SUM(cs_quantity) AS total_quantity,
+        SUM(wr_return_amt) AS total_return_amount,
+        SUM(cs_ext_list_price) AS total_list_price
+    FROM base
+    GROUP BY
+        d_year,
+        p_promo_name,
+        sm_type,
+        hd_buy_potential,
+        profit_category
+    HAVING SUM(cs_net_profit) > 10000
 )
 SELECT
-    sd.s_store_name,
-    sd.sales_year,
-    COUNT(DISTINCT sd.c_customer_sk) AS unique_customers,
-    SUM(sd.ss_net_profit) AS total_net_profit,
-    SUM(COALESCE(sd.sr_return_amt, 0)) AS total_return_amount,
-    SUM(sd.ss_quantity) AS total_quantity,
-    CASE WHEN SUM(sd.ss_net_profit) > 50000 THEN 'High' ELSE 'Normal' END AS profit_category,
-    CASE WHEN SUM(sd.ss_quantity) > 1000 THEN 'BulkStore' ELSE 'RegularStore' END AS store_type
-FROM sales_data sd
-JOIN store s2 ON sd.ss_store_sk = s2.s_store_sk               -- reuse store with a different alias
-JOIN date_dim d_closed ON s2.s_closed_date_sk = d_closed.d_date_sk   -- join closed‑date dimension
-JOIN web_page wp ON wp.wp_customer_sk = sd.c_customer_sk
-WHERE EXISTS (
-    SELECT 1 FROM promotion p2
-    WHERE p2.p_promo_sk = sd.ss_promo_sk
-      AND p2.p_discount_active = 'Y'
-)
-  AND wp.wp_type = 'article'
-GROUP BY
-    sd.s_store_name,
-    sd.sales_year
-HAVING
-    SUM(sd.ss_net_profit) > 10000
-    AND COUNT(DISTINCT sd.c_customer_sk) > 5
-ORDER BY
-    total_net_profit DESC
+    d_year,
+    p_promo_name,
+    sm_type,
+    hd_buy_potential,
+    profit_category,
+    total_profit,
+    avg_inventory_on_hand,
+    days_sold,
+    total_quantity,
+    total_return_amount,
+    total_list_price,
+    total_list_price / NULLIF(total_quantity, 0) AS avg_price_per_unit,
+    total_profit / NULLIF(total_quantity, 0) AS profit_per_unit,
+    SUM(total_profit) OVER (
+        PARTITION BY d_year
+        ORDER BY total_profit
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS running_year_profit
+FROM agg
+ORDER BY total_profit DESC
 LIMIT 100

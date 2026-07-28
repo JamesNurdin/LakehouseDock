@@ -1,7 +1,12 @@
-SELECT DISTINCT i.i_brand, i.i_category, inv.inv_quantity_on_hand
-FROM tpcds.inventory AS inv
-JOIN tpcds.item AS i
-  ON inv.inv_item_sk = i.i_item_sk
-WHERE inv.inv_warehouse_sk = 18
-  AND i.i_formulation LIKE '%seashell%'
+SELECT
+    w.w_warehouse_id,
+    w.w_city,
+    SUM(i.inv_quantity_on_hand) AS total_quantity
+FROM tpcds.inventory i
+JOIN tpcds.warehouse w
+  ON i.inv_warehouse_sk = w.w_warehouse_sk
+WHERE w.w_zip = '44593'
+  AND i.inv_quantity_on_hand > 600
+GROUP BY w.w_warehouse_id, w.w_city
+ORDER BY total_quantity DESC
 LIMIT 100

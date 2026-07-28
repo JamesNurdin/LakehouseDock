@@ -1,70 +1,34 @@
-WITH sales_agg AS (
-    SELECT
-        d1.d_year,
-        ca.ca_state,
-        we.web_name,
-        SUM(cs.cs_net_profit) AS catalog_profit,
-        SUM(ss.ss_net_profit) AS store_profit,
-        SUM(ws.ws_net_profit) AS web_profit,
-        SUM(cs.cs_ext_sales_price) AS catalog_sales,
-        SUM(ss.ss_ext_sales_price) AS store_sales,
-        SUM(ws.ws_ext_sales_price) AS web_sales
-    FROM catalog_sales cs
-    JOIN date_dim d1 ON cs.cs_sold_date_sk = d1.d_date_sk
-    JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
-    JOIN store_sales ss
-        ON ss.ss_sold_date_sk = d1.d_date_sk
-        AND ss.ss_addr_sk = ca.ca_address_sk
-    JOIN web_sales ws
-        ON ws.ws_sold_date_sk = d1.d_date_sk
-        AND ws.ws_bill_addr_sk = ca.ca_address_sk
-    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
-    JOIN web_site we ON ws.ws_web_site_sk = we.web_site_sk
-    JOIN inventory inv ON inv.inv_date_sk = d1.d_date_sk
-    WHERE d1.d_year = 2001
-      AND ca.ca_state IN ('CA', 'TX', 'NY')
-      AND we.web_market_manager = 'James Brewer'
-      AND wp.wp_type = 'home'
-      AND wp.wp_char_count > 1000
-      AND inv.inv_quantity_on_hand > 0
-      AND cs.cs_quantity > 1
-      AND ss.ss_quantity > 0
-      AND ws.ws_quantity > 0
-    GROUP BY GROUPING SETS (
-        (d1.d_year, ca.ca_state, we.web_name),
-        (d1.d_year, ca.ca_state),
-        (d1.d_year),
-        ()
-    )
+WITH filtered_items AS (
+    SELECT i_item_sk, i_category, i_product_name, i_item_desc
+    FROM item
+    WHERE regexp_like(i_product_name, '^A.*')
 )
 SELECT
-    d_year,
-    ca_state,
-    web_name,
-    catalog_profit,
-    store_profit,
-    web_profit,
-    (catalog_profit + store_profit + web_profit) AS total_profit
-FROM sales_agg
-WHERE (catalog_profit + store_profit + web_profit) > (
-    SELECT AVG(total_profit) FROM (
-        SELECT
-            SUM(cs.cs_net_profit) + SUM(ss.ss_net_profit) + SUM(ws.ws_net_profit) AS total_profit
-        FROM catalog_sales cs
-        JOIN date_dim d2 ON cs.cs_sold_date_sk = d2.d_date_sk
-        JOIN customer_address ca2 ON cs.cs_bill_addr_sk = ca2.ca_address_sk
-        JOIN store_sales ss
-            ON ss.ss_sold_date_sk = d2.d_date_sk
-            AND ss.ss_addr_sk = ca2.ca_address_sk
-        JOIN web_sales ws
-            ON ws.ws_sold_date_sk = d2.d_date_sk
-            AND ws.ws_bill_addr_sk = ca2.ca_address_sk
-        WHERE d2.d_year = 2001
-          AND ca2.ca_state IN ('CA', 'TX', 'NY')
-          AND cs.cs_quantity > 1
-          AND ss.ss_quantity > 0
-          AND ws.ws_quantity > 0
-    ) sub
+    d.d_year,
+    i.i_category,
+    regexp_extract(i.i_product_name, '^([^ ]+)', 1) AS product_prefix,
+    SUM(cs.cs_net_paid) AS total_net_paid,
+    SUM(cs.cs_net_profit) AS total_net_profit,
+    COUNT(*) AS sales_cnt,
+    RANK() OVER (PARTITION BY i.i_category ORDER BY SUM(cs.cs_net_profit) DESC) AS profit_rank,
+    CONCAT('Category ', i.i_category) AS category_label
+FROM catalog_sales cs
+JOIN filtered_items i ON cs.cs_item_sk = i.i_item_sk
+JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+WHERE d.d_year = 2001
+  AND (cp.cp_description LIKE '%electronics%'
+       OR regexp_like(cp.cp_description, '.*[0-9]{4}.*'))
+  AND cc.cc_country = 'United States'
+GROUP BY
+    d.d_year,
+    i.i_category,
+    regexp_extract(i.i_product_name, '^([^ ]+)', 1)
+HAVING SUM(cs.cs_net_profit) > (
+    SELECT AVG(cs2.cs_net_profit) * 0.5
+    FROM catalog_sales cs2
+    JOIN date_dim d2 ON cs2.cs_sold_date_sk = d2.d_date_sk
+    WHERE d2.d_year = 2001
 )
-ORDER BY d_year DESC, total_profit DESC
-LIMIT 100
+ORDER BY total_net_profit DESC, i.i_category

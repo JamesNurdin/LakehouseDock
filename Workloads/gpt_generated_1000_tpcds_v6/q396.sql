@@ -1,50 +1,51 @@
-WITH ws_agg AS (
-    SELECT
-        ws.ws_sold_date_sk,
-        ws.ws_sold_time_sk,
-        ws.ws_ship_mode_sk,
-        ws.ws_promo_sk,
-        ws.ws_bill_customer_sk,
-        ws.ws_web_site_sk,
-        SUM(ws.ws_net_paid) AS total_net_paid,
-        COUNT(*) AS order_cnt,
-        (
-            SELECT MAX(p2.p_cost)
-            FROM promotion p2
-            WHERE p2.p_promo_sk = ws.ws_promo_sk
-        ) AS max_promo_cost
-    FROM web_sales ws
-    WHERE ws.ws_sold_date_sk IN (
-        SELECT d.d_date_sk
-        FROM date_dim d
-        WHERE d.d_year = 2001
-          AND d.d_month_seq BETWEEN 1 AND 12
-    )
-    GROUP BY
-        ws.ws_sold_date_sk,
-        ws.ws_sold_time_sk,
-        ws.ws_ship_mode_sk,
-        ws.ws_promo_sk,
-        ws.ws_bill_customer_sk,
-        ws.ws_web_site_sk
+WITH distinct_items AS (
+    SELECT DISTINCT i_item_id, i_item_sk
+    FROM item
+    WHERE i_brand_id IN (1, 2, 3)
+      AND i_category = 'Sports'
+      AND i_color = 'BLACK'
+),
+
+inventory_metrics AS (
+    SELECT di.i_item_id,
+           wh.w_warehouse_name,
+           SUM(inv.inv_quantity_on_hand) AS metric_value,
+           'inventory_qty' AS metric_type
+    FROM inventory inv
+    JOIN distinct_items di ON inv.inv_item_sk = di.i_item_sk
+    JOIN warehouse wh ON inv.inv_warehouse_sk = wh.w_warehouse_sk
+    WHERE inv.inv_date_sk BETWEEN 2450800 AND 2451100
+      AND wh.w_warehouse_sq_ft > 500000
+    GROUP BY di.i_item_id, wh.w_warehouse_name
+),
+
+return_metrics AS (
+    SELECT di.i_item_id,
+           NULL AS w_warehouse_name,
+           SUM(wr.wr_net_loss) AS metric_value,
+           'return_loss' AS metric_type
+    FROM web_returns wr
+    JOIN distinct_items di ON wr.wr_item_sk = di.i_item_sk
+    WHERE wr.wr_returned_date_sk BETWEEN 2450800 AND 2451100
+      AND wr.wr_refunded_customer_sk IN (6302889, 10455891)
+      AND wr.wr_refunded_hdemo_sk IN (6530, 5522)
+      AND wr.wr_return_quantity > 0
+    GROUP BY di.i_item_id
+),
+
+combined AS (
+    SELECT i_item_id, w_warehouse_name, metric_type, metric_value
+    FROM inventory_metrics
+    UNION ALL
+    SELECT i_item_id, w_warehouse_name, metric_type, metric_value
+    FROM return_metrics
 )
 SELECT
-    sm.sm_type,
-    AVG(wa.total_net_paid) AS avg_total_net_paid,
-    SUM(wa.order_cnt) AS sum_orders,
-    AVG(wa.max_promo_cost) AS avg_max_promo_cost
-FROM ws_agg wa
-JOIN date_dim d            ON wa.ws_sold_date_sk = d.d_date_sk
-JOIN time_dim t            ON wa.ws_sold_time_sk = t.t_time_sk
-JOIN ship_mode sm          ON wa.ws_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN promotion p           ON wa.ws_promo_sk = p.p_promo_sk
-JOIN customer c            ON wa.ws_bill_customer_sk = c.c_customer_sk
-JOIN web_site ws           ON wa.ws_web_site_sk = ws.web_site_sk
-WHERE sm.sm_type = 'AIR'
-  AND p.p_purpose = 'Discount'
-  AND c.c_preferred_cust_flag = 'Y'
-  AND t.t_hour BETWEEN 9 AND 17
-GROUP BY sm.sm_type
-HAVING AVG(wa.total_net_paid) > 1000
-ORDER BY avg_total_net_paid DESC
+    c.i_item_id,
+    c.w_warehouse_name,
+    c.metric_type,
+    c.metric_value,
+    ROW_NUMBER() OVER (PARTITION BY c.metric_type ORDER BY c.metric_value DESC) AS rank
+FROM combined c
+ORDER BY c.metric_type, rank
 LIMIT 100

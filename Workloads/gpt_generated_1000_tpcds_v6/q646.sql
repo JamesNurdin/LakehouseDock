@@ -1,78 +1,76 @@
-WITH store_agg AS (
+WITH cs_agg AS (
     SELECT
-        c.c_customer_sk,
-        c.c_customer_id,
-        ca.ca_state,
-        COUNT(DISTINCT sr.sr_ticket_number) AS store_return_count,
-        CAST(NULL AS integer) AS web_return_count,
-        SUM(sr.sr_return_amt) AS store_return_total,
-        CAST(NULL AS decimal(7,2)) AS web_return_total,
-        AVG(sr.sr_return_ship_cost) AS avg_ship_cost,
-        CAST(NULL AS decimal(7,2)) AS avg_account_credit,
-        MIN(sr.sr_return_amt_inc_tax) AS min_return_inc_tax,
-        MAX(sr.sr_return_amt_inc_tax) AS max_return_inc_tax
-    FROM tpcds.customer c
-    JOIN tpcds.customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
-    JOIN tpcds.store_returns sr ON sr.sr_customer_sk = c.c_customer_sk
-    WHERE c.c_birth_day BETWEEN 10 AND 20
-      AND c.c_birth_month = 5
-      AND c.c_first_sales_date_sk = 2451247
-      AND sr.sr_store_credit > 50
-      AND sr.sr_return_ship_cost < 50
-      AND ca.ca_gmt_offset >= -5.00
-    GROUP BY c.c_customer_sk, c.c_customer_id, ca.ca_state
-    HAVING COUNT(sr.sr_ticket_number) > 1
-),
-web_agg AS (
-    SELECT
-        c.c_customer_sk,
-        c.c_customer_id,
-        ca.ca_state,
-        CAST(NULL AS integer) AS store_return_count,
-        COUNT(DISTINCT wr.wr_order_number) AS web_return_count,
-        CAST(NULL AS decimal(7,2)) AS store_return_total,
-        SUM(wr.wr_return_amt) AS web_return_total,
-        CAST(NULL AS decimal(7,2)) AS avg_ship_cost,
-        AVG(wr.wr_account_credit) AS avg_account_credit,
-        MIN(wr.wr_return_amt_inc_tax) AS min_return_inc_tax,
-        MAX(wr.wr_return_amt_inc_tax) AS max_return_inc_tax
-    FROM tpcds.customer c
-    JOIN tpcds.customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
-    JOIN tpcds.web_returns wr ON wr.wr_refunded_customer_sk = c.c_customer_sk
-    WHERE c.c_birth_day = 15
-      AND c.c_birth_month = 12
-      AND c.c_first_sales_date_sk = 2452167
-      AND wr.wr_refunded_cash > 200
-      AND wr.wr_account_credit < 500
-      AND ca.ca_state IN ('CA', 'NY')
-    GROUP BY c.c_customer_sk, c.c_customer_id, ca.ca_state
-    HAVING SUM(wr.wr_return_amt) > 1000
-),
-combined AS (
-    SELECT * FROM store_agg
-    UNION ALL
-    SELECT * FROM web_agg
-)
-SELECT DISTINCT
-    combined.c_customer_id,
-    combined.ca_state,
-    combined.store_return_count,
-    combined.web_return_count,
-    combined.store_return_total,
-    combined.web_return_total,
-    combined.avg_ship_cost,
-    combined.avg_account_credit,
-    combined.min_return_inc_tax,
-    combined.max_return_inc_tax,
-    RANK() OVER (PARTITION BY combined.ca_state ORDER BY (COALESCE(combined.store_return_total, 0) + COALESCE(combined.web_return_total, 0)) DESC) AS state_return_rank,
-    (SELECT AVG(store_return_total) FROM store_agg) AS overall_avg_store_return
-FROM combined
-WHERE (combined.store_return_total IS NOT NULL AND combined.store_return_total > 500)
-   OR (combined.web_return_total IS NOT NULL AND combined.web_return_total > 500)
-  AND EXISTS (
-        SELECT 1 FROM tpcds.store_returns sr_check
-        WHERE sr_check.sr_customer_sk = combined.c_customer_sk
-          AND sr_check.sr_return_amt > 100
+        d.d_year AS year,
+        cc.cc_name AS segment,
+        i.i_category AS category,
+        sm.sm_type AS subsegment,
+        SUM(cs.cs_ext_sales_price) AS metric_value,
+        'sales' AS metric_type,
+        CASE WHEN SUM(cs.cs_ext_sales_price) > 100000 THEN 'High' ELSE 'Low' END AS level
+    FROM catalog_sales cs
+    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+    WHERE d.d_year = 2001
+      AND cc.cc_state = 'CA'
+      AND i.i_brand = 'Brand#12'
+      AND sm.sm_type = 'AIR'
+      AND cp.cp_type = 'Electronics'
+    GROUP BY GROUPING SETS (
+        (d.d_year, cc.cc_name, i.i_category, sm.sm_type),
+        (d.d_year, cc.cc_name, i.i_category),
+        (d.d_year, cc.cc_name),
+        (d.d_year)
     )
-ORDER BY combined.ca_state, state_return_rank
+),
+wr_agg AS (
+    SELECT
+        d.d_year AS year,
+        wp.wp_type AS segment,
+        i.i_category AS category,
+        NULL AS subsegment,
+        SUM(wr.wr_return_amt) AS metric_value,
+        'returns' AS metric_type,
+        CASE WHEN SUM(wr.wr_return_amt) > 50000 THEN 'High' ELSE 'Low' END AS level
+    FROM web_returns wr
+    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
+    JOIN item i ON wr.wr_item_sk = i.i_item_sk
+    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    WHERE d.d_year = 2001
+      AND i.i_brand = 'Brand#12'
+      AND wp.wp_type = 'Content'
+      AND EXISTS (
+          SELECT 1
+          FROM reason r
+          WHERE r.r_reason_sk = wr.wr_reason_sk
+            AND r.r_reason_desc = 'Damaged'
+      )
+    GROUP BY ROLLUP (d.d_year, wp.wp_type, i.i_category)
+)
+SELECT
+    year,
+    segment,
+    category,
+    subsegment,
+    metric_value,
+    metric_type,
+    level
+FROM cs_agg
+UNION ALL
+SELECT
+    year,
+    segment,
+    category,
+    subsegment,
+    metric_value,
+    metric_type,
+    level
+FROM wr_agg
+ORDER BY year DESC, metric_value DESC
 LIMIT 100

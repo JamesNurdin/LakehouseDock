@@ -1,38 +1,46 @@
-WITH sales_agg AS (
-    SELECT
-        ws_sold_time_sk,
-        ws_bill_hdemo_sk,
-        SUM(ws_ext_sales_price) AS total_sales,
-        SUM(ws_quantity) AS total_qty
-    FROM web_sales
-    WHERE ws_ext_sales_price > 1000
-      AND ws_quantity > 0
-    GROUP BY ws_sold_time_sk, ws_bill_hdemo_sk
+WITH catalog_agg AS (
+  SELECT
+    cd.cd_education_status AS education_status,
+    hd.hd_buy_potential AS buy_potential,
+    'catalog' AS source,
+    SUM(cs.cs_net_profit) AS total_profit,
+    COUNT(DISTINCT cs.cs_order_number) AS order_cnt,
+    ROW_NUMBER() OVER (PARTITION BY cd.cd_education_status ORDER BY SUM(cs.cs_net_profit) DESC) AS profit_rank
+  FROM catalog_sales cs
+  JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+  JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+  WHERE cd.cd_gender = 'F'
+    AND hd.hd_buy_potential = '>10000'
+    AND cs.cs_net_profit > (SELECT AVG(cs2.cs_net_profit) FROM catalog_sales cs2)
+  GROUP BY cd.cd_education_status, hd.hd_buy_potential
+),
+web_agg AS (
+  SELECT
+    cd.cd_education_status AS education_status,
+    hd.hd_buy_potential AS buy_potential,
+    'web' AS source,
+    SUM(ws.ws_net_profit) AS total_profit,
+    COUNT(DISTINCT ws.ws_order_number) AS order_cnt,
+    ROW_NUMBER() OVER (PARTITION BY cd.cd_education_status ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+  FROM web_sales ws
+  JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+  JOIN household_demographics hd ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+  WHERE cd.cd_gender = 'M'
+    AND hd.hd_buy_potential = '5001-10000'
+    AND ws.ws_net_profit > (SELECT AVG(ws2.ws_net_profit) FROM web_sales ws2)
+  GROUP BY cd.cd_education_status, hd.hd_buy_potential
 )
-SELECT
-    td.t_shift,
-    hd.hd_income_band_sk,
-    sa.total_sales,
-    sa.total_qty,
-    (
-        SELECT MAX(DISTINCT ws3.ws_ext_list_price)
-        FROM web_sales ws3
-        WHERE ws3.ws_bill_hdemo_sk = hd.hd_demo_sk
-    ) AS max_list_price_for_demo,
-    CASE
-        WHEN EXISTS (
-            SELECT 1
-            FROM web_sales ws4
-            WHERE ws4.ws_ship_hdemo_sk = hd.hd_demo_sk
-              AND ws4.ws_ext_discount_amt > 50
-        ) THEN 'HighDiscount'
-        ELSE 'LowDiscount'
-    END AS discount_flag
-FROM sales_agg sa
-JOIN time_dim td ON sa.ws_sold_time_sk = td.t_time_sk
-JOIN household_demographics hd ON sa.ws_bill_hdemo_sk = hd.hd_demo_sk
-WHERE td.t_shift IN ('first', 'second')
-  AND hd.hd_income_band_sk BETWEEN 5 AND 20
-  AND sa.total_sales > 5000
-ORDER BY sa.total_sales DESC
+SELECT DISTINCT
+  education_status,
+  buy_potential,
+  source,
+  total_profit,
+  order_cnt,
+  profit_rank
+FROM (
+  SELECT * FROM catalog_agg
+  UNION ALL
+  SELECT * FROM web_agg
+) AS combined
+ORDER BY total_profit DESC
 LIMIT 100

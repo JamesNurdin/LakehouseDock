@@ -1,43 +1,51 @@
-WITH filtered_sales AS (
+WITH sales_enriched AS (
     SELECT
-        cs.cs_ext_sales_price,
+        dm.d_year,
+        cp.cp_department AS cp_department,
         cs.cs_net_profit,
-        cs.cs_order_number,
-        cs.cs_ext_ship_cost,
-        cc.cc_name,
-        cc.cc_class,
-        cc.cc_company,
-        cc.cc_hours,
-        i.i_brand,
-        i.i_category,
-        i.i_container,
-        i.i_formulation
+        cs.cs_quantity,
+        cs.cs_net_paid,
+        CASE
+            WHEN cs.cs_net_profit > 1000 THEN 'HIGH'
+            WHEN cs.cs_net_profit > 0 THEN 'MEDIUM'
+            ELSE 'LOW'
+        END AS profit_category,
+        sm.sm_type,
+        hd.hd_vehicle_count,
+        s.s_city,
+        w.w_warehouse_name
     FROM catalog_sales cs
-    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
-    JOIN item i ON cs.cs_item_sk = i.i_item_sk
-    WHERE cc.cc_class = 'large'
-      AND cc.cc_company = 5
-      AND cc.cc_hours = '8AM-12AM'
-      AND cs.cs_ext_ship_cost > 500
-      AND cs.cs_quantity BETWEEN 2 AND 10
-      AND i.i_container = 'Unknown'
-      AND i.i_formulation LIKE '%goldenrod%'
-      AND cs.cs_sold_date_sk IN (
-          SELECT DISTINCT cs2.cs_sold_date_sk
-          FROM catalog_sales cs2
-          WHERE cs2.cs_ext_discount_amt > 100
-      )
+    JOIN date_dim dm ON cs.cs_sold_date_sk = dm.d_date_sk
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+    JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    JOIN store s ON s.s_closed_date_sk = dm.d_date_sk
+    WHERE dm.d_year = 2002
+      AND cs.cs_quantity >= 2
+      AND sm.sm_type = 'AIR'
+      AND hd.hd_vehicle_count >= 1
+      AND s.s_city = 'Springfield'
+),
+agg AS (
+    SELECT
+        d_year,
+        cp_department,
+        profit_category,
+        SUM(cs_net_profit) AS total_profit,
+        COUNT(*) AS order_cnt
+    FROM sales_enriched
+    GROUP BY ROLLUP (d_year, cp_department, profit_category)
 )
 SELECT
-    cc_name,
-    i_brand,
-    i_category,
-    SUM(cs_ext_sales_price) AS total_sales,
-    AVG(cs_net_profit) AS avg_profit,
-    COUNT(DISTINCT cs_order_number) AS order_cnt,
-    MIN(cs_ext_ship_cost) AS min_ship_cost,
-    MAX(cs_ext_ship_cost) AS max_ship_cost
-FROM filtered_sales
-GROUP BY cc_name, i_brand, i_category
-ORDER BY total_sales DESC
+    d_year,
+    cp_department,
+    profit_category,
+    total_profit,
+    order_cnt,
+    RANK() OVER (PARTITION BY d_year ORDER BY total_profit DESC) AS profit_rank
+FROM agg
+WHERE d_year IS NOT NULL
+ORDER BY d_year DESC, profit_rank
 LIMIT 100

@@ -1,25 +1,41 @@
-/*
-Goal: Analyze the combined financial impact of catalog returns, store returns, and web sales for a specific fiscal quarter, focusing on a narrow range of wholesale costs and higher catalog fees. The query joins all four tables on the common date dimension, applies three realistic filter predicates, and aggregates key monetary measures by year and month.
-*/
+WITH inv_distinct AS (
+    SELECT DISTINCT inv_date_sk, inv_quantity_on_hand
+    FROM inventory
+)
 SELECT
+    c.c_customer_id,
     d.d_year,
-    d.d_month_seq,
-    COUNT(DISTINCT cr.cr_order_number) AS cnt_catalog_orders,
-    SUM(cr.cr_return_amount) AS total_catalog_return_amount,
-    SUM(sr.sr_return_amt) AS total_store_return_amount,
-    SUM(ws.ws_ext_sales_price) AS total_web_sales,
-    AVG(ws.ws_wholesale_cost) AS avg_web_wholesale_cost,
-    MIN(ws.ws_ext_sales_price) AS min_web_sales_price,
-    MAX(ws.ws_ext_sales_price) AS max_web_sales_price
-FROM catalog_returns cr
+    p.p_promo_name,
+    SUM(ss.ss_net_paid) AS total_net_paid,
+    SUM(i.inv_quantity_on_hand) AS total_inventory_qty,
+    COUNT(DISTINCT ss.ss_ticket_number) AS distinct_tickets,
+    CASE
+        WHEN SUM(ss.ss_quantity) > 10 THEN 'High Qty'
+        ELSE 'Low Qty'
+    END AS qty_category,
+    RANK() OVER (PARTITION BY d.d_year ORDER BY SUM(ss.ss_net_paid) DESC) AS sales_rank,
+    COALESCE(SUM(wr.wr_net_loss), 0) AS total_return_loss
+FROM store_sales ss
 JOIN date_dim d
-  ON cr.cr_returned_date_sk = d.d_date_sk
-JOIN store_returns sr
-  ON sr.sr_returned_date_sk = d.d_date_sk
-JOIN web_sales ws
-  ON ws.ws_sold_date_sk = d.d_date_sk
-WHERE d.d_fy_quarter_seq = 3
-  AND ws.ws_wholesale_cost BETWEEN 35.0 AND 55.0
-  AND cr.cr_fee > 20.0
-GROUP BY d.d_year, d.d_month_seq
-ORDER BY d.d_year, d.d_month_seq
+    ON ss.ss_sold_date_sk = d.d_date_sk
+JOIN customer c
+    ON ss.ss_customer_sk = c.c_customer_sk
+JOIN promotion p
+    ON ss.ss_promo_sk = p.p_promo_sk
+JOIN inv_distinct i
+    ON i.inv_date_sk = d.d_date_sk
+LEFT JOIN web_returns wr
+    ON wr.wr_returned_date_sk = d.d_date_sk
+    AND wr.wr_refunded_customer_sk = c.c_customer_sk
+WHERE d.d_year = 2001
+  AND p.p_discount_active = 'Y'
+  AND ss.ss_net_paid > 100
+  AND i.inv_quantity_on_hand > 0
+  AND c.c_birth_month = 5
+GROUP BY
+    c.c_customer_id,
+    d.d_year,
+    p.p_promo_name
+ORDER BY
+    d.d_year,
+    total_net_paid DESC

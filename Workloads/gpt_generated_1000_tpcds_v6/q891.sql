@@ -1,50 +1,38 @@
-WITH date_filtered AS (
-    SELECT
-        d_date_sk,
-        d_fy_year,
-        regexp_extract(d_quarter_name, '(\\d{4})Q(\\d)', 1) AS fy_year_str,
-        regexp_extract(d_quarter_name, '(\\d{4})Q(\\d)', 2) AS quarter_num,
-        d_quarter_name
-    FROM date_dim
-    WHERE regexp_like(d_quarter_name, '^19[0-9]{2}Q[1-4]$')
-      AND d_quarter_name LIKE '%Q1'
+WITH promo_filtered AS (
+    SELECT p_promo_sk,
+           p_promo_name
+    FROM promotion
+    WHERE regexp_like(p_promo_name, '(?i)discount')
 ),
-returns_agg AS (
-    SELECT
-        df.fy_year_str,
-        df.quarter_num,
-        COUNT(sr.sr_ticket_number) AS return_cnt,
-        SUM(sr.sr_return_amt) AS total_return_amt,
-        SUM(sr.sr_net_loss) AS total_net_loss
-    FROM store_returns sr
-    JOIN date_filtered df ON sr.sr_returned_date_sk = df.d_date_sk
-    GROUP BY df.fy_year_str, df.quarter_num
-),
-sales_agg AS (
-    SELECT
-        df.fy_year_str,
-        df.quarter_num,
-        COUNT(ws.ws_order_number) AS sales_cnt,
-        SUM(ws.ws_net_paid_inc_tax) AS total_sales_inc_tax,
-        SUM(ws.ws_ext_tax) AS total_tax
-    FROM web_sales ws
-    JOIN date_filtered df ON ws.ws_sold_date_sk = df.d_date_sk
-    GROUP BY df.fy_year_str, df.quarter_num
+sales_data AS (
+    SELECT ss.ss_store_sk,
+           ss.ss_customer_sk,
+           ss.ss_net_paid,
+           s.s_store_name,
+           s.s_city,
+           s.s_state,
+           concat(s.s_city, ', ', s.s_state) AS store_location,
+           substring(s.s_store_name, 1, 10) AS store_name_prefix,
+           p.p_promo_name,
+           t.t_meal_time
+    FROM store_sales ss
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN promo_filtered p ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN time_dim t ON ss.ss_sold_time_sk = t.t_time_sk
+    WHERE s.s_store_name LIKE '%Online%'
+      AND t.t_meal_time = 'lunch'
 )
 SELECT
-    r.fy_year_str AS fiscal_year,
-    r.quarter_num AS quarter,
-    r.return_cnt,
-    r.total_return_amt,
-    r.total_net_loss,
-    CASE WHEN r.total_return_amt > 1000 THEN 'HIGH' ELSE 'LOW' END AS return_level,
-    s.sales_cnt,
-    s.total_sales_inc_tax,
-    s.total_tax,
-    CONCAT('FY', r.fy_year_str, ' Q', r.quarter_num) AS period_label
-FROM returns_agg r
-LEFT JOIN sales_agg s
-    ON r.fy_year_str = s.fy_year_str
-   AND r.quarter_num = s.quarter_num
-ORDER BY fiscal_year, quarter
+    store_location,
+    store_name_prefix,
+    p_promo_name,
+    SUM(ss_net_paid) AS total_net_paid,
+    COUNT(*) AS total_transactions,
+    COUNT(DISTINCT ss_customer_sk) AS unique_customers
+FROM sales_data
+GROUP BY
+    store_location,
+    store_name_prefix,
+    p_promo_name
+ORDER BY total_net_paid DESC
 LIMIT 100

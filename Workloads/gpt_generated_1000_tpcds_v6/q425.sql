@@ -1,76 +1,52 @@
-WITH buyer_sales AS (
-   SELECT
-       ws.ws_order_number,
-       ws.ws_net_paid_inc_tax,
-       CASE
-           WHEN ws.ws_net_profit > 1000 THEN 'High'
-           WHEN ws.ws_net_profit > 0 THEN 'Medium'
-           ELSE 'Low'
-       END AS profit_category,
-       hd.hd_buy_potential,
-       wp.wp_url
-   FROM tpcds.web_sales ws
-   JOIN tpcds.household_demographics hd
-        ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-   JOIN tpcds.income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-   JOIN tpcds.web_page wp
-        ON ws.ws_web_page_sk = wp.wp_web_page_sk
-   WHERE hd.hd_buy_potential = '>10000'
-     AND ib.ib_upper_bound > 100000
-     AND EXISTS (
-         SELECT 1 FROM tpcds.web_page wp2
-         WHERE wp2.wp_web_page_sk = ws.ws_web_page_sk
-           AND wp2.wp_type = 'product'
-     )
+WITH joined_sales AS (
+  SELECT
+    cs.cs_order_number,
+    cs.cs_ext_sales_price AS catalog_sales,
+    ws.ws_ext_sales_price AS web_sales,
+    p.p_promo_id,
+    d_cs.d_date AS cs_sold_date,
+    d_ws.d_date AS ws_ship_date,
+    cs.cs_quantity AS catalog_qty,
+    ws.ws_quantity AS web_qty
+  FROM catalog_sales cs
+  JOIN promotion p
+    ON cs.cs_promo_sk = p.p_promo_sk
+  JOIN web_sales ws
+    ON ws.ws_promo_sk = p.p_promo_sk
+  JOIN date_dim d_cs
+    ON cs.cs_sold_date_sk = d_cs.d_date_sk
+  JOIN date_dim d_ws
+    ON ws.ws_ship_date_sk = d_ws.d_date_sk
+  WHERE cs.cs_ext_sales_price > 1000
+    AND ws.ws_ext_sales_price > 500
+    AND p.p_discount_active = 'Y'
+    AND d_cs.d_year = 2001
+    AND d_ws.d_month_seq BETWEEN 1200 AND 1300
+    AND cs.cs_quantity >= 1
+    AND ws.ws_quantity >= 1
+    AND d_cs.d_quarter_seq = 4
 ),
-ship_sales AS (
-   SELECT
-       ws.ws_order_number,
-       ws.ws_net_paid_inc_tax,
-       CASE
-           WHEN ws.ws_net_profit > 500 THEN 'High'
-           WHEN ws.ws_net_profit > 0 THEN 'Medium'
-           ELSE 'Low'
-       END AS profit_category,
-       hd.hd_buy_potential,
-       wp.wp_url
-   FROM tpcds.web_sales ws
-   JOIN tpcds.household_demographics hd
-        ON ws.ws_ship_hdemo_sk = hd.hd_demo_sk
-   JOIN tpcds.income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-   JOIN tpcds.web_page wp
-        ON ws.ws_web_page_sk = wp.wp_web_page_sk
-   WHERE hd.hd_vehicle_count = 0
-     AND ib.ib_lower_bound <= 50000
-     AND ws.ws_net_paid_inc_tax > (
-         SELECT AVG(ws2.ws_net_paid_inc_tax)
-         FROM tpcds.web_sales ws2
-     )
+agg_sales AS (
+  SELECT
+    cs_order_number,
+    p_promo_id,
+    cs_sold_date,
+    ws_ship_date,
+    (catalog_sales + web_sales) AS total_sales
+  FROM joined_sales
 )
 SELECT
-    order_number,
-    net_paid_inc_tax,
-    profit_category,
-    buy_potential,
-    url
-FROM (
-    SELECT
-        ws_order_number AS order_number,
-        ws_net_paid_inc_tax AS net_paid_inc_tax,
-        profit_category,
-        hd_buy_potential AS buy_potential,
-        wp_url AS url
-    FROM buyer_sales
-    UNION ALL
-    SELECT
-        ws_order_number AS order_number,
-        ws_net_paid_inc_tax AS net_paid_inc_tax,
-        profit_category,
-        hd_buy_potential AS buy_potential,
-        wp_url AS url
-    FROM ship_sales
-) combined
-ORDER BY net_paid_inc_tax DESC
+  cs_order_number,
+  p_promo_id,
+  cs_sold_date,
+  ws_ship_date,
+  total_sales,
+  RANK() OVER (PARTITION BY p_promo_id ORDER BY total_sales DESC) AS sales_rank,
+  CASE
+    WHEN total_sales > (SELECT AVG(catalog_sales + web_sales) FROM joined_sales)
+      THEN 'HIGH'
+    ELSE 'NORMAL'
+  END AS sales_category
+FROM agg_sales
+ORDER BY total_sales DESC
 LIMIT 100

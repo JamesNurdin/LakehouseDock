@@ -1,46 +1,79 @@
-WITH agg_returns AS (
-    SELECT
-        wr_returning_customer_sk,
-        wr_web_page_sk,
-        COUNT(*) AS cnt_returns,
-        SUM(wr_return_amt) AS total_return_amt,
-        AVG(wr_return_amt) AS avg_return_amt,
-        SUM(wr_net_loss) AS total_net_loss
-    FROM web_returns
-    WHERE wr_return_quantity > 1
-      AND wr_return_amt > 10
-      AND wr_reversed_charge < 300
-      AND wr_returned_date_sk BETWEEN 2450000 AND 2453000
-      AND wr_reason_sk IN (1, 2, 3)
-    GROUP BY wr_returning_customer_sk, wr_web_page_sk
+WITH base AS (
+  SELECT
+    s.s_store_id,
+    s.s_geography_class,
+    p.p_channel_email,
+    r.r_reason_desc,
+    ss.ss_net_paid          AS ss_net_paid,
+    ss.ss_net_profit        AS ss_net_profit,
+    cs.cs_net_paid          AS cs_net_paid,
+    cs.cs_net_profit        AS cs_net_profit,
+    sr.sr_return_amt        AS sr_return_amt,
+    sr.sr_net_loss          AS sr_net_loss
+  FROM store_sales ss
+  JOIN date_dim d_sold
+    ON ss.ss_sold_date_sk = d_sold.d_date_sk
+  JOIN store s
+    ON ss.ss_store_sk = s.s_store_sk
+  JOIN promotion p
+    ON ss.ss_promo_sk = p.p_promo_sk
+  JOIN customer_demographics cd_ss
+    ON ss.ss_cdemo_sk = cd_ss.cd_demo_sk
+  JOIN household_demographics hd_ss
+    ON ss.ss_hdemo_sk = hd_ss.hd_demo_sk
+  LEFT JOIN income_band ib_ss
+    ON hd_ss.hd_income_band_sk = ib_ss.ib_income_band_sk
+
+  LEFT JOIN store_returns sr
+    ON ss.ss_ticket_number = sr.sr_ticket_number
+  LEFT JOIN reason r
+    ON sr.sr_reason_sk = r.r_reason_sk
+  LEFT JOIN date_dim d_ret
+    ON sr.sr_returned_date_sk = d_ret.d_date_sk
+  LEFT JOIN store s_ret
+    ON sr.sr_store_sk = s_ret.s_store_sk
+  LEFT JOIN customer_demographics cd_ret
+    ON sr.sr_cdemo_sk = cd_ret.cd_demo_sk
+  LEFT JOIN household_demographics hd_ret
+    ON sr.sr_hdemo_sk = hd_ret.hd_demo_sk
+  LEFT JOIN income_band ib_ret
+    ON hd_ret.hd_income_band_sk = ib_ret.ib_income_band_sk
+
+  LEFT JOIN catalog_sales cs
+    ON cs.cs_sold_date_sk = d_sold.d_date_sk
+   AND cs.cs_promo_sk = p.p_promo_sk
+  LEFT JOIN ship_mode sm
+    ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+  LEFT JOIN customer_demographics cd_bill
+    ON cs.cs_bill_cdemo_sk = cd_bill.cd_demo_sk
+  LEFT JOIN household_demographics hd_bill
+    ON cs.cs_bill_hdemo_sk = hd_bill.hd_demo_sk
+  LEFT JOIN income_band ib_bill
+    ON hd_bill.hd_income_band_sk = ib_bill.ib_income_band_sk
+  LEFT JOIN customer_demographics cd_ship
+    ON cs.cs_ship_cdemo_sk = cd_ship.cd_demo_sk
+  LEFT JOIN household_demographics hd_ship
+    ON cs.cs_ship_hdemo_sk = hd_ship.hd_demo_sk
+  LEFT JOIN income_band ib_ship
+    ON hd_ship.hd_income_band_sk = ib_ship.ib_income_band_sk
 )
 SELECT
-    c.c_customer_id,
-    c.c_first_name,
-    c.c_last_name,
-    c.c_birth_country,
-    wp.wp_web_page_id,
-    wp.wp_type,
-    wp.wp_link_count,
-    ar.cnt_returns,
-    ar.total_return_amt,
-    ar.avg_return_amt,
-    ar.total_net_loss,
-    (
-        SELECT MAX(wr_return_amt)
-        FROM web_returns
-        WHERE wr_returning_customer_sk = c.c_customer_sk
-    ) AS max_return_amt
-FROM agg_returns ar
-JOIN customer c
-  ON ar.wr_returning_customer_sk = c.c_customer_sk
-JOIN web_page wp
-  ON ar.wr_web_page_sk = wp.wp_web_page_sk
-  AND wp.wp_customer_sk = c.c_customer_sk
-WHERE c.c_birth_country = 'CHILE'
-  AND c.c_first_sales_date_sk > 2452000
-  AND wp.wp_type = 'Content'
-  AND wp.wp_link_count BETWEEN 5 AND 20
-  AND wp.wp_char_count > 1000
-ORDER BY ar.total_return_amt DESC
+  s_store_id,
+  s_geography_class,
+  p_channel_email,
+  r_reason_desc,
+  SUM(COALESCE(ss_net_paid, 0) + COALESCE(cs_net_paid, 0) - COALESCE(sr_return_amt, 0)) AS total_revenue,
+  SUM(COALESCE(ss_net_profit, 0) + COALESCE(cs_net_profit, 0) - COALESCE(sr_net_loss, 0)) AS total_profit,
+  ROW_NUMBER() OVER (PARTITION BY s_geography_class ORDER BY SUM(COALESCE(ss_net_paid, 0) + COALESCE(cs_net_paid, 0) - COALESCE(sr_return_amt, 0)) DESC) AS revenue_rank
+FROM base
+GROUP BY
+  GROUPING SETS (
+    (s_store_id, s_geography_class, p_channel_email, r_reason_desc),
+    (s_store_id, s_geography_class, p_channel_email),
+    (s_store_id, s_geography_class),
+    (s_geography_class)
+  )
+ORDER BY
+  total_revenue DESC,
+  s_geography_class
 LIMIT 100

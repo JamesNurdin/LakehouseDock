@@ -1,46 +1,51 @@
-WITH filtered_returns AS (
+WITH joined_data AS (
     SELECT
-        wr.wr_refunded_addr_sk,
-        wr.wr_refunded_hdemo_sk,
-        wr.wr_reason_sk,
-        wr.wr_return_quantity,
-        wr.wr_net_loss,
-        ca.ca_state,
-        ca.ca_gmt_offset,
-        hd.hd_vehicle_count,
-        hd.hd_dep_count,
-        r.r_reason_desc
-    FROM web_returns wr
-    JOIN household_demographics hd
-        ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN customer_address ca
-        ON wr.wr_refunded_addr_sk = ca.ca_address_sk
-    JOIN reason r
-        ON wr.wr_reason_sk = r.r_reason_sk
-    WHERE hd.hd_vehicle_count >= 2
-      AND hd.hd_dep_count BETWEEN 1 AND 5
-      AND ca.ca_gmt_offset BETWEEN -8.00 AND -5.00
-      AND r.r_reason_desc LIKE '%color%'
-      AND wr.wr_return_quantity > 0
-      AND wr.wr_net_loss > 0
-      AND EXISTS (
-          SELECT 1 FROM customer_address ca2
-          WHERE ca2.ca_address_sk = wr.wr_returning_addr_sk
-            AND ca2.ca_city IN ('Ash 8th', 'Main Second')
-      )
+        c.c_customer_sk,
+        c.c_customer_id,
+        c.c_current_hdemo_sk,
+        c.c_last_review_date,
+        t.t_time_sk,
+        t.t_time_id,
+        t.t_sub_shift,
+        ss.ss_ticket_number,
+        ss.ss_ext_sales_price,
+        ss.ss_net_profit,
+        cr.cr_order_number,
+        cr.cr_return_amount,
+        cr.cr_net_loss AS cr_net_loss,
+        wr.wr_order_number,
+        wr.wr_return_amt,
+        wr.wr_net_loss AS wr_net_loss
+    FROM store_sales ss
+    JOIN time_dim t
+        ON ss.ss_sold_time_sk = t.t_time_sk
+    JOIN customer c
+        ON ss.ss_customer_sk = c.c_customer_sk
+    LEFT JOIN catalog_returns cr
+        ON cr.cr_returned_time_sk = t.t_time_sk
+       AND cr.cr_refunded_customer_sk = c.c_customer_sk
+    LEFT JOIN web_returns wr
+        ON wr.wr_returned_time_sk = t.t_time_sk
+       AND wr.wr_refunded_customer_sk = c.c_customer_sk
+    WHERE
+        t.t_sub_shift = 'morning'
+        AND t.t_time_id IN ('AAAAAAAAGAAAAAAA', 'AAAAAAAABAAAAAA')
+        AND c.c_current_hdemo_sk IN (2615, 725)
+        AND c.c_last_review_date >= 2452400
+        AND ss.ss_wholesale_cost > 30
+        AND ss.ss_list_price BETWEEN 35 AND 120
+        AND (cr.cr_return_amount IS NULL OR cr.cr_return_amount > 5)
+        AND (wr.wr_return_amt IS NULL OR wr.wr_return_amt > 5)
 )
 SELECT
-    ca_state,
-    r_reason_desc,
-    SUM(wr_net_loss) AS total_net_loss,
-    COUNT(*) AS return_cnt,
-    CASE
-        WHEN SUM(wr_net_loss) > 1000 THEN 'High'
-        ELSE 'Low'
-    END AS loss_category,
-    RANK() OVER (ORDER BY SUM(wr_net_loss) DESC) AS state_loss_rank
-FROM filtered_returns
-GROUP BY ca_state, r_reason_desc
-HAVING SUM(wr_net_loss) > 500
-ORDER BY total_net_loss DESC
+    c_customer_id,
+    c_current_hdemo_sk,
+    SUM(ss_ext_sales_price) AS total_sales,
+    SUM(COALESCE(cr_return_amount, 0)) AS total_catalog_returns,
+    SUM(COALESCE(wr_return_amt, 0)) AS total_web_returns,
+    SUM(COALESCE(cr_net_loss, 0) + COALESCE(wr_net_loss, 0)) AS total_net_loss,
+    ROW_NUMBER() OVER (ORDER BY SUM(COALESCE(cr_net_loss, 0) + COALESCE(wr_net_loss, 0)) DESC) AS loss_rank
+FROM joined_data
+GROUP BY c_customer_id, c_current_hdemo_sk
+ORDER BY loss_rank
 LIMIT 100

@@ -1,58 +1,58 @@
-WITH sales AS (
+WITH catalog_agg AS (
     SELECT
-        td.t_hour,
-        td.t_minute,
-        'sales' AS source,
-        SUM(cs.cs_ext_sales_price) AS total_sales,
-        SUM(cs.cs_net_profit) AS total_metric,
-        'profit' AS metric,
-        CASE WHEN td.t_hour >= 12 THEN 'Peak' ELSE 'Off-Peak' END AS period
+        d.d_year AS year,
+        'CATALOG' AS source,
+        sm.sm_ship_mode_id AS ship_mode_id,
+        COUNT(*) AS sales_cnt,
+        SUM(cs.cs_net_paid) AS total_net_paid,
+        CASE WHEN SUM(cs.cs_net_profit) > 100000 THEN 'HIGH' ELSE 'LOW' END AS profit_category,
+        (
+            SELECT AVG(cs3.cs_net_profit)
+            FROM catalog_sales cs3
+            JOIN date_dim d3 ON cs3.cs_sold_date_sk = d3.d_date_sk
+            WHERE d3.d_year = d.d_year
+        ) AS avg_yearly_profit
     FROM catalog_sales cs
-    JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
-    JOIN item i ON cs.cs_item_sk = i.i_item_sk
-    JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
-    WHERE i.i_category = 'Sports'
-      AND cd.cd_marital_status = 'M'
-    GROUP BY td.t_hour,
-        td.t_minute,
-        CASE WHEN td.t_hour >= 12 THEN 'Peak' ELSE 'Off-Peak' END
+    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE d.d_year = 2001
+      AND sm.sm_code = 'AIR'
+    GROUP BY d.d_year, sm.sm_ship_mode_id
 ),
-returns AS (
+store_agg AS (
     SELECT
-        td.t_hour,
-        td.t_minute,
-        'returns' AS source,
-        SUM(wr.wr_return_amt) AS total_sales,
-        SUM(wr.wr_net_loss) AS total_metric,
-        'loss' AS metric,
-        CASE WHEN td.t_hour >= 12 THEN 'Peak' ELSE 'Off-Peak' END AS period
-    FROM web_returns wr
-    JOIN time_dim td ON wr.wr_returned_time_sk = td.t_time_sk
-    JOIN item i ON wr.wr_item_sk = i.i_item_sk
-    JOIN customer_demographics cd ON wr.wr_refunded_cdemo_sk = cd.cd_demo_sk
-    WHERE i.i_category = 'Sports'
-      AND cd.cd_marital_status = 'M'
-    GROUP BY td.t_hour,
-        td.t_minute,
-        CASE WHEN td.t_hour >= 12 THEN 'Peak' ELSE 'Off-Peak' END
+        d.d_year AS year,
+        'STORE' AS source,
+        NULL AS ship_mode_id,
+        COUNT(*) AS sales_cnt,
+        SUM(ss.ss_net_paid) AS total_net_paid,
+        CASE WHEN SUM(ss.ss_net_profit) > 50000 THEN 'HIGH' ELSE 'LOW' END AS profit_category,
+        (
+            SELECT AVG(ss3.ss_net_profit)
+            FROM store_sales ss3
+            JOIN date_dim d3 ON ss3.ss_sold_date_sk = d3.d_date_sk
+            WHERE d3.d_year = d.d_year
+        ) AS avg_yearly_profit
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE d.d_year = 2001
+      AND EXISTS (
+            SELECT 1
+            FROM catalog_returns cr
+            JOIN date_dim dcr ON cr.cr_returned_date_sk = dcr.d_date_sk
+            WHERE cr.cr_order_number = ss.ss_ticket_number
+              AND dcr.d_year = d.d_year
+              AND cr.cr_return_quantity > 0
+        )
+    GROUP BY d.d_year
 )
-SELECT
-    t_hour,
-    t_minute,
-    source,
-    period,
-    total_sales,
-    total_metric,
-    metric
-FROM sales
+SELECT * FROM catalog_agg
 UNION ALL
-SELECT
-    t_hour,
-    t_minute,
-    source,
-    period,
-    total_sales,
-    total_metric,
-    metric
-FROM returns
-ORDER BY t_hour, t_minute, source
+SELECT * FROM store_agg
+ORDER BY year, total_net_paid DESC
+LIMIT 100

@@ -1,79 +1,67 @@
-WITH base AS (
+WITH sales_returns AS (
     SELECT
-        cs.cs_ext_sales_price,
-        cs.cs_net_profit,
+        w.w_warehouse_name,
+        w.w_country,
+        w.w_city,
+        i.i_category,
+        i.i_brand,
+        c.c_preferred_cust_flag,
+        c.c_birth_year,
+        r.r_reason_desc,
         ws.ws_ext_sales_price,
         ws.ws_net_profit,
-        sr.sr_return_amt,
-        sr.sr_net_loss,
-        wr.wr_return_amt,
-        wr.wr_net_loss,
-        i.i_category,
-        d_sold.d_year
-    FROM catalog_sales cs
-    JOIN date_dim d_sold
-        ON cs.cs_sold_date_sk = d_sold.d_date_sk
-    JOIN date_dim d_ship
-        ON cs.cs_ship_date_sk = d_ship.d_date_sk
-    JOIN call_center cc
-        ON cs.cs_call_center_sk = cc.cc_call_center_sk
-    JOIN ship_mode sm
-        ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN warehouse wh
-        ON cs.cs_warehouse_sk = wh.w_warehouse_sk
-    JOIN item i
-        ON cs.cs_item_sk = i.i_item_sk
-    JOIN customer_address ca_bill
-        ON cs.cs_bill_addr_sk = ca_bill.ca_address_sk
-    JOIN customer_address ca_ship
-        ON cs.cs_ship_addr_sk = ca_ship.ca_address_sk
-    LEFT JOIN store_returns sr
-        ON sr.sr_item_sk = i.i_item_sk
-        AND sr.sr_returned_date_sk = d_sold.d_date_sk
-    LEFT JOIN store s
-        ON sr.sr_store_sk = s.s_store_sk
-    LEFT JOIN customer_address ca_sr_addr
-        ON sr.sr_addr_sk = ca_sr_addr.ca_address_sk
-    LEFT JOIN web_sales ws
-        ON ws.ws_item_sk = i.i_item_sk
-        AND ws.ws_sold_date_sk = d_sold.d_date_sk
-    LEFT JOIN ship_mode sm_ws
-        ON ws.ws_ship_mode_sk = sm_ws.sm_ship_mode_sk
-    LEFT JOIN warehouse wh_ws
-        ON ws.ws_warehouse_sk = wh_ws.w_warehouse_sk
-    LEFT JOIN web_site wsite
-        ON ws.ws_web_site_sk = wsite.web_site_sk
-    LEFT JOIN customer_address ca_ws_bill
-        ON ws.ws_bill_addr_sk = ca_ws_bill.ca_address_sk
-    LEFT JOIN customer_address ca_ws_ship
-        ON ws.ws_ship_addr_sk = ca_ws_ship.ca_address_sk
-    LEFT JOIN web_returns wr
-        ON wr.wr_order_number = ws.ws_order_number
-        AND wr.wr_item_sk = ws.ws_item_sk
-    LEFT JOIN date_dim d_wr
-        ON wr.wr_returned_date_sk = d_wr.d_date_sk
-    LEFT JOIN customer_address ca_wr_refund
-        ON wr.wr_refunded_addr_sk = ca_wr_refund.ca_address_sk
-    LEFT JOIN customer_address ca_wr_return
-        ON wr.wr_returning_addr_sk = ca_wr_return.ca_address_sk
-    LEFT JOIN inventory inv
-        ON inv.inv_item_sk = i.i_item_sk
-        AND inv.inv_warehouse_sk = wh.w_warehouse_sk
-        AND inv.inv_date_sk = d_sold.d_date_sk
-    LEFT JOIN date_dim d_inv
-        ON inv.inv_date_sk = d_inv.d_date_sk
-    LEFT JOIN date_dim d_store_closed
-        ON s.s_closed_date_sk = d_store_closed.d_date_sk
+        wr.wr_return_amt
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN household_demographics hd ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN web_returns wr ON wr.wr_order_number = ws.ws_order_number
+    LEFT JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
+    WHERE w.w_country = 'United States'
+      AND w.w_city IN ('Salem', 'Liberty', 'Greenwood')
+      AND c.c_preferred_cust_flag = 'Y'
+      AND c.c_birth_year BETWEEN 1960 AND 1970
+      AND i.i_brand = 'BrandX'
+      AND ws.ws_sold_date_sk BETWEEN 2450000 AND 2450250
+      AND EXISTS (
+          SELECT 1 FROM inventory inv
+          WHERE inv.inv_item_sk = i.i_item_sk
+            AND inv.inv_warehouse_sk = w.w_warehouse_sk
+            AND inv.inv_quantity_on_hand > 0
+      )
+),
+aggregated AS (
+    SELECT
+        warehouse_name,
+        category,
+        SUM(total_sales)   AS total_sales,
+        SUM(total_profit)  AS total_profit,
+        SUM(total_returns) AS total_returns
+    FROM (
+        SELECT
+            w_warehouse_name AS warehouse_name,
+            i_category       AS category,
+            ws_ext_sales_price AS total_sales,
+            ws_net_profit      AS total_profit,
+            COALESCE(wr_return_amt, 0) AS total_returns
+        FROM sales_returns
+    ) sub
+    GROUP BY ROLLUP (warehouse_name, category)
 )
 SELECT
-    i_category,
-    d_year,
-    SUM(cs_ext_sales_price) AS catalog_sales,
-    SUM(ws_ext_sales_price) AS web_sales,
-    SUM(sr_return_amt) AS store_return_amount,
-    SUM(wr_return_amt) AS web_return_amount,
-    SUM(cs_net_profit) + SUM(ws_net_profit) - COALESCE(SUM(sr_net_loss), 0) - COALESCE(SUM(wr_net_loss), 0) AS net_gain
-FROM base
-GROUP BY i_category, d_year
-ORDER BY net_gain DESC
+    warehouse_name,
+    category,
+    total_sales,
+    total_profit,
+    total_returns,
+    CASE
+        WHEN warehouse_name IS NULL AND category IS NOT NULL THEN 'Category Total'
+        WHEN warehouse_name IS NOT NULL AND category IS NULL THEN 'Warehouse Total'
+        WHEN warehouse_name IS NULL AND category IS NULL THEN 'Grand Total'
+        ELSE 'Detail'
+    END AS row_type,
+    RANK() OVER (PARTITION BY category ORDER BY total_profit DESC) AS profit_rank
+FROM aggregated
+ORDER BY category, profit_rank, warehouse_name
 LIMIT 100

@@ -1,46 +1,93 @@
-WITH base AS (
+WITH
+  filtered_items AS (
     SELECT
-        cr.cr_warehouse_sk,
-        cr.cr_store_credit,
-        cr.cr_return_amount,
-        cr.cr_return_quantity,
-        ws.ws_bill_hdemo_sk,
-        ws.ws_net_paid_inc_tax,
-        ws.ws_order_number,
-        wr.wr_return_quantity,
-        t.t_hour,
-        CASE WHEN cr.cr_store_credit > 300 THEN 'High' ELSE 'Low' END AS credit_category
-    FROM catalog_returns cr
-    JOIN time_dim t
-        ON cr.cr_returned_time_sk = t.t_time_sk
-    JOIN web_sales ws
-        ON ws.ws_sold_time_sk = t.t_time_sk
-    JOIN web_returns wr
-        ON wr.wr_returned_time_sk = t.t_time_sk
-        AND wr.wr_item_sk = ws.ws_item_sk
-        AND wr.wr_order_number = ws.ws_order_number
-    WHERE cr.cr_warehouse_sk IN (3, 7, 12)
-      AND cr.cr_store_credit > 100
-      AND ws.ws_bill_hdemo_sk = 3319
-      AND ws.ws_net_paid_inc_tax BETWEEN 500 AND 2000
-      AND wr.wr_return_quantity >= 10
-      AND t.t_hour BETWEEN 9 AND 17
-)
+      i.i_item_sk,
+      i.i_product_name,
+      i.i_current_price,
+      regexp_extract(i.i_product_name, '(\\d{4})') AS year_in_name
+    FROM tpcds.item i
+    WHERE regexp_like(i.i_product_name, '^.*[0-9]{4}.*$')
+      AND i.i_product_name LIKE '%COOL%'
+  ),
+  catalog_agg AS (
+    SELECT
+      p.p_promo_name,
+      d.d_year AS year,
+      f.i_item_sk,
+      f.i_product_name,
+      SUM(cs.cs_net_paid) AS total_net_paid,
+      (
+        SELECT AVG(cs2.cs_net_paid)
+        FROM tpcds.catalog_sales cs2
+        WHERE cs2.cs_item_sk = f.i_item_sk
+      ) AS avg_item_net_paid
+    FROM tpcds.catalog_sales cs
+    JOIN filtered_items f ON cs.cs_item_sk = f.i_item_sk
+    JOIN tpcds.promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN tpcds.date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    WHERE p.p_promo_name LIKE '%Discount%'
+      AND EXISTS (
+        SELECT 1
+        FROM tpcds.web_returns wr
+        WHERE wr.wr_item_sk = f.i_item_sk
+          AND wr.wr_reason_sk = (
+            SELECT r.r_reason_sk
+            FROM tpcds.reason r
+            WHERE r.r_reason_desc = 'Customer not satisfied'
+            LIMIT 1
+          )
+      )
+    GROUP BY p.p_promo_name, d.d_year, f.i_item_sk, f.i_product_name
+    HAVING SUM(cs.cs_net_paid) > 10000
+  ),
+  store_agg AS (
+    SELECT
+      p.p_promo_name,
+      d.d_year AS year,
+      f.i_item_sk,
+      f.i_product_name,
+      SUM(ss.ss_net_paid) AS total_net_paid,
+      (
+        SELECT AVG(cs2.cs_net_paid)
+        FROM tpcds.catalog_sales cs2
+        WHERE cs2.cs_item_sk = f.i_item_sk
+      ) AS avg_item_net_paid
+    FROM tpcds.store_sales ss
+    JOIN filtered_items f ON ss.ss_item_sk = f.i_item_sk
+    JOIN tpcds.promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN tpcds.date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE p.p_promo_name LIKE '%Discount%'
+      AND EXISTS (
+        SELECT 1
+        FROM tpcds.web_returns wr
+        WHERE wr.wr_item_sk = f.i_item_sk
+          AND wr.wr_reason_sk = (
+            SELECT r.r_reason_sk
+            FROM tpcds.reason r
+            WHERE r.r_reason_desc = 'Customer not satisfied'
+            LIMIT 1
+          )
+      )
+    GROUP BY p.p_promo_name, d.d_year, f.i_item_sk, f.i_product_name
+    HAVING SUM(ss.ss_net_paid) > 10000
+  ),
+  union_all AS (
+    SELECT DISTINCT promo_name, year, i_item_sk, i_product_name, total_net_paid, avg_item_net_paid
+    FROM (
+      SELECT p_promo_name AS promo_name, year, i_item_sk, i_product_name, total_net_paid, avg_item_net_paid FROM catalog_agg
+      UNION ALL
+      SELECT p_promo_name AS promo_name, year, i_item_sk, i_product_name, total_net_paid, avg_item_net_paid FROM store_agg
+    ) u
+  )
 SELECT
-    cr_warehouse_sk,
-    t_hour,
-    credit_category,
-    SUM(cr_return_amount) AS total_return_amount,
-    AVG(ws_net_paid_inc_tax) AS avg_sales,
-    COUNT(DISTINCT ws_order_number) AS distinct_orders,
-    MIN(wr_return_quantity) AS min_return_qty,
-    MAX(cr_store_credit) AS max_store_credit,
-    SUM(SUM(cr_return_amount)) OVER (
-        PARTITION BY cr_warehouse_sk
-        ORDER BY t_hour
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS running_return_amount
-FROM base
-GROUP BY cr_warehouse_sk, t_hour, credit_category
-ORDER BY total_return_amount DESC
+  promo_name,
+  year,
+  i_product_name,
+  total_net_paid,
+  avg_item_net_paid,
+  ROW_NUMBER() OVER (PARTITION BY year ORDER BY total_net_paid DESC) AS rank_in_year,
+  CONCAT('Promo_', CAST(year AS VARCHAR), '_', REPLACE(promo_name, ' ', '_')) AS promo_key
+FROM union_all
+WHERE promo_name LIKE '%Summer%'
+ORDER BY total_net_paid DESC
 LIMIT 100

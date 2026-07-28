@@ -1,50 +1,52 @@
-WITH sales_agg AS (
+WITH base AS (
     SELECT
-        cp.cp_type,
-        sm.sm_type,
-        w.w_warehouse_name,
-        cd.cd_gender,
-        SUM(cs.cs_ext_sales_price)               AS total_sales,
-        SUM(cs.cs_net_profit)                    AS total_profit,
-        SUM(sr.sr_net_loss)                      AS total_return_loss,
-        COUNT(DISTINCT cs.cs_order_number)       AS order_cnt
-    FROM catalog_sales cs
-    JOIN catalog_page cp
-        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN ship_mode sm
-        ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN warehouse w
-        ON cs.cs_warehouse_sk = w.w_warehouse_sk
-    JOIN customer_demographics cd
-        ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
-    JOIN date_dim d
-        ON cs.cs_sold_date_sk = d.d_date_sk
-    JOIN store_returns sr
-        ON sr.sr_returned_date_sk = d.d_date_sk
-        AND sr.sr_cdemo_sk = cd.cd_demo_sk
-    WHERE d.d_year = 2001
-      AND cs.cs_quantity > 1
-      AND cs.cs_wholesale_cost > 10
-      AND cp.cp_type = 'monthly'
-      AND sm.sm_type = 'air'
-      AND w.w_state = 'CA'
-    GROUP BY
-        cp.cp_type,
-        sm.sm_type,
-        w.w_warehouse_name,
-        cd.cd_gender
+        dw.d_year,
+        dw.d_month_seq,
+        dw.d_date,
+        wr.wr_return_amt,
+        wr.wr_return_quantity,
+        wr.wr_web_page_sk,
+        wr.wr_reason_sk,
+        r.r_reason_desc,
+        ca.ca_state,
+        ca.ca_country,
+        cc.cc_name,
+        cc.cc_state,
+        ws.web_name,
+        inv.inv_quantity_on_hand,
+        p.p_discount_active,
+        CASE WHEN p.p_discount_active = 'Y' THEN wr.wr_return_amt * 0.9 ELSE wr.wr_return_amt END AS adjusted_return_amt
+    FROM web_returns wr
+    JOIN date_dim dw ON wr.wr_returned_date_sk = dw.d_date_sk
+    JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
+    JOIN customer_address ca ON wr.wr_refunded_addr_sk = ca.ca_address_sk
+    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    LEFT JOIN call_center cc ON dw.d_date_sk = cc.cc_open_date_sk
+    LEFT JOIN web_site ws ON dw.d_date_sk = ws.web_open_date_sk
+    LEFT JOIN inventory inv ON dw.d_date_sk = inv.inv_date_sk
+    LEFT JOIN promotion p ON dw.d_date_sk = p.p_start_date_sk
 )
 SELECT
-    cp_type,
-    sm_type,
-    w_warehouse_name,
-    cd_gender,
-    total_sales,
-    total_profit,
-    total_return_loss,
-    (total_profit - total_return_loss) AS net_total,
-    order_cnt,
-    ROW_NUMBER() OVER (ORDER BY (total_profit - total_return_loss) DESC) AS rank
-FROM sales_agg
-ORDER BY rank
+    base.d_year,
+    base.d_month_seq,
+    COUNT(DISTINCT base.r_reason_desc) AS distinct_reason_cnt,
+    SUM(base.adjusted_return_amt) AS total_adj_return,
+    AVG(base.inv_quantity_on_hand) AS avg_inventory,
+    MAX(base.wr_return_quantity) AS max_return_qty,
+    SUM(CASE WHEN base.cc_name IS NOT NULL THEN 1 ELSE 0 END) AS cnt_calls_center_present
+FROM base
+WHERE base.wr_return_amt > 100.00
+  AND base.adjusted_return_amt < 5000.00
+  AND base.d_year BETWEEN 2000 AND 2002
+  AND base.ca_state = 'CA'
+  AND base.p_discount_active IN ('Y','N')
+  AND base.d_date >= DATE '2000-01-01'
+  AND EXISTS (
+        SELECT 1 FROM web_page wp2
+        WHERE wp2.wp_web_page_sk = base.wr_web_page_sk
+          AND wp2.wp_type = 'content'
+      )
+GROUP BY base.d_year, base.d_month_seq
+HAVING SUM(base.adjusted_return_amt) > 1000
+ORDER BY total_adj_return DESC
 LIMIT 100

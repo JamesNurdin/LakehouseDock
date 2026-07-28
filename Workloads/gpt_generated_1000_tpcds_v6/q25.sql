@@ -1,48 +1,50 @@
 WITH filtered_returns AS (
     SELECT
-        sr.sr_returned_date_sk,
-        sr.sr_ticket_number,
-        sr.sr_return_quantity,
-        sr.sr_return_amt,
-        sr.sr_return_amt_inc_tax,
-        d.d_year,
-        d.d_fy_quarter_seq,
-        d.d_current_week
-    FROM store_returns sr
-    JOIN date_dim d
-      ON sr.sr_returned_date_sk = d.d_date_sk
-    WHERE d.d_year = 2002                                 -- filter 1
-      AND d.d_fy_quarter_seq = 10                         -- filter 2
-      AND d.d_current_week = 'N'                          -- filter 3
-      AND sr.sr_return_quantity > 1                       -- filter 4
-      AND sr.sr_reason_sk IN (34, 38)                     -- filter 5
+        cr.cr_returned_date_sk,
+        cr.cr_call_center_sk,
+        cr.cr_refunded_customer_sk,
+        cr.cr_fee,
+        cr.cr_return_amount,
+        cr.cr_return_quantity
+    FROM catalog_returns cr
+    WHERE cr.cr_fee > 20
+      AND cr.cr_return_quantity >= 2
 )
 SELECT
-    cc.cc_division_name,
-    p.p_promo_name,
-    fr.d_year,
-    fr.d_fy_quarter_seq,
-    COUNT(DISTINCT fr.sr_ticket_number) AS distinct_tickets,
-    SUM(fr.sr_return_amt) AS total_return_amt,
-    AVG(fr.sr_return_amt_inc_tax) AS avg_return_amt_inc_tax,
-    SUM(CASE WHEN p.p_channel_tv = 'Y' THEN fr.sr_return_amt ELSE 0 END) AS tv_promo_return_amt,
-    MIN(fr.sr_return_amt) AS min_return_amt,
-    MAX(fr.sr_return_amt) AS max_return_amt
+    cc.cc_name,
+    cc.cc_state,
+    dr.d_year,
+    CASE WHEN fr.cr_fee > 50 THEN 'High' ELSE 'Low' END AS fee_category,
+    COUNT(DISTINCT fr.cr_refunded_customer_sk) AS unique_customers,
+    SUM(fr.cr_return_amount) AS total_return_amount,
+    AVG(fr.cr_fee) AS avg_fee,
+    MIN(fr.cr_return_quantity) AS min_qty,
+    MAX(fr.cr_return_quantity) AS max_qty
 FROM filtered_returns fr
 JOIN call_center cc
-  ON cc.cc_closed_date_sk = fr.sr_returned_date_sk
-JOIN promotion p
-  ON p.p_start_date_sk = fr.sr_returned_date_sk
-WHERE EXISTS (
-    SELECT 1
-    FROM promotion p2
-    WHERE p2.p_start_date_sk = fr.sr_returned_date_sk
-      AND p2.p_discount_active = 'Y'
-)
+  ON fr.cr_call_center_sk = cc.cc_call_center_sk
+JOIN date_dim dr
+  ON fr.cr_returned_date_sk = dr.d_date_sk
+JOIN customer cu
+  ON fr.cr_refunded_customer_sk = cu.c_customer_sk
+JOIN web_page wp
+  ON wp.wp_customer_sk = cu.c_customer_sk
+WHERE cc.cc_state = 'TN'
+  AND cc.cc_hours = '8AM-4PM'
+  AND dr.d_year = 2000
+  AND cu.c_birth_country = 'United States'
+  AND wp.wp_image_count >= 5
+  AND wp.wp_type = 'product'
+  AND NOT EXISTS (
+        SELECT 1
+        FROM catalog_returns cr2
+        WHERE cr2.cr_refunded_customer_sk = cu.c_customer_sk
+          AND cr2.cr_fee > 100
+    )
 GROUP BY
-    cc.cc_division_name,
-    p.p_promo_name,
-    fr.d_year,
-    fr.d_fy_quarter_seq
-ORDER BY total_return_amt DESC
+    cc.cc_name,
+    cc.cc_state,
+    dr.d_year,
+    CASE WHEN fr.cr_fee > 50 THEN 'High' ELSE 'Low' END
+ORDER BY total_return_amount DESC
 LIMIT 100

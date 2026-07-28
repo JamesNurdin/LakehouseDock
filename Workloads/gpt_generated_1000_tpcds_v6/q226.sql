@@ -1,55 +1,46 @@
-WITH refunded AS (
+WITH sales_cte AS (
     SELECT
-        hd.hd_buy_potential,
-        SUM(wr.wr_refunded_cash) AS metric_value,
-        'RefundedCash' AS metric_type,
-        CASE WHEN SUM(wr.wr_refunded_cash) > 500 THEN 'High' ELSE 'Low' END AS category,
-        (SELECT COUNT(DISTINCT r2.r_reason_id)
-         FROM reason r2
-         WHERE r2.r_reason_desc LIKE '%damaged%') AS extra_info
-    FROM web_returns wr
-    JOIN household_demographics hd
-        ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN reason r
-        ON wr.wr_reason_sk = r.r_reason_sk
-    WHERE r.r_reason_desc LIKE '%damaged%'
-      AND hd.hd_income_band_sk IN (4, 8, 11)
-    GROUP BY hd.hd_buy_potential
-),
-losses AS (
-    SELECT
-        hd.hd_buy_potential,
-        SUM(wr.wr_net_loss) AS metric_value,
-        'NetLoss' AS metric_type,
-        CASE WHEN SUM(wr.wr_net_loss) > 200 THEN 'High' ELSE 'Low' END AS category,
-        CAST(NULL AS integer) AS extra_info
-    FROM web_returns wr
-    JOIN household_demographics hd
-        ON wr.wr_returning_hdemo_sk = hd.hd_demo_sk
-    JOIN reason r
-        ON wr.wr_reason_sk = r.r_reason_sk
-    WHERE NOT r.r_reason_desc LIKE '%damaged%'
+        cs.cs_order_number,
+        cs.cs_net_profit,
+        cs.cs_net_paid,
+        cs.cs_call_center_sk,
+        cs.cs_promo_sk,
+        cs.cs_bill_customer_sk,
+        d.d_date,
+        c.c_customer_sk,
+        p.p_promo_name,
+        cc.cc_city,
+        wp.wp_url,
+        regexp_extract(p.p_promo_name, 'Promo-(\\d{4})', 1) AS promo_year_extracted
+    FROM catalog_sales cs
+    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN web_page wp ON wp.wp_customer_sk = c.c_customer_sk
+    WHERE regexp_like(wp.wp_url, '^https?://.*\\.example\\.com/.*$')
+      AND regexp_like(p.p_promo_name, 'Promo-202[0-5]')
       AND EXISTS (
           SELECT 1
-          FROM reason r2
-          WHERE r2.r_reason_id = r.r_reason_id
-            AND r2.r_reason_desc LIKE '%warranty%'
+          FROM catalog_returns cr
+          WHERE cr.cr_order_number = cs.cs_order_number
+            AND cr.cr_net_loss > 0
       )
-    GROUP BY hd.hd_buy_potential
 )
 SELECT
-    hd_buy_potential,
-    metric_value,
-    metric_type,
-    category,
-    extra_info
-FROM refunded
-UNION ALL
-SELECT
-    hd_buy_potential,
-    metric_value,
-    metric_type,
-    category,
-    extra_info
-FROM losses
+    sales_cte.cc_city AS city,
+    sales_cte.p_promo_name AS promo_name,
+    sales_cte.promo_year_extracted AS promo_year,
+    CONCAT(sales_cte.cc_city, ' - ', sales_cte.p_promo_name) AS city_promo_label,
+    SUM(sales_cte.cs_net_profit) AS total_profit,
+    COUNT(DISTINCT sales_cte.cs_order_number) AS order_count,
+    AVG(sales_cte.cs_net_paid) AS avg_net_paid
+FROM sales_cte
+GROUP BY
+    sales_cte.cc_city,
+    sales_cte.p_promo_name,
+    sales_cte.promo_year_extracted,
+    CONCAT(sales_cte.cc_city, ' - ', sales_cte.p_promo_name)
+HAVING SUM(sales_cte.cs_net_profit) > 10000
+ORDER BY total_profit DESC
 LIMIT 100

@@ -1,65 +1,51 @@
-WITH cs_agg AS (
-        SELECT
-            cs_promo_sk,
-            cs_ship_mode_sk,
-            SUM(cs_net_paid) AS sum_cs_net_paid,
-            COUNT(*) AS cnt_cs
-        FROM catalog_sales
-        WHERE cs_coupon_amt > 100
-          AND cs_ext_list_price < 5000
-        GROUP BY cs_promo_sk, cs_ship_mode_sk
-    ),
-    ws_agg AS (
-        SELECT
-            ws_promo_sk,
-            ws_ship_mode_sk,
-            ws_web_site_sk,
-            ws_web_page_sk,
-            SUM(ws_net_paid) AS sum_ws_net_paid,
-            COUNT(*) AS cnt_ws
-        FROM web_sales
-        WHERE ws_coupon_amt > 50
-          AND ws_ext_list_price < 4000
-        GROUP BY ws_promo_sk, ws_ship_mode_sk, ws_web_site_sk, ws_web_page_sk
-    )
+WITH distinct_returns AS (
+    SELECT DISTINCT
+        sr.sr_ticket_number,
+        sr.sr_item_sk,
+        sr.sr_return_amt,
+        sr.sr_return_quantity,
+        wr.wr_order_number,
+        wr.wr_item_sk,
+        wr.wr_return_amt,
+        wr.wr_return_quantity,
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        hd.hd_dep_count,
+        hd.hd_buy_potential,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        ca.ca_state
+    FROM store_returns sr
+    JOIN item i
+        ON sr.sr_item_sk = i.i_item_sk
+    JOIN household_demographics hd
+        ON sr.sr_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib
+        ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN customer_address ca
+        ON sr.sr_addr_sk = ca.ca_address_sk
+    JOIN web_returns wr
+        ON wr.wr_item_sk = i.i_item_sk
+        AND wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
+        AND wr.wr_refunded_addr_sk = ca.ca_address_sk
+    WHERE i.i_current_price BETWEEN 10 AND 200
+      AND ca.ca_state = 'CA'
+      AND hd.hd_dep_count IN (2, 4, 5)
+      AND ib.ib_upper_bound > 50000
+)
 SELECT
-    p.p_promo_name,
-    sm.sm_type,
-    wp.wp_type,
-    ws_agg.sum_ws_net_paid,
-    cs_agg.sum_cs_net_paid,
-    (cs_agg.sum_cs_net_paid + ws_agg.sum_ws_net_paid) AS total_net_paid,
-    ws_agg.cnt_ws,
-    cs_agg.cnt_cs,
-    ws_agg.sum_ws_net_paid / NULLIF(ws_agg.cnt_ws, 0) AS avg_ws_net_paid,
-    (
-        SELECT AVG(cs2.cs_ext_discount_amt)
-        FROM catalog_sales cs2
-        WHERE cs2.cs_promo_sk = p.p_promo_sk
-    ) AS avg_cs_discount
-FROM cs_agg
-JOIN promotion p
-    ON cs_agg.cs_promo_sk = p.p_promo_sk
-JOIN ship_mode sm
-    ON cs_agg.cs_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN ws_agg
-    ON ws_agg.ws_promo_sk = p.p_promo_sk
-   AND ws_agg.ws_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN web_site ws
-    ON ws_agg.ws_web_site_sk = ws.web_site_sk
-JOIN web_page wp
-    ON ws_agg.ws_web_page_sk = wp.wp_web_page_sk
-WHERE p.p_channel_event = 'N'
-  AND sm.sm_type = 'EXPRESS'
-  AND ws.web_state = 'TX'
-  AND wp.wp_char_count > 500
-  AND EXISTS (
-        SELECT 1
-        FROM web_sales ws2
-        JOIN customer_address ca
-            ON ws2.ws_ship_addr_sk = ca.ca_address_sk
-        WHERE ws2.ws_web_site_sk = ws.web_site_sk
-          AND ca.ca_state = 'CA'
-    )
-ORDER BY total_net_paid DESC
+    dr.i_item_id,
+    dr.i_item_desc,
+    SUM(dr.sr_return_amt) AS total_store_return_amt,
+    SUM(dr.wr_return_amt) AS total_web_return_amt,
+    SUM(dr.sr_return_amt + dr.wr_return_amt) AS total_combined_return_amt,
+    AVG(dr.ib_lower_bound) AS avg_income_lower_bound,
+    COUNT(DISTINCT dr.sr_ticket_number) AS distinct_store_tickets,
+    COUNT(DISTINCT dr.wr_order_number) AS distinct_web_orders
+FROM distinct_returns dr
+GROUP BY dr.i_item_id, dr.i_item_desc
+HAVING SUM(dr.sr_return_amt + dr.wr_return_amt) > 1000
+   AND AVG(dr.ib_lower_bound) BETWEEN 60000 AND 150000
+ORDER BY total_combined_return_amt DESC
 LIMIT 100

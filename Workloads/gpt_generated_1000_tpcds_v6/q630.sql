@@ -1,52 +1,56 @@
 WITH sales_agg AS (
-  SELECT
-    ib.ib_income_band_sk,
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    SUM(cs.cs_net_profit) AS total_net_profit,
-    COUNT(*) AS sales_cnt,
-    AVG(cs.cs_quantity) AS avg_quantity,
-    SUM(cs.cs_ext_ship_cost) AS total_ship_cost
-  FROM catalog_sales cs
-  JOIN household_demographics hd
-    ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-  JOIN income_band ib
-    ON hd.hd_income_band_sk = ib.ib_income_band_sk
-  WHERE
-    cs.cs_ext_wholesale_cost > 1000.00
-    AND cs.cs_quantity BETWEEN 1 AND 100
-    AND cs.cs_sold_date_sk BETWEEN 2450000 AND 2453650
-    AND cs.cs_list_price < 5000.00
-    AND cs.cs_net_paid_inc_tax > 0
-    AND EXISTS (
-      SELECT 1
-      FROM web_returns wr
-      WHERE wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-        AND wr.wr_return_amt > 50.00
-        AND wr.wr_return_quantity <= 50
-        AND wr.wr_returned_time_sk BETWEEN 20000 AND 50000
-    )
-  GROUP BY
-    ib.ib_income_band_sk,
-    ib.ib_lower_bound,
-    ib.ib_upper_bound
+    SELECT
+        d.d_year,
+        d.d_quarter_seq,
+        p.p_promo_id,
+        cp.cp_department,
+        SUM(ss.ss_net_profit) AS total_store_profit,
+        SUM(ws.ws_net_profit) AS total_web_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_sales_cnt,
+        COUNT(DISTINCT ws.ws_order_number) AS web_sales_cnt
+    FROM
+        store_sales ss
+        JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+        JOIN time_dim t ON ss.ss_sold_time_sk = t.t_time_sk
+        JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+        JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+        JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+        JOIN store_returns sr ON sr.sr_ticket_number = ss.ss_ticket_number
+                               AND sr.sr_item_sk = ss.ss_item_sk
+        JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+        JOIN web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+                           AND ws.ws_sold_time_sk = t.t_time_sk
+                           AND ws.ws_promo_sk = p.p_promo_sk
+        JOIN catalog_page cp ON cp.cp_start_date_sk = d.d_date_sk
+        JOIN inventory inv ON inv.inv_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2001
+        AND d.d_month_seq BETWEEN 1 AND 12
+        AND ib.ib_upper_bound <= 50000
+        AND p.p_discount_active = 'Y'
+        AND r.r_reason_desc NOT LIKE '%warranty%'
+        AND inv.inv_quantity_on_hand > 0
+    GROUP BY
+        d.d_year,
+        d.d_quarter_seq,
+        p.p_promo_id,
+        cp.cp_department
+    HAVING
+        SUM(ss.ss_net_profit) + SUM(ws.ws_net_profit) > 100000
 )
 SELECT
-  ib_income_band_sk,
-  ib_lower_bound,
-  ib_upper_bound,
-  total_net_profit,
-  sales_cnt,
-  avg_quantity,
-  total_ship_cost,
-  total_net_profit / sales_cnt AS avg_profit_per_sale
-FROM sales_agg
-WHERE
-  total_net_profit > 100000.00
-  AND sales_cnt >= 10
-  AND avg_quantity > 10
-  AND total_ship_cost > 5000.00
+    sa.d_year,
+    sa.d_quarter_seq,
+    sa.p_promo_id,
+    sa.cp_department,
+    sa.total_store_profit,
+    sa.total_web_profit,
+    (sa.total_store_profit + sa.total_web_profit) AS total_profit,
+    RANK() OVER (PARTITION BY sa.d_year ORDER BY (sa.total_store_profit + sa.total_web_profit) DESC) AS profit_rank,
+    (SELECT COUNT(*) FROM store_sales ss2 WHERE ss2.ss_net_paid > 5000) AS high_paid_sales_cnt
+FROM
+    sales_agg sa
 ORDER BY
-  avg_profit_per_sale DESC,
-  sales_cnt DESC
+    sa.d_year,
+    profit_rank
 LIMIT 100

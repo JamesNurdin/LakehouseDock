@@ -1,43 +1,31 @@
-/* goal: Identify high‑value customers (based on purchase estimate) who have generated sales either in stores or on the web, and who also have at least one catalog return record. */
-WITH
-    store_filtered AS (
-        SELECT
-            ss.ss_cdemo_sk AS cdemo_sk,
-            ss.ss_net_paid AS net_paid
-        FROM store_sales ss
-        JOIN customer_demographics cd
-            ON ss.ss_cdemo_sk = cd.cd_demo_sk
-        WHERE cd.cd_purchase_estimate > 8000
-          AND ss.ss_net_paid > 1000
-    ),
-    web_filtered AS (
-        SELECT
-            ws.ws_bill_cdemo_sk AS cdemo_sk,
-            ws.ws_net_paid_inc_ship AS net_paid
-        FROM web_sales ws
-        JOIN customer_demographics cd
-            ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-        WHERE cd.cd_purchase_estimate > 8000
-          AND ws.ws_net_paid_inc_ship > 1000
-    ),
-    combined_sales AS (
-        SELECT cdemo_sk, SUM(net_paid) AS total_sales
-        FROM (
-            SELECT cdemo_sk, net_paid FROM store_filtered
-            UNION ALL
-            SELECT cdemo_sk, net_paid FROM web_filtered
-        ) u
-        GROUP BY cdemo_sk
-    )
-SELECT DISTINCT
-    cs.cdemo_sk,
-    cs.total_sales
-FROM combined_sales cs
-WHERE EXISTS (
-    SELECT 1
+WITH returns_base AS (
+    SELECT
+        cr.cr_net_loss,
+        dd.d_year,
+        i.i_item_desc,
+        cp.cp_description,
+        w.w_city,
+        r.r_reason_desc
     FROM catalog_returns cr
-    WHERE (cr.cr_refunded_cdemo_sk = cs.cdemo_sk OR cr.cr_returning_cdemo_sk = cs.cdemo_sk)
-      AND cr.cr_return_amount > 0
+    JOIN date_dim dd ON cr.cr_returned_date_sk = dd.d_date_sk
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+    WHERE dd.d_year = 2001
+      AND regexp_like(r.r_reason_desc, '(?i)damaged|defective')
+      AND cp.cp_description LIKE 'Prom%'
 )
-ORDER BY cs.total_sales DESC
+SELECT
+    w_city,
+    regexp_extract(i_item_desc, 'brand ([A-Za-z]+)', 1) AS brand_extracted,
+    COUNT(*) AS num_returns,
+    SUM(cr_net_loss) AS total_net_loss,
+    CASE WHEN SUM(cr_net_loss) > 10000 THEN 'High' ELSE 'Medium' END AS loss_category,
+    MIN(SUBSTRING(cp_description, 1, 15)) AS sample_page_prefix
+FROM returns_base
+GROUP BY
+    w_city,
+    regexp_extract(i_item_desc, 'brand ([A-Za-z]+)', 1)
+ORDER BY total_net_loss DESC
 LIMIT 100

@@ -1,33 +1,38 @@
-WITH filtered_inventory AS (
-    SELECT inv_date_sk,
-           inv_item_sk,
-           inv_warehouse_sk,
-           inv_quantity_on_hand
-    FROM inventory
-    WHERE inv_quantity_on_hand BETWEEN 50 AND 500
-      AND inv_date_sk IN (2450815, 2450948, 2450822)
+WITH store_agg AS (
+    SELECT
+        i.i_item_id AS item_id,
+        ss.ss_sold_date_sk AS sold_date_sk,
+        SUM(ss.ss_net_paid) AS total_net_paid,
+        'store' AS sales_channel
+    FROM store_sales ss
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    WHERE p.p_discount_active = 'Y'
+    GROUP BY i.i_item_id, ss.ss_sold_date_sk
+),
+web_agg AS (
+    SELECT
+        i.i_item_id AS item_id,
+        ws.ws_sold_date_sk AS sold_date_sk,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        'web' AS sales_channel
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE p.p_discount_active = 'Y'
+    GROUP BY i.i_item_id, ws.ws_sold_date_sk
+),
+unioned AS (
+    SELECT * FROM store_agg
+    UNION ALL
+    SELECT * FROM web_agg
 )
 SELECT
-    i.i_item_id,
-    i.i_product_name,
-    COALESCE(w.w_warehouse_name, 'UNKNOWN') AS warehouse_name,
-    COUNT(*) AS days_stocked,
-    SUM(f.inv_quantity_on_hand) AS total_qty,
-    AVG(i.i_current_price) AS avg_price,
-    MIN(i.i_current_price) AS min_price,
-    MAX(i.i_current_price) AS max_price
-FROM filtered_inventory f
-JOIN item i
-    ON f.inv_item_sk = i.i_item_sk
-LEFT JOIN warehouse w
-    ON f.inv_warehouse_sk = w.w_warehouse_sk
-    AND w.w_state = 'CA'
-WHERE i.i_rec_start_date >= DATE '2000-01-01'
-  AND i.i_rec_end_date > DATE '2005-12-31'
-  AND i.i_brand = 'Brand#12'
-  AND i.i_color = 'Red'
-GROUP BY i.i_item_id,
-         i.i_product_name,
-         COALESCE(w.w_warehouse_name, 'UNKNOWN')
-ORDER BY total_qty DESC
+    item_id,
+    sold_date_sk,
+    sales_channel,
+    total_net_paid,
+    ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY total_net_paid DESC) AS rn
+FROM unioned
+ORDER BY total_net_paid DESC, item_id
 LIMIT 100

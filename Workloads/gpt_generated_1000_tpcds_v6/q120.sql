@@ -1,44 +1,57 @@
-WITH filtered_sales AS (
+WITH
+catalog_agg AS (
     SELECT
-        ws.ws_ship_mode_sk,
-        ws.ws_warehouse_sk,
-        ws.ws_net_paid_inc_ship_tax,
-        ws.ws_order_number,
-        wp.wp_rec_start_date,
-        wh.w_state
-    FROM web_sales ws
-    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
-    JOIN warehouse wh ON ws.ws_warehouse_sk = wh.w_warehouse_sk
-    WHERE wp.wp_rec_start_date BETWEEN DATE '2000-01-01' AND DATE '2000-12-31'
+        d.d_year,
+        hd.hd_buy_potential,
+        SUM(cr.cr_net_loss) AS catalog_net_loss,
+        COUNT(*) AS catalog_cnt,
+        MAX(regexp_extract(t.t_time_id, 'A+(.*)', 1)) AS time_suffix,
+        CASE WHEN SUM(cr.cr_net_loss) > 100 THEN 'High' ELSE 'Low' END AS catalog_loss_category
+    FROM catalog_returns cr
+    JOIN date_dim d
+      ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN time_dim t
+      ON cr.cr_returned_time_sk = t.t_time_sk
+    JOIN household_demographics hd
+      ON cr.cr_returning_hdemo_sk = hd.hd_demo_sk
+    WHERE d.d_day_name LIKE 'S%'
+      AND regexp_like(t.t_time_id, '^A{4,}.*$')
+    GROUP BY d.d_year, hd.hd_buy_potential
 ),
-ship_mode_agg AS (
+web_agg AS (
     SELECT
-        sm.sm_ship_mode_id AS category_id,
-        'ship_mode' AS category_type,
-        SUM(fs.ws_net_paid_inc_ship_tax) AS total_net_paid,
-        COUNT(DISTINCT fs.ws_order_number) AS order_count
-    FROM filtered_sales fs
-    JOIN ship_mode sm ON fs.ws_ship_mode_sk = sm.sm_ship_mode_sk
-    GROUP BY sm.sm_ship_mode_id, 'ship_mode'
-),
-warehouse_state_agg AS (
-    SELECT
-        fs.w_state AS category_id,
-        'warehouse_state' AS category_type,
-        SUM(fs.ws_net_paid_inc_ship_tax) AS total_net_paid,
-        COUNT(DISTINCT fs.ws_order_number) AS order_count
-    FROM filtered_sales fs
-    GROUP BY fs.w_state, 'warehouse_state'
+        d.d_year,
+        hd.hd_buy_potential,
+        SUM(wr.wr_net_loss) AS web_net_loss,
+        COUNT(*) AS web_cnt,
+        MAX(regexp_extract(t.t_time_id, 'A+(.*)', 1)) AS time_suffix,
+        CASE WHEN SUM(wr.wr_net_loss) > 100 THEN 'High' ELSE 'Low' END AS web_loss_category
+    FROM web_returns wr
+    JOIN date_dim d
+      ON wr.wr_returned_date_sk = d.d_date_sk
+    JOIN time_dim t
+      ON wr.wr_returned_time_sk = t.t_time_sk
+    JOIN household_demographics hd
+      ON wr.wr_returning_hdemo_sk = hd.hd_demo_sk
+    WHERE d.d_day_name LIKE 'S%'
+      AND regexp_like(t.t_time_id, '^A{4,}.*$')
+    GROUP BY d.d_year, hd.hd_buy_potential
 )
 SELECT
-    category_id,
-    category_type,
-    total_net_paid,
-    order_count
-FROM (
-    SELECT * FROM ship_mode_agg
-    UNION ALL
-    SELECT * FROM warehouse_state_agg
-) AS combined
-ORDER BY total_net_paid DESC
+    COALESCE(c.d_year, w.d_year) AS year,
+    COALESCE(c.hd_buy_potential, w.hd_buy_potential) AS buy_potential,
+    c.catalog_net_loss,
+    w.web_net_loss,
+    (c.catalog_net_loss + w.web_net_loss) AS total_net_loss,
+    CASE
+        WHEN (c.catalog_net_loss + w.web_net_loss) > 200 THEN 'Very High'
+        WHEN (c.catalog_net_loss + w.web_net_loss) > 100 THEN 'High'
+        ELSE 'Medium'
+    END AS total_loss_category,
+    COALESCE(c.time_suffix, w.time_suffix) AS sample_time_suffix
+FROM catalog_agg c
+FULL OUTER JOIN web_agg w
+    ON c.d_year = w.d_year
+   AND c.hd_buy_potential = w.hd_buy_potential
+ORDER BY total_net_loss DESC
 LIMIT 100

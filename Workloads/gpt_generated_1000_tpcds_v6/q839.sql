@@ -1,58 +1,71 @@
-WITH brand_profit_a AS (
-    SELECT
-        i.i_brand AS brand,
-        w.web_name AS site_name,
-        SUM(ws.ws_net_profit) AS total_profit,
-        CASE
-            WHEN SUM(ws.ws_net_profit) > 100000 THEN 'High'
-            WHEN SUM(ws.ws_net_profit) > 50000 THEN 'Medium'
-            ELSE 'Low'
-        END AS profit_category,
-        (
-            SELECT AVG(ws2.ws_list_price)
-            FROM web_sales ws2
-            JOIN item i2 ON ws2.ws_item_sk = i2.i_item_sk
-            WHERE i2.i_brand = i.i_brand
-        ) AS avg_list_price
-    FROM web_sales ws
-    JOIN item i ON ws.ws_item_sk = i.i_item_sk
-    JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
-    WHERE w.web_rec_end_date = DATE '2000-08-15'
-      AND i.i_class = 'pants'
-    GROUP BY i.i_brand, w.web_name
+WITH catalog_agg AS (
+  SELECT
+    i.i_item_id AS item_id,
+    d.d_year AS year,
+    SUM(cs.cs_ext_sales_price) AS total_sales,
+    COUNT(*) AS order_cnt,
+    CASE
+      WHEN regexp_like(i.i_item_desc, '(?i)SSD|HDD') THEN 'Storage'
+      ELSE 'Other'
+    END AS category_flag
+  FROM catalog_sales cs
+  JOIN item i ON cs.cs_item_sk = i.i_item_sk
+  JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+  WHERE i.i_item_desc LIKE '%Blue%'
+    AND d.d_year BETWEEN 2001 AND 2002
+  GROUP BY i.i_item_id,
+           d.d_year,
+           CASE
+             WHEN regexp_like(i.i_item_desc, '(?i)SSD|HDD') THEN 'Storage'
+             ELSE 'Other'
+           END
 ),
-brand_profit_b AS (
-    SELECT
-        i.i_brand AS brand,
-        w.web_name AS site_name,
-        SUM(ws.ws_net_profit) AS total_profit,
-        CASE
-            WHEN SUM(ws.ws_net_profit) > 80000 THEN 'High'
-            WHEN SUM(ws.ws_net_profit) > 30000 THEN 'Medium'
-            ELSE 'Low'
-        END AS profit_category,
-        (
-            SELECT AVG(ws2.ws_list_price)
-            FROM web_sales ws2
-            JOIN item i2 ON ws2.ws_item_sk = i2.i_item_sk
-            WHERE i2.i_brand = i.i_brand
-        ) AS avg_list_price
-    FROM web_sales ws
-    JOIN item i ON ws.ws_item_sk = i.i_item_sk
-    JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
-    WHERE w.web_rec_end_date = DATE '1999-08-16'
-      AND i.i_class = 'sports-apparel'
-      AND EXISTS (
-          SELECT 1
-          FROM item i3
-          WHERE i3.i_formulation LIKE '%goldenrod%'
-            AND i3.i_brand_id = i.i_brand_id
-      )
-    GROUP BY i.i_brand, w.web_name
+web_agg AS (
+  SELECT
+    i.i_item_id AS item_id,
+    d.d_year AS year,
+    SUM(ws.ws_ext_sales_price) AS total_sales,
+    COUNT(*) AS order_cnt,
+    CASE
+      WHEN regexp_like(i.i_item_desc, '(?i)SSD|HDD') THEN 'Storage'
+      ELSE 'Other'
+    END AS category_flag
+  FROM web_sales ws
+  JOIN item i ON ws.ws_item_sk = i.i_item_sk
+  JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+  WHERE i.i_item_desc LIKE '%Blue%'
+    AND d.d_year BETWEEN 2001 AND 2002
+  GROUP BY i.i_item_id,
+           d.d_year,
+           CASE
+             WHEN regexp_like(i.i_item_desc, '(?i)SSD|HDD') THEN 'Storage'
+             ELSE 'Other'
+           END
 )
-SELECT *
-FROM brand_profit_a
-UNION ALL
-SELECT *
-FROM brand_profit_b
-LIMIT 100
+SELECT
+  concat(combined.sales_channel, '_', cast(combined.year AS varchar)) AS channel_year,
+  combined.item_id,
+  combined.total_sales,
+  combined.order_cnt,
+  combined.category_flag
+FROM (
+  SELECT
+    'catalog' AS sales_channel,
+    ca.item_id,
+    ca.year,
+    ca.total_sales,
+    ca.order_cnt,
+    ca.category_flag
+  FROM catalog_agg ca
+  UNION ALL
+  SELECT
+    'web' AS sales_channel,
+    wa.item_id,
+    wa.year,
+    wa.total_sales,
+    wa.order_cnt,
+    wa.category_flag
+  FROM web_agg wa
+) AS combined
+WHERE combined.total_sales > 100000
+ORDER BY combined.sales_channel, combined.total_sales DESC

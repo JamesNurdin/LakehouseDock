@@ -1,55 +1,49 @@
-WITH filtered_returns AS (
-    SELECT
-        sr.sr_store_sk,
-        sr.sr_hdemo_sk,
-        sr.sr_returned_date_sk,
-        sr.sr_reason_sk,
-        sr.sr_return_amt,
-        sr.sr_net_loss,
-        d_ret.d_year,
-        r.r_reason_desc
-    FROM store_returns sr
-    JOIN date_dim d_ret
-        ON sr.sr_returned_date_sk = d_ret.d_date_sk
-    JOIN reason r
-        ON sr.sr_reason_sk = r.r_reason_sk
-    WHERE d_ret.d_year = 2001
-      AND r.r_reason_desc = 'Damaged'
-      AND sr.sr_return_amt > 0
+WITH sales_agg AS (
+  SELECT
+    c.c_customer_id,
+    cp.cp_department AS department,
+    sm.sm_type AS ship_type,
+    SUM(cs.cs_ext_sales_price) AS total_sales,
+    SUM(cs.cs_net_profit) AS total_profit,
+    SUM(cs.cs_quantity) AS total_qty
+  FROM catalog_sales cs
+  JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+  JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+  JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+  JOIN item i ON cs.cs_item_sk = i.i_item_sk
+  JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+  JOIN web_page wp ON wp.wp_customer_sk = c.c_customer_sk
+  WHERE
+    cc.cc_rec_start_date >= DATE '2000-01-01'
+    AND cc.cc_state = 'CA'
+    AND cp.cp_type IN ('monthly', 'quarterly')
+    AND cp.cp_start_date_sk BETWEEN 2450905 AND 2451362
+    AND wp.wp_link_count > 10
+    AND wp.wp_char_count BETWEEN 1500 AND 3000
+    AND cs.cs_ext_sales_price > 500
+  GROUP BY
+    c.c_customer_id,
+    cp.cp_department,
+    sm.sm_type
 )
 SELECT
-    s.s_store_id,
-    d_closure.d_year AS closure_year,
-    CASE
-        WHEN ib.ib_upper_bound <= 60000 THEN 'Low Income'
-        WHEN ib.ib_upper_bound <= 120000 THEN 'Mid Income'
-        ELSE 'High Income'
-    END AS income_category,
-    COUNT(fr.sr_return_amt) AS returns_count,
-    SUM(fr.sr_return_amt) AS total_return_amt,
-    AVG(fr.sr_return_amt) AS avg_return_amt,
-    MIN(fr.sr_return_amt) AS min_return_amt,
-    MAX(fr.sr_return_amt) AS max_return_amt,
-    SUM(CASE WHEN fr.sr_net_loss > 0 THEN fr.sr_net_loss ELSE 0 END) AS total_net_loss
-FROM filtered_returns fr
-JOIN store s
-    ON fr.sr_store_sk = s.s_store_sk
-JOIN household_demographics hd
-    ON fr.sr_hdemo_sk = hd.hd_demo_sk
-JOIN income_band ib
-    ON hd.hd_income_band_sk = ib.ib_income_band_sk
-JOIN date_dim d_closure
-    ON s.s_closed_date_sk = d_closure.d_date_sk
-WHERE s.s_floor_space > 8000000
-  AND s.s_state = 'CA'
-  AND ib.ib_upper_bound <= 100000
-GROUP BY
-    s.s_store_id,
-    d_closure.d_year,
-    CASE
-        WHEN ib.ib_upper_bound <= 60000 THEN 'Low Income'
-        WHEN ib.ib_upper_bound <= 120000 THEN 'Mid Income'
-        ELSE 'High Income'
-    END
-ORDER BY total_return_amt DESC
+  department,
+  ship_type,
+  SUM(total_sales) AS dept_ship_sales,
+  AVG(total_sales) AS avg_sales_per_customer,
+  SUM(total_profit) AS dept_ship_profit,
+  CASE
+    WHEN SUM(total_profit) > 20000 THEN 'HIGH_PROFIT'
+    ELSE 'MODERATE_PROFIT'
+  END AS profit_level,
+  GROUPING(department) AS grp_department,
+  GROUPING(ship_type) AS grp_ship_type
+FROM sales_agg
+GROUP BY GROUPING SETS (
+  (department, ship_type),
+  (department),
+  ()
+)
+HAVING SUM(total_sales) > 10000
+ORDER BY department, ship_type
 LIMIT 100

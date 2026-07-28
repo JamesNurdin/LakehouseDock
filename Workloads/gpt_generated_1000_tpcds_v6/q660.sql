@@ -1,39 +1,70 @@
-WITH sales_agg AS (
-    SELECT
-        sm.sm_ship_mode_id,
-        sm.sm_code,
-        t.t_hour,
-        cd.cd_credit_rating,
-        COUNT(*) AS order_cnt,
-        SUM(ws.ws_quantity) AS total_qty,
-        SUM(ws.ws_net_profit) AS total_profit,
-        AVG(ws.ws_wholesale_cost) AS avg_wholesale_cost
-    FROM web_sales ws
-    JOIN time_dim t
-        ON ws.ws_sold_time_sk = t.t_time_sk
-    JOIN ship_mode sm
-        ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN customer_demographics cd
-        ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-    WHERE sm.sm_code IN ('AIR', 'SEA')
-        AND cd.cd_credit_rating = 'Good'
-        AND cd.cd_dep_college_count >= 1
-        AND t.t_hour BETWEEN 9 AND 17
-        AND ws.ws_wholesale_cost > 10
-        AND ws.ws_net_profit > 0
-    GROUP BY sm.sm_ship_mode_id, sm.sm_code, t.t_hour, cd.cd_credit_rating
+WITH joined_data AS (
+   SELECT
+       c.c_customer_id,
+       c.c_first_name,
+       c.c_last_name,
+       i.i_brand,
+       i.i_category,
+       d_sold.d_year,
+       cc.cc_name,
+       cc.cc_state,
+       wp.wp_url,
+       ws.web_name,
+       cs.cs_net_profit,
+       wr.wr_return_amt
+   FROM catalog_sales cs
+   JOIN date_dim d_sold        ON cs.cs_sold_date_sk = d_sold.d_date_sk
+   JOIN time_dim t_sold        ON cs.cs_sold_time_sk = t_sold.t_time_sk
+   JOIN customer c            ON cs.cs_bill_customer_sk = c.c_customer_sk
+   JOIN customer_address ca   ON cs.cs_bill_addr_sk = ca.ca_address_sk
+   JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+   JOIN income_band ib        ON hd.hd_income_band_sk = ib.ib_income_band_sk
+   JOIN call_center cc        ON cs.cs_call_center_sk = cc.cc_call_center_sk
+   JOIN catalog_page cp       ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+   JOIN item i                ON cs.cs_item_sk = i.i_item_sk
+   JOIN promotion p           ON cs.cs_promo_sk = p.p_promo_sk
+   JOIN web_returns wr        ON i.i_item_sk = wr.wr_item_sk
+   JOIN web_page wp           ON wr.wr_web_page_sk = wp.wp_web_page_sk
+   JOIN date_dim d_wp_creation ON wp.wp_creation_date_sk = d_wp_creation.d_date_sk
+   JOIN date_dim d_wp_access   ON wp.wp_access_date_sk = d_wp_access.d_date_sk
+   JOIN web_site ws           ON ws.web_open_date_sk = d_sold.d_date_sk
+   JOIN date_dim d_ret        ON wr.wr_returned_date_sk = d_ret.d_date_sk
+   JOIN time_dim t_ret        ON wr.wr_returned_time_sk = t_ret.t_time_sk
+   WHERE d_sold.d_year = 2001
+     AND i.i_brand = 'Brand#12'
+     AND p.p_channel_email = 'Y'
+     AND cc.cc_state = 'CA'
+),
+aggregated AS (
+   SELECT
+       c_customer_id,
+       c_first_name,
+       c_last_name,
+       i_brand,
+       i_category,
+       d_year,
+       cc_name,
+       cc_state,
+       wp_url,
+       web_name,
+       SUM(cs_net_profit) AS total_profit,
+       SUM(wr_return_amt) AS total_returns
+   FROM joined_data
+   GROUP BY
+       c_customer_id,
+       c_first_name,
+       c_last_name,
+       i_brand,
+       i_category,
+       d_year,
+       cc_name,
+       cc_state,
+       wp_url,
+       web_name
 )
 SELECT
-    sm_ship_mode_id,
-    sm_code,
-    t_hour,
-    cd_credit_rating,
-    order_cnt,
-    total_qty,
-    total_profit,
-    avg_wholesale_cost,
-    SUM(total_profit) OVER (PARTITION BY sm_ship_mode_id ORDER BY t_hour ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cum_profit_by_hour,
-    RANK() OVER (PARTITION BY sm_ship_mode_id ORDER BY total_profit DESC) AS profit_rank
-FROM sales_agg
-ORDER BY sm_ship_mode_id, t_hour
+   *,
+   RANK() OVER (PARTITION BY d_year ORDER BY total_profit DESC) AS profit_rank_year
+FROM aggregated
+ORDER BY profit_rank_year, total_profit DESC
 LIMIT 100

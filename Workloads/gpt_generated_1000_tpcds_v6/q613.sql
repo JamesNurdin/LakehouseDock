@@ -1,44 +1,56 @@
-WITH filtered_returns AS (
-    SELECT
-        sr.sr_return_time_sk,
-        sr.sr_addr_sk,
-        sr.sr_store_sk,
-        sr.sr_reason_sk,
-        sr.sr_net_loss
-    FROM store_returns sr
-    JOIN time_dim t ON sr.sr_return_time_sk = t.t_time_sk
-    WHERE t.t_shift = 'Evening'
-      AND REGEXP_LIKE(
-            (SELECT ca.ca_street_name FROM customer_address ca WHERE ca.ca_address_sk = sr.sr_addr_sk),
-            'Road$'
-          )
-      AND EXISTS (
-            SELECT 1 FROM reason r
-            WHERE r.r_reason_sk = sr.sr_reason_sk
-              AND r.r_reason_desc LIKE '%damaged%'
-          )
+WITH store_agg AS (
+    SELECT c.c_customer_id,
+           SUM(ss.ss_net_paid) AS total_store_sales,
+           COUNT(*) AS store_txn_cnt
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    WHERE d.d_year = 2002
+    GROUP BY c.c_customer_id
 ),
-joined AS (
-    SELECT
-        st.s_store_name,
-        st.s_city,
-        r.r_reason_desc,
-        fr.sr_net_loss
-    FROM filtered_returns fr
-    JOIN store st ON fr.sr_store_sk = st.s_store_sk
-    JOIN reason r ON fr.sr_reason_sk = r.r_reason_sk
-    JOIN customer_address ca ON fr.sr_addr_sk = ca.ca_address_sk
+web_agg AS (
+    SELECT c.c_customer_id,
+           SUM(ws.ws_net_paid) AS total_web_sales,
+           COUNT(*) AS web_txn_cnt
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE d.d_year = 2002
+    GROUP BY c.c_customer_id
+),
+combined AS (
+    SELECT sa.c_customer_id,
+           sa.total_store_sales AS total_sales,
+           sa.store_txn_cnt AS txn_cnt,
+           'store' AS channel
+    FROM store_agg sa
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM store_returns sr
+        JOIN date_dim dr ON sr.sr_returned_date_sk = dr.d_date_sk
+        JOIN customer c2 ON sr.sr_customer_sk = c2.c_customer_sk
+        WHERE c2.c_customer_id = sa.c_customer_id
+          AND dr.d_year = 2002
+    )
+    UNION ALL
+    SELECT wa.c_customer_id,
+           wa.total_web_sales AS total_sales,
+           wa.web_txn_cnt AS txn_cnt,
+           'web' AS channel
+    FROM web_agg wa
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM web_returns wr
+        JOIN date_dim dw ON wr.wr_returned_date_sk = dw.d_date_sk
+        JOIN customer c3 ON wr.wr_refunded_customer_sk = c3.c_customer_sk
+        WHERE c3.c_customer_id = wa.c_customer_id
+          AND dw.d_year = 2002
+    )
 )
-SELECT
-    CONCAT(st.s_store_name, ' - ', st.s_city) AS store_full_name,
-    REGEXP_EXTRACT(r.r_reason_desc, '^([A-Za-z]+)', 1) AS reason_root_word,
-    SUM(j.sr_net_loss) AS total_net_loss,
-    COUNT(*) AS return_count
-FROM joined j
-JOIN store st ON j.s_store_name = st.s_store_name AND j.s_city = st.s_city
-JOIN reason r ON j.r_reason_desc = r.r_reason_desc
-GROUP BY
-    CONCAT(st.s_store_name, ' - ', st.s_city),
-    REGEXP_EXTRACT(r.r_reason_desc, '^([A-Za-z]+)', 1)
-ORDER BY total_net_loss DESC
-LIMIT 20
+SELECT c_customer_id,
+       total_sales,
+       txn_cnt,
+       channel
+FROM combined
+ORDER BY total_sales DESC
+LIMIT 100

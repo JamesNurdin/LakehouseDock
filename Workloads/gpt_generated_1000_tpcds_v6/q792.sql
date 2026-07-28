@@ -1,50 +1,55 @@
-WITH
-  store_agg AS (
-    SELECT ss.ss_item_sk AS item_sk,
-           SUM(ss.ss_ext_sales_price) AS store_sales
-    FROM store_sales ss
-    GROUP BY ss.ss_item_sk
-  ),
-  web_agg AS (
-    SELECT ws.ws_item_sk AS item_sk,
-           SUM(ws.ws_ext_sales_price) AS web_sales
-    FROM web_sales ws
-    GROUP BY ws.ws_item_sk
-  ),
-  sales_agg AS (
-    SELECT i.i_item_id,
-           i.i_product_name,
-           COALESCE(s.store_sales, 0) + COALESCE(w.web_sales, 0) AS total_sales,
-           ROW_NUMBER() OVER (ORDER BY COALESCE(s.store_sales, 0) + COALESCE(w.web_sales, 0) DESC) AS sales_rank
-    FROM item i
-    LEFT JOIN store_agg s ON s.item_sk = i.i_item_sk
-    LEFT JOIN web_agg w ON w.item_sk = i.i_item_sk
-    WHERE COALESCE(s.store_sales, 0) + COALESCE(w.web_sales, 0) > 10000
-  ),
-  inventory_agg AS (
-    SELECT i.i_item_id,
-           i.i_product_name,
-           SUM(inv.inv_quantity_on_hand) AS total_inventory,
-           ROW_NUMBER() OVER (ORDER BY SUM(inv.inv_quantity_on_hand) DESC) AS inventory_rank
-    FROM item i
-    JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk
-    GROUP BY i.i_item_id, i.i_product_name
-    HAVING SUM(inv.inv_quantity_on_hand) > 5000
-  )
+/*
+  Goal: Combine daily aggregated catalog sales (weekday sales from promotions that used TV channel) with daily aggregated web returns (weekend returns from landing pages). The query shows the date, amount, transaction count and source type, ordered by date descending.
+*/
+WITH cs_agg AS (
+    SELECT
+        d.d_date AS event_date,
+        SUM(cs.cs_ext_sales_price) AS amount,
+        COUNT(DISTINCT cs.cs_order_number) AS txn_cnt,
+        'Catalog' AS source
+    FROM catalog_sales cs
+    JOIN date_dim d
+        ON cs.cs_sold_date_sk = d.d_date_sk
+    JOIN promotion p
+        ON cs.cs_promo_sk = p.p_promo_sk
+    WHERE d.d_day_name IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday')
+      AND p.p_channel_tv = 'Y'
+    GROUP BY d.d_date
+),
+wr_agg AS (
+    SELECT
+        d.d_date AS event_date,
+        SUM(wr.wr_return_amt) AS amount,
+        COUNT(DISTINCT wr.wr_order_number) AS txn_cnt,
+        'WebReturn' AS source
+    FROM web_returns wr
+    JOIN date_dim d
+        ON wr.wr_returned_date_sk = d.d_date_sk
+    JOIN web_page wp
+        ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    WHERE d.d_day_name IN ('Saturday', 'Sunday')
+      AND wp.wp_type = 'Landing'
+      AND EXISTS (
+          SELECT 1
+          FROM customer c
+          JOIN catalog_sales cs2
+              ON c.c_customer_sk = cs2.cs_bill_customer_sk
+          WHERE cs2.cs_order_number = wr.wr_order_number
+      )
+    GROUP BY d.d_date
+)
 SELECT
-  i_item_id,
-  i_product_name,
-  total_sales AS metric,
-  sales_rank AS rank,
-  'sales' AS source
-FROM sales_agg
+    event_date,
+    amount,
+    txn_cnt,
+    source
+FROM cs_agg
 UNION ALL
 SELECT
-  i_item_id,
-  i_product_name,
-  total_inventory AS metric,
-  inventory_rank AS rank,
-  'inventory' AS source
-FROM inventory_agg
-ORDER BY metric DESC
+    event_date,
+    amount,
+    txn_cnt,
+    source
+FROM wr_agg
+ORDER BY event_date DESC
 LIMIT 100

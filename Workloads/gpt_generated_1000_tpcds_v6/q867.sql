@@ -1,57 +1,68 @@
 WITH
-    filtered_warehouses AS (
-        SELECT w_warehouse_sk,
-               w_warehouse_name,
-               w_county
-        FROM   warehouse
-        WHERE  w_county IN ('Bronx County', 'Mobile County')
-    ),
-    return_agg AS (
-        SELECT
-            fw.w_warehouse_name,
-            fw.w_county,
-            'return' AS activity_type,
-            SUM(cr.cr_return_amount) AS total_amount,
-            COUNT(*) AS txn_count,
-            (SELECT AVG(cr2.cr_return_amount)
-               FROM catalog_returns cr2) AS avg_amount_overall
-        FROM   catalog_returns cr
-        JOIN   filtered_warehouses fw
-               ON cr.cr_warehouse_sk = fw.w_warehouse_sk
-        JOIN   reason r
-               ON cr.cr_reason_sk = r.r_reason_sk
-        WHERE  r.r_reason_desc = 'Package was damaged'
-        GROUP BY fw.w_warehouse_name, fw.w_county
-    ),
-    sales_agg AS (
-        SELECT
-            fw.w_warehouse_name,
-            fw.w_county,
-            'sale' AS activity_type,
-            SUM(ws.ws_ext_sales_price) AS total_amount,
-            COUNT(*) AS txn_count,
-            (SELECT AVG(ws2.ws_ext_sales_price)
-               FROM web_sales ws2) AS avg_amount_overall
-        FROM   web_sales ws
-        JOIN   filtered_warehouses fw
-               ON ws.ws_warehouse_sk = fw.w_warehouse_sk
-        JOIN   household_demographics hd
-               ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-        WHERE  hd.hd_buy_potential = '>10000'
-        GROUP BY fw.w_warehouse_name, fw.w_county
-    )
+  returns_agg AS (
+    SELECT
+      i.i_brand AS brand,
+      i.i_category AS category,
+      CONCAT(i.i_brand, '-', i.i_category) AS brand_category,
+      DATE_TRUNC('month', d.d_date) AS month,
+      CASE WHEN i.i_current_price > 100 THEN 'Premium' ELSE 'Standard' END AS price_tier,
+      REGEXP_EXTRACT(i.i_item_desc, '(\\d+)', 1) AS first_number,
+      SUM(cr.cr_return_amount) AS total_return_amount,
+      COUNT(*) AS return_cnt,
+      CAST(NULL AS decimal(7,2)) AS total_sales_amount,
+      CAST(NULL AS integer) AS sales_cnt
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    WHERE REGEXP_LIKE(i.i_item_desc, '[A-Za-z]{3}\\d{3}')
+      AND i.i_item_desc LIKE '%steel%'
+    GROUP BY
+      i.i_brand,
+      i.i_category,
+      CONCAT(i.i_brand, '-', i.i_category),
+      DATE_TRUNC('month', d.d_date),
+      CASE WHEN i.i_current_price > 100 THEN 'Premium' ELSE 'Standard' END,
+      REGEXP_EXTRACT(i.i_item_desc, '(\\d+)', 1)
+  ),
+  sales_agg AS (
+    SELECT
+      i.i_brand AS brand,
+      i.i_category AS category,
+      CONCAT(i.i_brand, '-', i.i_category) AS brand_category,
+      DATE_TRUNC('month', d.d_date) AS month,
+      CASE WHEN i.i_current_price > 100 THEN 'Premium' ELSE 'Standard' END AS price_tier,
+      REGEXP_EXTRACT(i.i_item_desc, '(\\d+)', 1) AS first_number,
+      CAST(NULL AS decimal(7,2)) AS total_return_amount,
+      CAST(NULL AS integer) AS return_cnt,
+      SUM(ws.ws_ext_sales_price) AS total_sales_amount,
+      COUNT(*) AS sales_cnt
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE REGEXP_LIKE(i.i_item_desc, '[A-Za-z]{3}\\d{3}')
+      AND i.i_item_desc LIKE '%steel%'
+    GROUP BY
+      i.i_brand,
+      i.i_category,
+      CONCAT(i.i_brand, '-', i.i_category),
+      DATE_TRUNC('month', d.d_date),
+      CASE WHEN i.i_current_price > 100 THEN 'Premium' ELSE 'Standard' END,
+      REGEXP_EXTRACT(i.i_item_desc, '(\\d+)', 1)
+  )
 SELECT
-    activity_type,
-    w_warehouse_name,
-    w_county,
-    total_amount,
-    txn_count,
-    avg_amount_overall,
-    RANK() OVER (PARTITION BY activity_type ORDER BY total_amount DESC) AS activity_rank
+  brand,
+  category,
+  brand_category,
+  month,
+  price_tier,
+  first_number,
+  total_return_amount,
+  total_sales_amount,
+  return_cnt,
+  sales_cnt
 FROM (
-    SELECT * FROM return_agg
-    UNION ALL
-    SELECT * FROM sales_agg
-) combined
-ORDER BY activity_type, activity_rank
-LIMIT 100
+  SELECT * FROM returns_agg
+  UNION ALL
+  SELECT * FROM sales_agg
+) u
+ORDER BY month DESC, brand ASC, total_sales_amount DESC

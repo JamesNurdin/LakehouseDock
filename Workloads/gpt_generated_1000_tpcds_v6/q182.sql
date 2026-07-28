@@ -1,58 +1,55 @@
-WITH sales_returns AS (
-    SELECT
-        ss.ss_item_sk AS item_sk,
-        i.i_item_id,
-        d.d_date,
-        SUM(ss.ss_net_paid) AS total_sales,
-        SUM(ss.ss_quantity) AS total_quantity,
-        SUM(ss.ss_net_profit) AS total_profit,
-        COUNT(DISTINCT ss.ss_ticket_number) AS distinct_tickets,
-        CASE WHEN SUM(ss.ss_net_profit) > 10000 THEN 'HIGH' ELSE 'LOW' END AS profit_category
-    FROM store_sales ss
-    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
-    JOIN time_dim t ON ss.ss_sold_time_sk = t.t_time_sk
-    JOIN item i ON ss.ss_item_sk = i.i_item_sk
-    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
-    WHERE d.d_year = 2001                     -- filter 1: year
-      AND t.t_hour BETWEEN 8 AND 18           -- filter 2: business hours
-      AND i.i_current_price > 50              -- filter 3: price threshold
-      AND hd.hd_income_band_sk IN (9, 10)      -- filter 4: income band
-      AND ca.ca_state = 'TX'                  -- filter 5: state
-    GROUP BY ss.ss_item_sk, i.i_item_id, d.d_date
-),
-returns_agg AS (
-    SELECT
-        cr.cr_item_sk AS item_sk,
-        d_ret.d_date,
-        SUM(cr.cr_return_amount) AS total_return_amount,
-        SUM(cr.cr_return_quantity) AS total_return_qty
-    FROM catalog_returns cr
-    JOIN date_dim d_ret ON cr.cr_returned_date_sk = d_ret.d_date_sk
-    JOIN time_dim t_ret ON cr.cr_returned_time_sk = t_ret.t_time_sk
-    JOIN item i_ret ON cr.cr_item_sk = i_ret.i_item_sk
-    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-    WHERE EXISTS (
-        SELECT 1
-        FROM ship_mode sm
-        WHERE sm.sm_ship_mode_sk = cr.cr_ship_mode_sk
-          AND sm.sm_contract = 'P7FBIt8yd'
-    )
-    GROUP BY cr.cr_item_sk, d_ret.d_date
+WITH high_income_hh AS (
+    SELECT hd.hd_demo_sk
+    FROM household_demographics hd
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE ib.ib_lower_bound >= 80001
+      AND ib.ib_upper_bound <= 180000
 )
-SELECT DISTINCT
-    sr.i_item_id,
-    sr.d_date,
-    sr.total_sales,
-    ra.total_return_amount,
-    (sr.total_sales - COALESCE(ra.total_return_amount, 0)) AS net_sales,
-    sr.total_profit,
-    sr.profit_category,
-    sr.distinct_tickets
-FROM sales_returns sr
-LEFT JOIN returns_agg ra
-    ON sr.item_sk = ra.item_sk
-   AND sr.d_date = ra.d_date
-WHERE (sr.total_sales - COALESCE(ra.total_return_amount, 0)) > 5000
-ORDER BY net_sales DESC
+SELECT
+    d.d_year,
+    w.w_warehouse_name,
+    SUM(sr.sr_net_loss) AS total_store_loss,
+    SUM(cr.cr_net_loss) AS total_catalog_loss,
+    SUM(ws.ws_net_profit) AS total_web_profit,
+    COUNT(DISTINCT ws.ws_order_number) AS distinct_orders,
+    AVG(inv.inv_quantity_on_hand) AS avg_inventory_qty
+FROM
+    store_returns sr
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    JOIN time_dim t ON sr.sr_return_time_sk = t.t_time_sk
+    JOIN customer_demographics cd_ret ON sr.sr_cdemo_sk = cd_ret.cd_demo_sk
+    JOIN high_income_hh hh_ret ON sr.sr_hdemo_sk = hh_ret.hd_demo_sk
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    LEFT JOIN catalog_returns cr ON cr.cr_returned_date_sk = d.d_date_sk
+        AND cr.cr_returned_time_sk = t.t_time_sk
+        AND cr.cr_refunded_hdemo_sk = sr.sr_hdemo_sk
+    LEFT JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    LEFT JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+    LEFT JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    LEFT JOIN inventory inv ON inv.inv_date_sk = d.d_date_sk
+        AND inv.inv_warehouse_sk = w.w_warehouse_sk
+    LEFT JOIN web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+        AND ws.ws_ship_date_sk = d.d_date_sk
+        AND ws.ws_bill_hdemo_sk = sr.sr_hdemo_sk
+    LEFT JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    LEFT JOIN web_site wsit ON ws.ws_web_site_sk = wsit.web_site_sk
+    LEFT JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+WHERE
+    d.d_year = 2001
+    AND w.w_state = 'CA'
+    AND sm.sm_type = 'AIR'
+    AND wsit.web_country = 'United States'
+    AND p.p_discount_active = 'Y'
+    AND EXISTS (
+        SELECT 1 FROM reason r2 WHERE r2.r_reason_desc = r.r_reason_desc
+    )
+GROUP BY
+    d.d_year,
+    w.w_warehouse_name
+HAVING
+    SUM(ws.ws_net_profit) > (
+        SELECT AVG(ws2.ws_net_profit) FROM web_sales ws2
+    )
+ORDER BY
+    total_web_profit DESC
 LIMIT 100

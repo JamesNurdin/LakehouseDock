@@ -1,48 +1,46 @@
-WITH sales_detail AS (
-    SELECT
-        ss.ss_sold_date_sk,
-        ss.ss_item_sk,
-        ss.ss_promo_sk,
-        ss.ss_quantity,
-        ss.ss_net_profit,
-        ss.ss_ext_sales_price,
-        i.i_item_id,
-        i.i_product_name,
-        i.i_current_price,
-        d.d_year,
-        d.d_month_seq,
-        p.p_cost,
-        p.p_promo_name,
-        p.p_channel_details
-    FROM store_sales ss
-    JOIN date_dim d
-        ON ss.ss_sold_date_sk = d.d_date_sk
-    JOIN item i
-        ON ss.ss_item_sk = i.i_item_sk
-    JOIN promotion p
-        ON ss.ss_promo_sk = p.p_promo_sk
-    WHERE d.d_year = 2001
-      AND i.i_current_price > 100
-      AND p.p_cost <= 2000
-      AND ss.ss_quantity >= 5
-      AND d.d_month_seq BETWEEN 1200 AND 1240
-)
+/*
+Goal: Identify stores whose names contain the word "Market" and that have no recorded "Damaged" returns. For each store and sales year, compute total sales, discounts, profit and categorize each transaction by discount level. Extract a three‑letter code from the item description using regex, and also show the first five characters of the description. Limit to the top 100 rows by profit.
+*/
 SELECT
-    sd.d_year,
-    sd.d_month_seq,
-    sd.i_item_id,
-    sd.i_product_name,
-    sd.i_current_price,
-    sd.p_promo_name,
-    sd.ss_quantity,
-    sd.ss_net_profit,
-    CASE WHEN sd.ss_net_profit > 500 THEN 'High' ELSE 'Normal' END AS profit_tier,
-    ROW_NUMBER() OVER (PARTITION BY sd.d_year, sd.d_month_seq ORDER BY sd.ss_net_profit DESC) AS profit_rank,
-    SUM(sd.ss_ext_sales_price) OVER (
-        PARTITION BY sd.d_year, sd.d_month_seq
-        ORDER BY sd.ss_net_profit DESC
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS cum_sales_price
-FROM sales_detail sd
-ORDER BY sd.d_year, sd.d_month_seq, profit_rank
+  s.s_store_id,
+  s.s_store_name,
+  d.d_year,
+  regexp_extract(i.i_item_desc, '(\\w{3})', 1)               AS three_letter_code,
+  substring(i.i_item_desc FROM 1 FOR 5)                     AS item_prefix,
+  CASE
+    WHEN ss.ss_ext_discount_amt > 0.2 * ss.ss_ext_list_price THEN 'High Discount'
+    ELSE 'Normal Discount'
+  END                                                       AS discount_category,
+  SUM(ss.ss_ext_sales_price)                               AS total_sales,
+  SUM(ss.ss_ext_discount_amt)                              AS total_discount,
+  SUM(ss.ss_net_profit)                                    AS total_profit,
+  COUNT(*)                                                  AS transaction_count
+FROM store_sales ss
+JOIN store s
+  ON ss.ss_store_sk = s.s_store_sk
+JOIN date_dim d
+  ON ss.ss_sold_date_sk = d.d_date_sk
+JOIN item i
+  ON ss.ss_item_sk = i.i_item_sk
+WHERE s.s_store_name LIKE '%Market%'
+  AND regexp_like(i.i_item_desc, '[A-Z]{3}')
+  AND NOT EXISTS (
+        SELECT 1
+        FROM store_returns sr
+        JOIN reason r
+          ON sr.sr_reason_sk = r.r_reason_sk
+        WHERE sr.sr_store_sk = s.s_store_sk
+          AND r.r_reason_desc = 'Damaged'
+      )
+GROUP BY
+  s.s_store_id,
+  s.s_store_name,
+  d.d_year,
+  regexp_extract(i.i_item_desc, '(\\w{3})', 1),
+  substring(i.i_item_desc FROM 1 FOR 5),
+  CASE
+    WHEN ss.ss_ext_discount_amt > 0.2 * ss.ss_ext_list_price THEN 'High Discount'
+    ELSE 'Normal Discount'
+  END
+ORDER BY total_profit DESC
 LIMIT 100

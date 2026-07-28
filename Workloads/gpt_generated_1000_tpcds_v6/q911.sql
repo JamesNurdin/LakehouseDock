@@ -1,50 +1,34 @@
-WITH max_birth_year AS (
-    SELECT max(c_birth_year) AS max_year FROM tpcds.customer
-),
-sub1 AS (
+WITH ws_agg AS (
     SELECT
-        hd.hd_income_band_sk,
-        CASE
-            WHEN c.c_birth_year < 1960 THEN 'Senior'
-            ELSE 'Adult'
-        END AS age_group,
-        COUNT(*) AS customer_cnt,
-        (SELECT max_year FROM max_birth_year) AS overall_max_birth_year
-    FROM tpcds.customer c
-    JOIN tpcds.household_demographics hd
-        ON c.c_current_hdemo_sk = hd.hd_demo_sk
-    WHERE c.c_birth_year <= 1970
-      AND hd.hd_dep_count >= 2
-    GROUP BY hd.hd_income_band_sk,
-        CASE
-            WHEN c.c_birth_year < 1960 THEN 'Senior'
-            ELSE 'Adult'
-        END
-),
-sub2 AS (
-    SELECT
-        hd.hd_income_band_sk,
-        CASE
-            WHEN c.c_birth_year BETWEEN 1971 AND 1990 THEN 'Middle'
-            ELSE 'Young'
-        END AS age_group,
-        COUNT(*) AS customer_cnt,
-        (SELECT max_year FROM max_birth_year) AS overall_max_birth_year
-    FROM tpcds.customer c
-    JOIN tpcds.household_demographics hd
-        ON c.c_current_hdemo_sk = hd.hd_demo_sk
-    WHERE c.c_birth_year > 1970
-      AND hd.hd_vehicle_count > 0
-    GROUP BY hd.hd_income_band_sk,
-        CASE
-            WHEN c.c_birth_year BETWEEN 1971 AND 1990 THEN 'Middle'
-            ELSE 'Young'
-        END
+        ws_item_sk,
+        ws_ship_mode_sk,
+        ws_bill_addr_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(*) AS order_cnt
+    FROM web_sales
+    WHERE ws_ext_sales_price > 1000
+      AND ws_ext_wholesale_cost < 5000
+      AND ws_quantity >= 1
+      AND ws_sold_date_sk BETWEEN 2450000 AND 2451500
+      AND ws_ship_mode_sk IN (1, 6, 10, 17, 20)
+    GROUP BY ws_item_sk, ws_ship_mode_sk, ws_bill_addr_sk
 )
-SELECT *
-FROM sub1
-UNION ALL
-SELECT *
-FROM sub2
-ORDER BY hd_income_band_sk, age_group, customer_cnt DESC
+SELECT DISTINCT
+    i.i_category,
+    sm.sm_type,
+    ca.ca_state,
+    ws_agg.total_sales,
+    ws_agg.total_profit,
+    ws_agg.order_cnt
+FROM ws_agg
+JOIN item i ON ws_agg.ws_item_sk = i.i_item_sk
+JOIN ship_mode sm ON ws_agg.ws_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN customer_address ca ON ws_agg.ws_bill_addr_sk = ca.ca_address_sk
+WHERE i.i_manufact = 'ationcallyought'
+  AND sm.sm_contract = 'ldhM8IvpzHgdbBgDfI'
+  AND ca.ca_country = 'United States'
+  AND i.i_rec_start_date >= DATE '2000-01-01'
+  AND i.i_rec_end_date <= DATE '2005-12-31'
+ORDER BY ws_agg.total_sales DESC
 LIMIT 100

@@ -1,41 +1,48 @@
-WITH agg AS (
-    SELECT cr_call_center_sk,
-           SUM(cr_return_amount) AS total_return_amount,
-           SUM(cr_return_quantity) AS total_return_quantity
-    FROM catalog_returns
-    WHERE cr_return_amount > 0
-    GROUP BY cr_call_center_sk
+WITH sales_agg AS (
+    SELECT
+        ca.ca_state,
+        i.i_category,
+        cd.cd_gender,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        SUM(ss.ss_quantity) AS total_qty,
+        SUM(CASE WHEN cd.cd_credit_rating = 'Good' THEN 1 ELSE 0 END) AS good_credit_cnt,
+        AVG(ss.ss_ext_discount_amt) AS avg_discount
+    FROM store_sales ss
+    JOIN item i
+        ON ss.ss_item_sk = i.i_item_sk
+    JOIN customer_demographics cd
+        ON ss.ss_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca
+        ON ss.ss_addr_sk = ca.ca_address_sk
+    WHERE ca.ca_country = 'United States'
+      AND ca.ca_location_type IN ('apartment', 'single family')
+      AND cd.cd_purchase_estimate >= 3000
+      AND cd.cd_credit_rating IN ('Good', 'High Risk')
+      AND i.i_units = 'Box'
+      AND i.i_current_price BETWEEN 10 AND 100
+      AND i.i_manufact LIKE '%cally%'
+    GROUP BY ca.ca_state, i.i_category, cd.cd_gender
+),
+final_stats AS (
+    SELECT
+        ca_state,
+        AVG(total_sales) AS avg_state_sales,
+        SUM(good_credit_cnt) AS total_good_credit,
+        MAX(total_sales) AS max_state_sales
+    FROM sales_agg
+    GROUP BY ca_state
+    HAVING AVG(total_sales) > 1000
 )
 SELECT
-    cc.cc_call_center_id,
-    cc.cc_state,
-    cd.cd_credit_rating,
-    cd.cd_marital_status,
-    hd.hd_buy_potential,
-    hd.hd_vehicle_count,
-    w.w_warehouse_name,
-    agg.total_return_amount,
-    agg.total_return_quantity,
-    CASE WHEN agg.total_return_amount > (
-            SELECT AVG(cr_return_amount)
-            FROM catalog_returns
-         ) THEN 'High'
-         ELSE 'Low'
-    END AS amount_category,
-    RANK() OVER (PARTITION BY cc.cc_state ORDER BY agg.total_return_amount DESC) AS state_rank
-FROM call_center cc
-JOIN agg ON agg.cr_call_center_sk = cc.cc_call_center_sk
-JOIN catalog_returns cr ON cr.cr_call_center_sk = cc.cc_call_center_sk
-JOIN customer_demographics cd ON cd.cd_demo_sk = cr.cr_returning_cdemo_sk
-JOIN household_demographics hd ON hd.hd_demo_sk = cr.cr_returning_hdemo_sk
-JOIN warehouse w ON w.w_warehouse_sk = cr.cr_warehouse_sk
-WHERE cc.cc_state = 'CA'
-  AND cc.cc_company > 2
-  AND cd.cd_credit_rating = 'Good'
-  AND cd.cd_marital_status = 'M'
-  AND hd.hd_buy_potential IN ('501-1000', '1001-5000')
-  AND hd.hd_vehicle_count >= 1
-  AND w.w_state = 'CA'
-  AND cr.cr_return_amount > 100
-ORDER BY agg.total_return_amount DESC
+    ca_state,
+    avg_state_sales,
+    total_good_credit,
+    max_state_sales,
+    CASE
+        WHEN avg_state_sales > 5000 THEN 'High'
+        WHEN avg_state_sales > 2000 THEN 'Medium'
+        ELSE 'Low'
+    END AS sales_grade
+FROM final_stats
+ORDER BY avg_state_sales DESC
 LIMIT 100

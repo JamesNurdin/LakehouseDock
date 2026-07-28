@@ -1,47 +1,39 @@
-WITH filtered_sales AS (
+WITH promo_sales AS (
     SELECT
-        ws.ws_order_number,
-        ws.ws_item_sk,
-        ws.ws_bill_customer_sk,
-        ws.ws_bill_addr_sk,
-        ws.ws_net_profit,
-        i.i_category,
-        c.c_email_address,
-        ca.ca_state,
-        wp.wp_url
-    FROM web_sales ws
-    JOIN item i
-        ON ws.ws_item_sk = i.i_item_sk
-    JOIN customer c
-        ON ws.ws_bill_customer_sk = c.c_customer_sk
-    JOIN customer_address ca
-        ON ws.ws_bill_addr_sk = ca.ca_address_sk
-    JOIN web_page wp
-        ON ws.ws_web_page_sk = wp.wp_web_page_sk
-    WHERE
-        regexp_like(c.c_email_address, '^[A-Za-z0-9._%+-]+@example\\.(com|org)$')
-        AND wp.wp_url LIKE '%promo%'
+        p.p_promo_id AS promo_id,
+        'sales' AS metric_type,
+        SUM(ss.ss_ext_sales_price) AS amount,
+        SUM(ss.ss_net_profit) AS profit_or_loss
+    FROM store_sales ss
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    WHERE p.p_channel_details LIKE '%high%'
+    GROUP BY p.p_promo_id
 ),
-aggregated AS (
+promo_returns AS (
     SELECT
-        f.i_category,
-        f.ca_state,
-        COUNT(*) AS sales_cnt,
-        SUM(f.ws_net_profit) AS total_profit,
-        AVG(f.ws_net_profit) AS avg_profit,
-        MAX(f.wp_url) AS sample_wp_url,
-        MAX(f.c_email_address) AS sample_email
-    FROM filtered_sales f
-    GROUP BY f.i_category, f.ca_state
+        p.p_promo_id AS promo_id,
+        'returns' AS metric_type,
+        SUM(sr.sr_return_amt_inc_tax) AS amount,
+        SUM(sr.sr_net_loss) AS profit_or_loss
+    FROM store_returns sr
+    JOIN store_sales ss ON sr.sr_item_sk = ss.ss_item_sk
+                        AND sr.sr_ticket_number = ss.ss_ticket_number
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    WHERE p.p_channel_details LIKE '%high%'
+    GROUP BY p.p_promo_id
 )
 SELECT
-    a.i_category,
-    a.ca_state,
-    a.sales_cnt,
-    a.total_profit,
-    a.avg_profit,
-    regexp_extract(a.sample_wp_url, 'https?://([^/]+)/', 1) AS domain_extracted,
-    substring(a.sample_email, position('@' IN a.sample_email) + 1) AS email_domain
-FROM aggregated a
-ORDER BY a.total_profit DESC
+    promo_id,
+    metric_type,
+    amount,
+    profit_or_loss
+FROM promo_sales
+UNION ALL
+SELECT
+    promo_id,
+    metric_type,
+    amount,
+    profit_or_loss
+FROM promo_returns
+ORDER BY promo_id, metric_type
 LIMIT 100

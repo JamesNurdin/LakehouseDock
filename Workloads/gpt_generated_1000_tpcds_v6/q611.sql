@@ -1,45 +1,48 @@
-WITH joined AS (
+/* goal: Compare total sales and profit by household buying potential across catalog and web channels, excluding households that have more than two vehicles, and show subtotals */
+WITH catalog_agg AS (
     SELECT
-        cc.cc_manager,
-        cc.cc_name,
-        w.w_warehouse_name,
-        sm.sm_type,
-        r.r_reason_desc,
-        td.t_hour,
-        cp.cp_catalog_number,
-        cr.cr_return_amount,
-        cr.cr_return_quantity,
-        cr.cr_net_loss
-    FROM catalog_returns cr
-    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
-    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-    JOIN time_dim td ON cr.cr_returned_time_sk = td.t_time_sk
-    WHERE cc.cc_rec_start_date BETWEEN DATE '2000-01-01' AND DATE '2002-12-31'
-      AND cp.cp_catalog_number IN (4, 7, 16)
-      AND sm.sm_type = 'AIR'
-      AND r.r_reason_desc LIKE '%time%'
-      AND td.t_hour BETWEEN 9 AND 17
+        hd.hd_buy_potential AS buy_potential,
+        cs.cs_ext_sales_price   AS net_sales,
+        cs.cs_net_profit        AS profit
+    FROM catalog_sales cs
+    JOIN household_demographics hd
+        ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+    WHERE cs.cs_ext_sales_price > 5000
+      AND NOT EXISTS (
+          SELECT 1
+          FROM household_demographics hd2
+          WHERE hd2.hd_demo_sk = cs.cs_ship_hdemo_sk
+            AND hd2.hd_vehicle_count > 2
+      )
 ),
-agg AS (
+web_agg AS (
     SELECT
-        cc_manager AS manager,
-        w_warehouse_name AS warehouse,
-        SUM(cr_return_amount) AS total_return_amount,
-        SUM(cr_return_quantity) AS total_return_quantity,
-        SUM(cr_net_loss) AS total_net_loss
-    FROM joined
-    GROUP BY cc_manager, w_warehouse_name
+        hd.hd_buy_potential AS buy_potential,
+        ws.ws_ext_sales_price   AS net_sales,
+        ws.ws_net_profit        AS profit
+    FROM web_sales ws
+    JOIN household_demographics hd
+        ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+    WHERE ws.ws_ext_sales_price > 5000
+      AND NOT EXISTS (
+          SELECT 1
+          FROM household_demographics hd2
+          WHERE hd2.hd_demo_sk = ws.ws_ship_hdemo_sk
+            AND hd2.hd_vehicle_count > 2
+      )
 )
 SELECT
-    manager,
-    warehouse,
-    total_return_amount,
-    total_return_quantity,
-    total_net_loss,
-    RANK() OVER (PARTITION BY manager ORDER BY total_net_loss DESC) AS loss_rank
-FROM agg
-ORDER BY manager, loss_rank
+    buy_potential,
+    SUM(net_sales) AS total_sales,
+    SUM(profit)    AS total_profit,
+    COUNT(*)       AS txn_count,
+    GROUPING(buy_potential) AS grouping_indicator
+FROM (
+    SELECT buy_potential, net_sales, profit FROM catalog_agg
+    UNION ALL
+    SELECT buy_potential, net_sales, profit FROM web_agg
+) u
+GROUP BY GROUPING SETS ((buy_potential), ())
+HAVING SUM(net_sales) > 10000
+ORDER BY total_sales DESC, buy_potential
 LIMIT 100

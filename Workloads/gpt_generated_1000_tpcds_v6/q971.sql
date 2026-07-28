@@ -1,94 +1,44 @@
-/*
-Goal: Identify the most profitable market‑manager/warehouse combinations for the current year, enriched with inventory on‑hand, store returns and website activity. The query aggregates sales first, then joins additional aggregates via LEFT OUTER JOINs, applies several filters, orders by sales and limits the result.
-*/
-WITH
-  -- Aggregate catalog sales by year, month, market manager and warehouse
-  sales_agg AS (
+-- Goal: Analyze the financial impact of a specific return reason across catalog, store and web channels,
+-- joining all seven tables, applying realistic filters, using a scalar subquery, and aggregating key metrics.
+WITH filtered_cr AS (
+    SELECT cr.*
+    FROM catalog_returns cr
+    WHERE cr.cr_return_amount > (
+        SELECT AVG(cr2.cr_return_amount)
+        FROM catalog_returns cr2
+    )
+)
+, joined AS (
     SELECT
-      d.d_year,
-      d.d_month_seq,
-      cc.cc_market_manager,
-      w.w_warehouse_name,
-      SUM(cs.cs_ext_sales_price)      AS total_sales,
-      SUM(cs.cs_net_profit)           AS total_profit,
-      COUNT(DISTINCT cs.cs_order_number) AS orders_cnt
-    FROM catalog_sales cs
-    JOIN date_dim d          ON cs.cs_sold_date_sk   = d.d_date_sk
-    JOIN call_center cc      ON cs.cs_call_center_sk = cc.cc_call_center_sk
-    JOIN warehouse w         ON cs.cs_warehouse_sk   = w.w_warehouse_sk
-    WHERE d.d_current_year = 'Y'
-      AND d.d_current_month = 'Y'
-      AND cc.cc_gmt_offset BETWEEN -5 AND 5
-      AND w.w_gmt_offset IS NOT NULL
-    GROUP BY
-      d.d_year,
-      d.d_month_seq,
-      cc.cc_market_manager,
-      w.w_warehouse_name
-  ),
-
-  -- Aggregate store returns by year and store name
-  store_return_agg AS (
-    SELECT
-      d.d_year,
-      s.s_store_name,
-      SUM(sr.sr_return_amt) AS total_returns,
-      COUNT(*)               AS return_cnt
-    FROM store_returns sr
-    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
-    JOIN store s    ON sr.sr_store_sk         = s.s_store_sk
-    WHERE d.d_current_year = 'Y'
-      AND s.s_gmt_offset BETWEEN -5 AND 5
-    GROUP BY d.d_year, s.s_store_name
-  ),
-
-  -- Aggregate inventory on‑hand by year and warehouse
-  inventory_agg AS (
-    SELECT
-      d.d_year,
-      w.w_warehouse_name,
-      SUM(inv.inv_quantity_on_hand) AS total_on_hand
-    FROM inventory inv
-    JOIN date_dim d ON inv.inv_date_sk      = d.d_date_sk
-    JOIN warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
-    WHERE d.d_current_year = 'Y'
-    GROUP BY d.d_year, w.w_warehouse_name
-  ),
-
-  -- Aggregate website information by year and site name
-  website_agg AS (
-    SELECT
-      d.d_year,
-      ws.web_name,
-      COUNT(*) AS site_count
-    FROM web_site ws
-    JOIN date_dim d ON ws.web_open_date_sk = d.d_date_sk
-    WHERE d.d_current_year = 'Y'
-    GROUP BY d.d_year, ws.web_name
-  )
-
+        r.r_reason_desc,
+        cr.cr_return_amount,
+        cr.cr_net_loss               AS cr_net_loss,
+        sr.sr_return_amt             AS sr_return_amt,
+        sr.sr_net_loss               AS sr_net_loss,
+        ws.ws_net_profit             AS ws_net_profit,
+        wp.wp_image_count            AS wp_image_count,
+        wp.wp_rec_end_date           AS wp_rec_end_date
+    FROM filtered_cr cr
+    JOIN customer_address ca_ref      ON cr.cr_refunded_addr_sk = ca_ref.ca_address_sk
+    JOIN reason r                     ON cr.cr_reason_sk = r.r_reason_sk
+    JOIN store_returns sr             ON sr.sr_reason_sk = r.r_reason_sk
+    JOIN customer_address ca_store    ON sr.sr_addr_sk = ca_store.ca_address_sk
+    JOIN web_sales ws                 ON ws.ws_bill_addr_sk = ca_store.ca_address_sk
+    JOIN web_page wp                  ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN web_returns wr               ON wr.wr_order_number = ws.ws_order_number
+    WHERE r.r_reason_desc = 'Did not like the color'
+      AND wp.wp_image_count > 4
+      AND wp.wp_rec_end_date = DATE '2000-09-02'
+)
 SELECT
-  sa.d_year,
-  sa.cc_market_manager,
-  sa.w_warehouse_name,
-  sa.total_sales,
-  sa.total_profit,
-  COALESCE(ia.total_on_hand, 0)      AS total_on_hand,
-  COALESCE(sra.total_returns, 0)    AS total_returns,
-  COALESCE(wa.site_count, 0)        AS site_count,
-  CASE WHEN COALESCE(ia.total_on_hand, 0) = 0 THEN NULL
-       ELSE sa.total_sales / ia.total_on_hand END AS sales_per_onhand
-FROM sales_agg sa
-LEFT OUTER JOIN inventory_agg ia
-  ON sa.d_year = ia.d_year
- AND sa.w_warehouse_name = ia.w_warehouse_name
-LEFT OUTER JOIN store_return_agg sra
-  ON sa.d_year = sra.d_year
-LEFT OUTER JOIN website_agg wa
-  ON sa.d_year = wa.d_year
-WHERE sa.total_sales > 10000
-  AND sa.total_profit > 0
-  AND COALESCE(ia.total_on_hand, 0) > 0
-  AND wa.site_count > 0
-ORDER BY sa.total_sales DESC
+    r_reason_desc,
+    COUNT(*)                                     AS total_transactions,
+    SUM(cr_return_amount)                        AS total_catalog_return_amount,
+    SUM(cr_net_loss + sr_net_loss)               AS total_net_loss,
+    AVG(ws_net_profit)                           AS avg_web_profit,
+    MIN(wp_image_count)                         AS min_image_count,
+    MAX(wp_image_count)                         AS max_image_count
+FROM joined
+GROUP BY r_reason_desc
+ORDER BY total_transactions DESC
 LIMIT 100

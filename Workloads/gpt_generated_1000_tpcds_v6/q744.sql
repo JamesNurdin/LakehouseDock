@@ -1,58 +1,70 @@
-WITH base AS (
+WITH filtered_sales AS (
+    SELECT ss.*
+    FROM store_sales ss
+    WHERE ss.ss_sold_date_sk BETWEEN 2450800 AND 2450900
+      AND ss.ss_quantity > 1
+      AND ss.ss_ext_sales_price > 100
+),
+joined_data AS (
     SELECT
-        s.s_store_id,
-        d_ret.d_date,
-        sr.sr_net_loss AS sr_net_loss,
-        wr.wr_net_loss AS wr_net_loss,
-        s.s_state,
-        i.inv_quantity_on_hand,
-        cp.cp_catalog_number,
-        cc.cc_gmt_offset,
-        wp.wp_type,
-        t_ret.t_hour
-    FROM store_returns sr
-    JOIN date_dim d_ret ON sr.sr_returned_date_sk = d_ret.d_date_sk
-    JOIN time_dim t_ret ON sr.sr_return_time_sk = t_ret.t_time_sk
-    JOIN store s ON sr.sr_store_sk = s.s_store_sk
-    JOIN inventory i ON i.inv_date_sk = d_ret.d_date_sk
-    JOIN web_returns wr ON wr.wr_returned_date_sk = d_ret.d_date_sk
-        AND wr.wr_returned_time_sk = t_ret.t_time_sk
-    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    JOIN catalog_page cp ON cp.cp_start_date_sk = d_ret.d_date_sk
-    JOIN call_center cc ON cc.cc_closed_date_sk = d_ret.d_date_sk
-    WHERE d_ret.d_year = 2001
-      AND s.s_state = 'CA'
-      AND i.inv_quantity_on_hand > 200
-      AND cp.cp_catalog_number BETWEEN 5 AND 20
-      AND cc.cc_gmt_offset BETWEEN -5 AND 0
-      AND wp.wp_type = 'content'
-      AND sr.sr_return_amt > 50
-      AND t_ret.t_hour BETWEEN 9 AND 17
+        ss.ss_item_sk,
+        ss.ss_customer_sk,
+        ss.ss_hdemo_sk,
+        ss.ss_addr_sk,
+        ss.ss_sold_date_sk,
+        ss.ss_quantity,
+        ss.ss_ext_sales_price,
+        ss.ss_net_profit,
+        ss.ss_ticket_number,
+        i.i_category,
+        i.i_brand,
+        c.c_birth_country,
+        ca.ca_state,
+        ca.ca_zip,
+        hd.hd_income_band_sk,
+        inv.inv_quantity_on_hand,
+        wr.wr_return_amt_inc_tax,
+        wp.wp_type
+    FROM filtered_sales ss
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk
+    LEFT JOIN web_returns wr ON wr.wr_item_sk = i.i_item_sk AND wr.wr_refunded_customer_sk = c.c_customer_sk
+    LEFT JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    WHERE i.i_brand = 'Brand#12'
+      AND i.i_category = 'Electronics'
+      AND c.c_birth_country = 'KAZAKHSTAN'
+      AND ca.ca_state = 'CA'
+      AND ca.ca_zip = '10069'
+      AND inv.inv_quantity_on_hand >= 10
+      AND (wr.wr_return_amt_inc_tax IS NULL OR wr.wr_return_amt_inc_tax > 200)
       AND EXISTS (
-          SELECT 1
-          FROM call_center cc2
-          WHERE cc2.cc_company = s.s_company_id
-            AND cc2.cc_tax_percentage < 5
+          SELECT 1 FROM inventory inv2
+          WHERE inv2.inv_item_sk = i.i_item_sk
+            AND inv2.inv_quantity_on_hand > 50
       )
 ),
 agg AS (
     SELECT
-        s_store_id,
-        d_date,
-        SUM(sr_net_loss) AS store_return_loss,
-        SUM(wr_net_loss) AS web_return_loss,
-        SUM(sr_net_loss + wr_net_loss) AS total_loss
-    FROM base
-    GROUP BY s_store_id, d_date
+        i_category,
+        i_brand,
+        SUM(ss_ext_sales_price) AS total_sales,
+        AVG(ss_net_profit) AS avg_profit,
+        COUNT(DISTINCT ss_ticket_number) AS order_count,
+        SUM(COALESCE(wr_return_amt_inc_tax, 0)) AS total_returns
+    FROM joined_data
+    GROUP BY ROLLUP (i_category, i_brand)
 )
 SELECT
-    s_store_id,
-    d_date,
-    store_return_loss,
-    web_return_loss,
-    total_loss,
-    ROW_NUMBER() OVER (PARTITION BY d_date ORDER BY total_loss DESC) AS loss_rank
+    i_category,
+    i_brand,
+    CASE WHEN total_sales > 10000 THEN 'High' ELSE 'Low' END AS sales_level,
+    total_sales,
+    avg_profit,
+    order_count,
+    total_returns,
+    ROW_NUMBER() OVER (PARTITION BY i_category ORDER BY total_sales DESC) AS rank_in_category
 FROM agg
-WHERE total_loss > 0
-ORDER BY total_loss DESC, loss_rank
-LIMIT 100
+ORDER BY i_category, i_brand

@@ -1,52 +1,34 @@
-/*
-Goal: Compare the volume of returns from the catalog channel versus the web channel by hour and minute of the day, aggregating total return amount and net loss, and list the results ordered chronologically and by source.
-*/
-WITH catalog_ret AS (
-    SELECT
-        td.t_hour AS hour,
-        td.t_minute AS minute,
-        td.t_sub_shift AS sub_shift,
-        'catalog' AS source,
-        SUM(cr.cr_return_amount) AS total_return_amount,
-        SUM(cr.cr_net_loss) AS total_net_loss
-    FROM catalog_returns cr
-    JOIN time_dim td
-        ON cr.cr_returned_time_sk = td.t_time_sk
-    WHERE cr.cr_return_amount > 10
-      AND td.t_hour BETWEEN 8 AND 20
-    GROUP BY td.t_hour, td.t_minute, td.t_sub_shift
-),
-web_ret AS (
-    SELECT
-        td.t_hour AS hour,
-        td.t_minute AS minute,
-        td.t_sub_shift AS sub_shift,
-        'web' AS source,
-        SUM(wr.wr_return_amt) AS total_return_amount,
-        SUM(wr.wr_net_loss) AS total_net_loss
-    FROM web_returns wr
-    JOIN time_dim td
-        ON wr.wr_returned_time_sk = td.t_time_sk
-    WHERE wr.wr_return_amt > 10
-      AND td.t_hour BETWEEN 8 AND 20
-    GROUP BY td.t_hour, td.t_minute, td.t_sub_shift
+WITH item_info AS (
+    SELECT i_item_sk,
+           i_item_id,
+           i_product_name,
+           i_current_price
+    FROM   item
+    WHERE  i_current_price BETWEEN 10 AND 500
 )
-SELECT hour,
-       minute,
-       sub_shift,
-       source,
-       total_return_amount,
-       total_net_loss
-FROM catalog_ret
+SELECT   ii.i_item_id,
+         ii.i_product_name,
+         'store' AS sales_channel,
+         SUM(ss.ss_ext_sales_price) AS total_sales,
+         COUNT(DISTINCT ss.ss_ticket_number) AS order_count,
+         CASE WHEN SUM(ss.ss_ext_sales_price) >= 50000 THEN 'high' ELSE 'low' END AS sales_level
+FROM     store_sales ss
+JOIN     item_info ii ON ss.ss_item_sk = ii.i_item_sk
+GROUP BY ii.i_item_id,
+         ii.i_product_name
+
 UNION ALL
-SELECT hour,
-       minute,
-       sub_shift,
-       source,
-       total_return_amount,
-       total_net_loss
-FROM web_ret
-ORDER BY hour,
-         minute,
-         source
+
+SELECT   ii.i_item_id,
+         ii.i_product_name,
+         'web' AS sales_channel,
+         SUM(ws.ws_ext_sales_price) AS total_sales,
+         COUNT(DISTINCT ws.ws_order_number) AS order_count,
+         CASE WHEN SUM(ws.ws_ext_sales_price) >= 50000 THEN 'high' ELSE 'low' END AS sales_level
+FROM     web_sales ws
+JOIN     item_info ii ON ws.ws_item_sk = ii.i_item_sk
+GROUP BY ii.i_item_id,
+         ii.i_product_name
+
+ORDER BY total_sales DESC
 LIMIT 100

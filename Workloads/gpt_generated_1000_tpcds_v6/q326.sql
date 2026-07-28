@@ -1,42 +1,53 @@
-WITH filtered_sites AS (
-    SELECT DISTINCT
-        web_site_sk,
-        web_name,
-        web_gmt_offset,
-        web_street_name
-    FROM web_site
-    WHERE web_gmt_offset = -5.00
-      AND web_street_name LIKE '%Ridge%'
+WITH filtered_returns AS (
+   SELECT
+      cr.cr_returned_date_sk,
+      cr.cr_return_amount,
+      cr.cr_net_loss,
+      cr.cr_warehouse_sk,
+      cr.cr_catalog_page_sk,
+      cr.cr_refunded_customer_sk,
+      cr.cr_order_number
+   FROM catalog_returns cr
+   WHERE cr.cr_return_amount > 500.00
+     AND cr.cr_returned_date_sk BETWEEN 2450000 AND 2452000
+     AND cr.cr_net_loss > 100.00
 ),
-agg_sales AS (
-    SELECT
-        ws_bill_hdemo_sk,
-        ws_web_site_sk,
-        SUM(ws_net_paid) AS total_net_paid,
-        AVG(ws_ext_discount_amt) AS avg_discount,
-        COUNT(DISTINCT ws_order_number) AS order_cnt
-    FROM web_sales
-    WHERE ws_ship_date_sk IN (2451482, 2452638)
-      AND ws_coupon_amt > 500.00
-      AND ws_wholesale_cost BETWEEN 30.00 AND 80.00
-    GROUP BY ws_bill_hdemo_sk, ws_web_site_sk
+aggregated AS (
+   SELECT
+      w.w_warehouse_name,
+      cp.cp_department,
+      COUNT(DISTINCT fr.cr_order_number) AS num_returns,
+      SUM(fr.cr_return_amount) AS total_return_amount,
+      AVG(ws.ws_net_profit) AS avg_web_sales_profit,
+      (
+         SELECT AVG(ws2.ws_ext_tax)
+         FROM web_sales ws2
+         WHERE ws2.ws_warehouse_sk = w.w_warehouse_sk
+      ) AS avg_tax_warehouse,
+      w.w_warehouse_sk
+   FROM filtered_returns fr
+   JOIN catalog_page cp ON fr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+   JOIN warehouse w ON fr.cr_warehouse_sk = w.w_warehouse_sk
+   JOIN customer c ON fr.cr_refunded_customer_sk = c.c_customer_sk
+   JOIN web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+                     AND ws.ws_warehouse_sk = w.w_warehouse_sk
+   JOIN web_returns wr ON wr.wr_order_number = ws.ws_order_number
+                       AND wr.wr_refunded_customer_sk = c.c_customer_sk
+   WHERE c.c_birth_month = 6
+     AND c.c_birth_day = 20
+     AND ws.ws_quantity > 20
+   GROUP BY w.w_warehouse_name, cp.cp_department, w.w_warehouse_sk
+   HAVING SUM(fr.cr_return_amount) > 1000.00
 )
 SELECT
-    hd.hd_buy_potential,
-    ws.web_name,
-    SUM(a.total_net_paid) AS sum_net_paid,
-    AVG(a.avg_discount) AS avg_discount_across,
-    COUNT(DISTINCT hd.hd_demo_sk) AS household_cnt,
-    MIN(ib.ib_lower_bound) AS min_income,
-    MAX(ib.ib_upper_bound) AS max_income
-FROM agg_sales a
-JOIN household_demographics hd
-  ON a.ws_bill_hdemo_sk = hd.hd_demo_sk
-JOIN income_band ib
-  ON hd.hd_income_band_sk = ib.ib_income_band_sk
-JOIN filtered_sites ws
-  ON a.ws_web_site_sk = ws.web_site_sk
-WHERE hd.hd_dep_count <= 2
-GROUP BY hd.hd_buy_potential, ws.web_name
-ORDER BY sum_net_paid DESC
+   a.w_warehouse_name,
+   a.cp_department,
+   a.num_returns,
+   a.total_return_amount,
+   a.avg_web_sales_profit,
+   a.avg_tax_warehouse,
+   SUM(a.total_return_amount) OVER (PARTITION BY a.w_warehouse_name) AS warehouse_return_amount_total,
+   RANK() OVER (ORDER BY a.total_return_amount DESC) AS return_amount_rank
+FROM aggregated a
+ORDER BY a.total_return_amount DESC
 LIMIT 100

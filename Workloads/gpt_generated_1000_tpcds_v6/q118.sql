@@ -1,45 +1,40 @@
-WITH refunded AS (
-  SELECT
-    w.w_warehouse_name AS w_warehouse_name,
-    SUM(cr.cr_return_amount) AS total_return_amount,
-    COUNT(*) AS return_cnt
-  FROM catalog_returns cr
-  JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
-  JOIN customer c ON cr.cr_refunded_customer_sk = c.c_customer_sk
-  JOIN customer_demographics cd ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-  JOIN time_dim t ON cr.cr_returned_time_sk = t.t_time_sk
-  WHERE cd.cd_gender = 'M'
-    AND w.w_state = 'CA'
-    AND t.t_hour BETWEEN 9 AND 17
-    AND cr.cr_fee > 20
-  GROUP BY w.w_warehouse_name
-),
-returning AS (
-  SELECT
-    w.w_warehouse_name AS w_warehouse_name,
-    SUM(cr.cr_return_amount) AS total_return_amount,
-    COUNT(*) AS return_cnt
-  FROM catalog_returns cr
-  JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
-  JOIN customer c ON cr.cr_returning_customer_sk = c.c_customer_sk
-  JOIN customer_demographics cd ON cr.cr_returning_cdemo_sk = cd.cd_demo_sk
-  JOIN time_dim t ON cr.cr_returned_time_sk = t.t_time_sk
-  WHERE cd.cd_gender = 'F'
-    AND w.w_state = 'NY'
-    AND t.t_hour BETWEEN 9 AND 17
-    AND cr.cr_fee > 20
-  GROUP BY w.w_warehouse_name
+WITH site_sales AS (
+    SELECT
+        ws.ws_web_site_sk,
+        ws.ws_bill_customer_sk,
+        ws.ws_ext_sales_price,
+        ws.ws_net_profit,
+        ws.ws_sold_date_sk
+    FROM web_sales ws
+    JOIN customer c
+        ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE regexp_like(c.c_email_address, '^A{5,}[A-Z]*@example\\.com$')
+      AND c.c_birth_month = 6
 )
 SELECT
-  w_warehouse_name,
-  total_return_amount,
-  return_cnt
-FROM refunded
-UNION ALL
-SELECT
-  w_warehouse_name,
-  total_return_amount,
-  return_cnt
-FROM returning
-ORDER BY total_return_amount DESC
-LIMIT 100
+    ws.web_site_id,
+    ws.web_name,
+    COUNT(DISTINCT ss.ws_bill_customer_sk) AS unique_customers,
+    SUM(ss.ws_ext_sales_price) AS total_sales,
+    SUM(ss.ws_net_profit) AS total_profit,
+    REGEXP_EXTRACT(ws.web_site_id, 'AAAAAAA([A-Z])', 1) AS site_code_char,
+    CONCAT(SUBSTRING(ws.web_city, 1, 3), '-', ws.web_state) AS city_state_key
+FROM site_sales ss
+JOIN web_site ws
+    ON ss.ws_web_site_sk = ws.web_site_sk
+WHERE ws.web_site_id LIKE 'AAAAAAA%'
+  AND EXISTS (
+        SELECT 1
+        FROM web_sales w2
+        WHERE w2.ws_web_site_sk = ws.web_site_sk
+          AND w2.ws_ext_discount_amt > 0
+      )
+GROUP BY
+    ws.web_site_id,
+    ws.web_name,
+    ws.web_city,
+    ws.web_state,
+    REGEXP_EXTRACT(ws.web_site_id, 'AAAAAAA([A-Z])', 1),
+    CONCAT(SUBSTRING(ws.web_city, 1, 3), '-', ws.web_state)
+ORDER BY total_profit DESC
+LIMIT 10

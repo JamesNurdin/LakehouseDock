@@ -1,38 +1,54 @@
-WITH customer_agg AS (
+WITH sales_agg AS (
     SELECT
-        c.c_customer_id,
-        c.c_birth_country,
-        cd.cd_gender,
-        SUM(ws.ws_net_profit) AS total_net_profit,
-        SUM(sr.sr_net_loss) AS total_net_loss,
-        COUNT(DISTINCT p.p_promo_name) AS promo_count
-    FROM tpcds.customer c
-    JOIN tpcds.customer_demographics cd
-        ON c.c_current_cdemo_sk = cd.cd_demo_sk
-    JOIN tpcds.web_sales ws
-        ON ws.ws_bill_customer_sk = c.c_customer_sk
-        AND ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-    JOIN tpcds.store_returns sr
-        ON sr.sr_customer_sk = c.c_customer_sk
-        AND sr.sr_cdemo_sk = cd.cd_demo_sk
-    JOIN tpcds.promotion p
-        ON ws.ws_promo_sk = p.p_promo_sk
-    WHERE c.c_birth_country IN ('SWITZERLAND', 'NICARAGUA')
-      AND cd.cd_dep_count <= 3
-      AND p.p_channel_press = 'N'
-      AND p.p_response_target = 1
-      AND ws.ws_quantity > 1
-    GROUP BY c.c_customer_id, c.c_birth_country, cd.cd_gender
+        dd.d_year,
+        i.i_brand,
+        i.i_category,
+        SUM(ss.ss_ext_sales_price) AS store_sales_amount,
+        SUM(cs.cs_ext_sales_price) AS catalog_sales_amount,
+        COUNT(DISTINCT ss.ss_ticket_number) AS store_txn_cnt,
+        AVG(cs.cs_coupon_amt) AS avg_coupon_amt,
+        SUM(CASE WHEN cs.cs_coupon_amt > 500 THEN cs.cs_ext_sales_price ELSE 0 END) AS high_coupon_sales
+    FROM store_sales ss
+    JOIN date_dim dd
+        ON ss.ss_sold_date_sk = dd.d_date_sk
+    JOIN time_dim td
+        ON ss.ss_sold_time_sk = td.t_time_sk
+    JOIN item i
+        ON ss.ss_item_sk = i.i_item_sk
+    JOIN catalog_sales cs
+        ON cs.cs_sold_date_sk = dd.d_date_sk
+        AND cs.cs_sold_time_sk = td.t_time_sk
+        AND cs.cs_item_sk = i.i_item_sk
+    WHERE dd.d_year = 2001
+      AND dd.d_dow = 5
+      AND i.i_brand_id IN (8015002, 7004003, 5003002)
+      AND i.i_category_id = 9
+      AND td.t_hour BETWEEN 9 AND 17
+      AND cs.cs_coupon_amt > 100
+      AND EXISTS (
+          SELECT 1
+          FROM catalog_sales cs2
+          WHERE cs2.cs_sold_date_sk = dd.d_date_sk
+            AND cs2.cs_ext_discount_amt > 500
+      )
+    GROUP BY dd.d_year, i.i_brand, i.i_category
 )
 SELECT
-    ca.c_customer_id,
-    ca.c_birth_country,
-    ca.cd_gender,
-    ca.total_net_profit,
-    ca.total_net_loss,
-    ca.promo_count,
-    RANK() OVER (ORDER BY ca.total_net_profit DESC) AS profit_rank,
-    DENSE_RANK() OVER (ORDER BY ca.total_net_loss DESC) AS loss_rank
-FROM customer_agg ca
-ORDER BY profit_rank
+    s.d_year,
+    s.i_brand,
+    s.i_category,
+    s.store_sales_amount,
+    s.catalog_sales_amount,
+    s.store_txn_cnt,
+    s.avg_coupon_amt,
+    s.high_coupon_sales,
+    CASE
+        WHEN s.avg_coupon_amt > 300 THEN 'Very High'
+        WHEN s.avg_coupon_amt > 150 THEN 'High'
+        ELSE 'Normal'
+    END AS coupon_category,
+    SUM(s.store_sales_amount) OVER (PARTITION BY s.d_year) AS total_store_sales_year,
+    ROW_NUMBER() OVER (ORDER BY s.store_sales_amount DESC) AS sales_rank
+FROM sales_agg s
+ORDER BY s.store_sales_amount DESC
 LIMIT 100

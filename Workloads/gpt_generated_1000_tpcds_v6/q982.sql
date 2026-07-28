@@ -1,52 +1,33 @@
-WITH catalog_part AS (
-    SELECT
-        sm.sm_type AS ship_type,
-        ib.ib_lower_bound,
-        ib.ib_upper_bound,
-        CASE WHEN ib.ib_upper_bound > 80000 THEN 'High' ELSE 'Medium' END AS income_category,
-        COUNT(DISTINCT cs.cs_order_number) AS order_cnt,
-        SUM(cs.cs_ext_sales_price) AS total_sales,
-        SUM(cs.cs_net_profit) AS total_profit
-    FROM catalog_sales cs
-    JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-    JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
-    JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    WHERE sm.sm_type = 'AIR'
-      AND ca.ca_location_type = 'apartment'
-    GROUP BY
-        sm.sm_type,
-        ib.ib_lower_bound,
-        ib.ib_upper_bound,
-        CASE WHEN ib.ib_upper_bound > 80000 THEN 'High' ELSE 'Medium' END
-    HAVING SUM(cs.cs_net_profit) > 10000
-),
-store_part AS (
-    SELECT
-        CAST('STORE' AS varchar) AS ship_type,
-        ib.ib_lower_bound,
-        ib.ib_upper_bound,
-        CASE WHEN ib.ib_upper_bound > 80000 THEN 'High' ELSE 'Medium' END AS income_category,
-        COUNT(DISTINCT ss.ss_ticket_number) AS order_cnt,
-        SUM(ss.ss_ext_sales_price) AS total_sales,
-        SUM(ss.ss_net_profit) AS total_profit
-    FROM store_sales ss
-    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
-    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    WHERE ca.ca_location_type = 'condo'
-      AND ss.ss_ext_sales_price > 5000
-    GROUP BY
-        ib.ib_lower_bound,
-        ib.ib_upper_bound,
-        CASE WHEN ib.ib_upper_bound > 80000 THEN 'High' ELSE 'Medium' END
-    HAVING SUM(ss.ss_net_profit) > 5000
+WITH sales_agg AS (
+   SELECT
+       cs.cs_net_profit,
+       i.i_category,
+       t.t_hour,
+       i.i_item_desc,
+       i.i_product_name
+   FROM catalog_sales cs
+   JOIN item i ON cs.cs_item_sk = i.i_item_sk
+   JOIN time_dim t ON cs.cs_sold_time_sk = t.t_time_sk
+   JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+   JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+   WHERE
+       regexp_like(i.i_item_desc, '(?i)steel')
+       AND c.c_last_name LIKE 'S%'
+       AND cd.cd_gender = 'M'
 )
-SELECT *
-FROM (
-    SELECT * FROM catalog_part
-    UNION ALL
-    SELECT * FROM store_part
-) combined
-ORDER BY total_sales DESC
-LIMIT 100
+SELECT
+    i_category,
+    t_hour,
+    sum(cs_net_profit) AS total_net_profit,
+    concat('Category ', i_category) AS category_label,
+    regexp_extract(i_item_desc, '(\\w+)', 1) AS first_word_desc,
+    substring(i_product_name, 1, 5) AS prod_prefix
+FROM sales_agg
+GROUP BY
+    i_category,
+    t_hour,
+    i_item_desc,
+    i_product_name
+HAVING sum(cs_net_profit) > 1000
+ORDER BY total_net_profit DESC
+LIMIT 20

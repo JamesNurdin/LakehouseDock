@@ -1,31 +1,56 @@
-WITH agg AS (
+WITH sales_summary AS (
     SELECT
-        s.s_division_name,
-        r.r_reason_desc,
-        td.t_hour,
-        SUM(sr.sr_net_loss) AS total_net_loss,
-        COUNT(*) AS returns_cnt
-    FROM store_returns sr
-    JOIN customer c ON sr.sr_customer_sk = c.c_customer_sk
-    JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
-    JOIN household_demographics hd ON sr.sr_hdemo_sk = hd.hd_demo_sk
-    JOIN store s ON sr.sr_store_sk = s.s_store_sk
-    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
-    JOIN time_dim td ON sr.sr_return_time_sk = td.t_time_sk
-    WHERE s.s_zip IN ('29584', '32477')
-      AND s.s_geography_class = 'Unknown'
-      AND r.r_reason_id = 'AAAAAAAAPAAAAAAA'
-      AND td.t_hour BETWEEN 9 AND 17
-    GROUP BY s.s_division_name, r.r_reason_desc, td.t_hour
-    HAVING SUM(sr.sr_net_loss) > 1000
-       AND COUNT(*) >= 5
+        cs.cs_call_center_sk,
+        cs.cs_ship_mode_sk,
+        cs.cs_promo_sk,
+        cs.cs_order_number,
+        cs.cs_quantity,
+        cs.cs_net_profit
+    FROM catalog_sales cs
 )
 SELECT
-    s_division_name,
-    r_reason_desc,
-    t_hour,
-    total_net_loss,
-    returns_cnt,
-    RANK() OVER (PARTITION BY s_division_name ORDER BY total_net_loss DESC) AS reason_rank
-FROM agg
-ORDER BY s_division_name, reason_rank, t_hour
+    cc.cc_name                                            AS call_center,
+    SUBSTRING(cc.cc_name, 1, 10)                         AS cc_name_short,
+    sm.sm_type                                            AS ship_type,
+    CONCAT(p.p_promo_name, ' (', p.p_channel_radio, ')') AS promo_desc,
+    REGEXP_EXTRACT(p.p_promo_name, '\\d+', 0)          AS promo_number,
+    SUM(CASE WHEN sm.sm_code = 'AIR' THEN s.cs_net_profit ELSE 0 END) AS air_profit,
+    SUM(s.cs_net_profit)                                   AS total_profit,
+    COUNT(DISTINCT s.cs_order_number)                     AS orders,
+    MAX(s.cs_quantity)                                    AS max_quantity,
+    CASE
+        WHEN REGEXP_LIKE(p.p_promo_name, '^.*Clearance.*$') THEN 'Clearance'
+        WHEN REGEXP_LIKE(p.p_promo_name, '^.*Holiday.*$')   THEN 'Holiday'
+        ELSE 'Other'
+    END                                                   AS promo_category
+FROM sales_summary s
+JOIN call_center cc ON s.cs_call_center_sk = cc.cc_call_center_sk
+JOIN ship_mode   sm ON s.cs_ship_mode_sk   = sm.sm_ship_mode_sk
+JOIN promotion   p  ON s.cs_promo_sk      = p.p_promo_sk
+WHERE
+    cc.cc_name LIKE '%Center%'
+    AND sm.sm_type LIKE 'REG%'
+    AND EXISTS (
+        SELECT 1
+        FROM catalog_returns cr
+        JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+        WHERE cr.cr_order_number = s.cs_order_number
+          AND REGEXP_LIKE(r.r_reason_desc, '(?i)damage')
+    )
+GROUP BY
+    cc.cc_name,
+    SUBSTRING(cc.cc_name, 1, 10),
+    sm.sm_type,
+    p.p_promo_name,
+    p.p_channel_radio,
+    REGEXP_EXTRACT(p.p_promo_name, '\\d+', 0),
+    CASE
+        WHEN REGEXP_LIKE(p.p_promo_name, '^.*Clearance.*$') THEN 'Clearance'
+        WHEN REGEXP_LIKE(p.p_promo_name, '^.*Holiday.*$')   THEN 'Holiday'
+        ELSE 'Other'
+    END
+HAVING
+    SUM(s.cs_net_profit) > 10000
+ORDER BY
+    total_profit DESC
+LIMIT 100

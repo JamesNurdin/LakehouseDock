@@ -1,41 +1,62 @@
-WITH filtered_returns AS (
+WITH bill_sales AS (
     SELECT
-        cr_returned_date_sk,
-        cr_return_quantity,
-        cr_return_amount,
-        cr_net_loss,
-        cr_catalog_page_sk,
-        cr_ship_mode_sk,
-        cr_refunded_cdemo_sk,
-        cr_refunded_hdemo_sk
-    FROM catalog_returns
-    WHERE cr_returned_date_sk BETWEEN 2450000 AND 2451000
-      AND cr_return_quantity > 0
+        i.i_category,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        SUM(cs.cs_net_paid) AS total_sales,
+        COUNT(*) AS sales_cnt,
+        MAX(regexp_extract(i.i_item_desc, '(\\w+)', 1)) AS sample_word,
+        ROW_NUMBER() OVER (PARTITION BY i.i_category ORDER BY SUM(cs.cs_net_paid) DESC) AS category_rank
+    FROM catalog_sales cs
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
+    WHERE regexp_like(i.i_class, '^furn')
+      AND ca.ca_city LIKE 'San%'
+    GROUP BY i.i_category, ca.ca_city, ca.ca_state, ca.ca_zip
+    HAVING SUM(cs.cs_net_paid) > 10000
+),
+ship_sales AS (
+    SELECT
+        i.i_category,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        SUM(cs.cs_net_paid) AS total_sales,
+        COUNT(*) AS sales_cnt,
+        MAX(regexp_extract(i.i_item_desc, '(\\w+)', 1)) AS sample_word,
+        ROW_NUMBER() OVER (PARTITION BY i.i_category ORDER BY SUM(cs.cs_net_paid) DESC) AS category_rank
+    FROM catalog_sales cs
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN customer_address ca ON cs.cs_ship_addr_sk = ca.ca_address_sk
+    WHERE i.i_size LIKE 'large%'
+      AND regexp_like(ca.ca_street_type, '^R')
+      AND ca.ca_zip LIKE '9%'
+    GROUP BY i.i_category, ca.ca_city, ca.ca_state, ca.ca_zip
+    HAVING SUM(cs.cs_net_paid) > 5000
 )
 SELECT
-    cp.cp_catalog_page_id,
-    cp.cp_type,
-    sm.sm_carrier,
-    SUM(fr.cr_net_loss) AS total_net_loss,
-    AVG(fr.cr_return_amount) AS avg_return_amount,
-    COUNT(*) AS return_cnt,
-    MIN(fr.cr_return_quantity) AS min_qty,
-    MAX(fr.cr_return_quantity) AS max_qty,
-    (SELECT AVG(cr_net_loss) FROM catalog_returns) AS overall_avg_net_loss
-FROM filtered_returns fr
-JOIN catalog_page cp
-    ON fr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-JOIN ship_mode sm
-    ON fr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN customer_demographics cd_ref
-    ON fr.cr_refunded_cdemo_sk = cd_ref.cd_demo_sk
-JOIN household_demographics hd
-    ON fr.cr_refunded_hdemo_sk = hd.hd_demo_sk
-WHERE cp.cp_type = 'monthly'
-  AND cp.cp_catalog_page_id = 'AAAAAAAAPAAAAAAA'
-  AND sm.sm_contract = 'HVDFCcQ'
-  AND hd.hd_vehicle_count >= 2
-  AND cd_ref.cd_gender = 'F'
-GROUP BY cp.cp_catalog_page_id, cp.cp_type, sm.sm_carrier
-ORDER BY total_net_loss DESC
+    i_category,
+    ca_city,
+    ca_state,
+    CONCAT(ca_city, ', ', ca_state) AS city_state,
+    SUBSTR(ca_zip, 1, 3) AS zip_prefix,
+    total_sales,
+    sales_cnt,
+    sample_word,
+    category_rank
+FROM bill_sales
+UNION ALL
+SELECT
+    i_category,
+    ca_city,
+    ca_state,
+    CONCAT(ca_city, ', ', ca_state) AS city_state,
+    SUBSTR(ca_zip, 1, 3) AS zip_prefix,
+    total_sales,
+    sales_cnt,
+    sample_word,
+    category_rank
+FROM ship_sales
+ORDER BY i_category, total_sales DESC
 LIMIT 100

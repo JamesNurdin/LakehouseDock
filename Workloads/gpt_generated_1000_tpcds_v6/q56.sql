@@ -1,79 +1,56 @@
-WITH sales_agg AS (
+WITH joined AS (
     SELECT
-        i.i_item_sk,
-        i.i_item_id,
-        i.i_product_name,
-        cp.cp_department,
-        w.w_warehouse_name,
-        ca_bill.ca_state,
-        t_sales.t_hour,
-        SUM(cs.cs_ext_sales_price)               AS total_sales,
-        SUM(cs.cs_net_profit)                    AS total_profit,
-        COALESCE(SUM(cr.cr_return_amount), 0)    AS total_catalog_return,
-        COALESCE(SUM(sr.sr_return_amt), 0)      AS total_store_return
+        cs.cs_order_number,
+        cs.cs_net_paid,
+        cs.cs_net_profit,
+        cs.cs_quantity,
+        cs.cs_ext_discount_amt,
+        ss.ss_net_paid,
+        s.s_store_id,
+        s.s_division_name,
+        s.s_division_id,
+        s.s_state,
+        w.w_state,
+        t1.t_hour,
+        p_cs.p_channel_details,
+        cd1.cd_gender
     FROM catalog_sales cs
-    JOIN catalog_page cp
-        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN item i
-        ON cs.cs_item_sk = i.i_item_sk
+    JOIN time_dim t1
+        ON cs.cs_sold_time_sk = t1.t_time_sk
+    JOIN promotion p_cs
+        ON cs.cs_promo_sk = p_cs.p_promo_sk
+    JOIN customer_demographics cd1
+        ON cs.cs_bill_cdemo_sk = cd1.cd_demo_sk
     JOIN warehouse w
         ON cs.cs_warehouse_sk = w.w_warehouse_sk
-    JOIN time_dim t_sales
-        ON cs.cs_sold_time_sk = t_sales.t_time_sk
-    JOIN household_demographics hd_bill
-        ON cs.cs_bill_hdemo_sk = hd_bill.hd_demo_sk
-    JOIN customer_address ca_bill
-        ON cs.cs_bill_addr_sk = ca_bill.ca_address_sk
-    LEFT JOIN catalog_returns cr
-        ON cs.cs_order_number = cr.cr_order_number
-    LEFT JOIN time_dim t_return
-        ON cr.cr_returned_time_sk = t_return.t_time_sk
-    LEFT JOIN household_demographics hd_refund
-        ON cr.cr_refunded_hdemo_sk = hd_refund.hd_demo_sk
-    LEFT JOIN customer_address ca_refund
-        ON cr.cr_refunded_addr_sk = ca_refund.ca_address_sk
-    LEFT JOIN store_returns sr
-        ON sr.sr_item_sk = i.i_item_sk
-        AND sr.sr_hdemo_sk = hd_bill.hd_demo_sk
-        AND sr.sr_addr_sk = ca_bill.ca_address_sk
-    LEFT JOIN time_dim t_store_return
-        ON sr.sr_return_time_sk = t_store_return.t_time_sk
-    WHERE cp.cp_start_date_sk >= 2450845
-      AND i.i_current_price > 100
+    JOIN store_sales ss
+        ON ss.ss_sold_time_sk = t1.t_time_sk
+    JOIN store s
+        ON ss.ss_store_sk = s.s_store_sk
+    -- additional required joins to satisfy the join‑rule set
+    JOIN promotion p_ss
+        ON ss.ss_promo_sk = p_ss.p_promo_sk
+    JOIN customer_demographics cd2
+        ON ss.ss_cdemo_sk = cd2.cd_demo_sk
+    WHERE s.s_division_id = 1
+      AND s.s_state = 'CA'
       AND w.w_state = 'CA'
-      AND t_sales.t_hour BETWEEN 9 AND 17
-      AND EXISTS (
-          SELECT 1
-          FROM catalog_returns cr2
-          WHERE cr2.cr_item_sk = i.i_item_sk
-            AND cr2.cr_return_amount > 0
-      )
-    GROUP BY
-        i.i_item_sk,
-        i.i_item_id,
-        i.i_product_name,
-        cp.cp_department,
-        w.w_warehouse_name,
-        ca_bill.ca_state,
-        t_sales.t_hour
+      AND t1.t_hour BETWEEN 9 AND 17
+      AND p_cs.p_channel_details LIKE '%Offences%'
+      AND cd1.cd_gender = 'M'
+      AND cs.cs_quantity > 5
 )
 SELECT
-    sa.i_item_id,
-    sa.i_product_name,
-    sa.cp_department,
-    sa.w_warehouse_name,
-    sa.ca_state,
-    sa.t_hour,
-    sa.total_sales,
-    sa.total_profit,
-    sa.total_catalog_return,
-    sa.total_store_return,
-    (
-        SELECT AVG(cs2.cs_sales_price)
-        FROM catalog_sales cs2
-        WHERE cs2.cs_item_sk = sa.i_item_sk
-    ) AS avg_sales_price,
-    RANK() OVER (PARTITION BY sa.cp_department ORDER BY sa.total_profit DESC) AS dept_profit_rank
-FROM sales_agg sa
-ORDER BY sa.total_profit DESC
+    s_store_id,
+    s_division_name,
+    CASE WHEN SUM(cs_net_profit) > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_category,
+    SUM(cs_net_paid) AS total_catalog_net_paid,
+    SUM(ss_net_paid) AS total_store_net_paid,
+    COUNT(DISTINCT cs_order_number) AS distinct_orders,
+    AVG(cs_ext_discount_amt) AS avg_catalog_discount,
+    MIN(cs_net_paid) AS min_catalog_net_paid,
+    MAX(cs_net_paid) AS max_catalog_net_paid
+FROM joined
+GROUP BY s_store_id, s_division_name
+ORDER BY total_catalog_net_paid DESC
 LIMIT 100

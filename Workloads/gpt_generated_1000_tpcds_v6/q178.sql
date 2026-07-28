@@ -1,73 +1,101 @@
-WITH sales_agg AS (
-    SELECT
-        i.i_manufact_id,
-        i.i_brand,
-        i.i_category,
-        t.t_hour,
-        t.t_am_pm,
-        ca.ca_state,
-        SUM(ss.ss_quantity) AS total_quantity_sold,
-        SUM(ss.ss_net_paid) AS total_net_paid,
-        COUNT(*) AS sales_transactions
-    FROM store_sales ss
-    JOIN item i ON ss.ss_item_sk = i.i_item_sk
-    JOIN time_dim t ON ss.ss_sold_time_sk = t.t_time_sk
-    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
-    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    WHERE i.i_manufact_id IN (625, 460, 995)                     -- filter 1
-      AND ca.ca_gmt_offset BETWEEN -8.00 AND -5.00               -- filter 2
-      AND t.t_am_pm = 'PM'                                       -- filter 3
-      AND t.t_minute IN (4, 10, 12)                              -- filter 4
-      AND i.i_category = 'Furniture'                             -- filter 5
-    GROUP BY
-        i.i_manufact_id,
-        i.i_brand,
-        i.i_category,
-        t.t_hour,
-        t.t_am_pm,
-        ca.ca_state
-),
-returns_agg AS (
-    SELECT
-        i.i_manufact_id,
-        t.t_hour,
-        COALESCE(r.r_reason_desc, 'Unknown') AS reason_desc,
-        SUM(cr.cr_return_quantity) AS catalog_return_qty,
-        SUM(cr.cr_return_amount) AS catalog_return_amount,
-        SUM(wr.wr_return_quantity) AS web_return_qty,
-        SUM(wr.wr_return_amt) AS web_return_amount
-    FROM catalog_returns cr
-    JOIN item i ON cr.cr_item_sk = i.i_item_sk
-    JOIN time_dim t ON cr.cr_returned_time_sk = t.t_time_sk
-    LEFT JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-    LEFT JOIN web_returns wr
-        ON wr.wr_item_sk = i.i_item_sk
-       AND wr.wr_returned_time_sk = t.t_time_sk
-    WHERE i.i_manufact_id IN (625, 460, 995)          -- filter 1 (same set)
-      AND t.t_hour BETWEEN 12 AND 20               -- filter 2
-      AND r.r_reason_desc IS NOT NULL              -- filter 3
-    GROUP BY
-        i.i_manufact_id,
-        t.t_hour,
-        COALESCE(r.r_reason_desc, 'Unknown')
+WITH overall_avg AS (
+    SELECT avg(cs_ext_discount_amt) AS avg_discount
+    FROM catalog_sales
 )
 SELECT
-    s.i_manufact_id,
-    s.i_brand,
-    s.i_category,
-    s.t_hour,
-    s.t_am_pm,
-    s.ca_state,
-    s.total_quantity_sold,
-    s.total_net_paid,
-    r.catalog_return_qty,
-    r.catalog_return_amount,
-    r.web_return_qty,
-    r.web_return_amount,
-    (s.total_net_paid - COALESCE(r.catalog_return_amount, 0) - COALESCE(r.web_return_amount, 0)) AS net_after_returns
-FROM sales_agg s
-LEFT JOIN returns_agg r
-    ON s.i_manufact_id = r.i_manufact_id
-   AND s.t_hour = r.t_hour
-ORDER BY net_after_returns DESC
-LIMIT 100
+    i.i_item_id,
+    i.i_product_name,
+    s.s_store_name,
+    s.s_state,
+    COALESCE(SUM(cs.cs_net_paid), 0)               AS catalog_net_paid,
+    COALESCE(SUM(ss.ss_net_paid), 0)               AS store_net_paid,
+    COALESCE(SUM(cr.cr_net_loss), 0)               AS catalog_return_loss,
+    COALESCE(SUM(sr.sr_net_loss), 0)               AS store_return_loss,
+    COUNT(DISTINCT cs.cs_order_number)             AS catalog_orders,
+    COUNT(DISTINCT ss.ss_ticket_number)            AS store_orders,
+    oa.avg_discount                                 AS overall_avg_discount,
+    wp.wp_url                                       AS web_page_url
+FROM item i
+LEFT JOIN catalog_sales cs
+       ON cs.cs_item_sk = i.i_item_sk
+LEFT JOIN time_dim t_cs
+       ON cs.cs_sold_time_sk = t_cs.t_time_sk
+LEFT JOIN customer c_bill
+       ON cs.cs_bill_customer_sk = c_bill.c_customer_sk
+LEFT JOIN customer_demographics cd_bill
+       ON cs.cs_bill_cdemo_sk = cd_bill.cd_demo_sk
+LEFT JOIN customer_address ca_bill
+       ON cs.cs_bill_addr_sk = ca_bill.ca_address_sk
+LEFT JOIN catalog_page cp
+       ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+LEFT JOIN ship_mode sm_cs
+       ON cs.cs_ship_mode_sk = sm_cs.sm_ship_mode_sk
+LEFT JOIN promotion p_cs
+       ON cs.cs_promo_sk = p_cs.p_promo_sk
+
+LEFT JOIN catalog_returns cr
+       ON cr.cr_order_number = cs.cs_order_number
+      AND cr.cr_item_sk = i.i_item_sk
+LEFT JOIN time_dim t_cr
+       ON cr.cr_returned_time_sk = t_cr.t_time_sk
+LEFT JOIN ship_mode sm_cr
+       ON cr.cr_ship_mode_sk = sm_cr.sm_ship_mode_sk
+LEFT JOIN customer c_refund
+       ON cr.cr_refunded_customer_sk = c_refund.c_customer_sk
+LEFT JOIN customer_demographics cd_refund
+       ON cr.cr_refunded_cdemo_sk = cd_refund.cd_demo_sk
+LEFT JOIN customer_address ca_refund
+       ON cr.cr_refunded_addr_sk = ca_refund.ca_address_sk
+LEFT JOIN catalog_page cp_cr
+       ON cr.cr_catalog_page_sk = cp_cr.cp_catalog_page_sk
+
+LEFT JOIN store_sales ss
+       ON ss.ss_item_sk = i.i_item_sk
+LEFT JOIN time_dim t_ss
+       ON ss.ss_sold_time_sk = t_ss.t_time_sk
+LEFT JOIN store s
+       ON ss.ss_store_sk = s.s_store_sk
+LEFT JOIN customer c_store
+       ON ss.ss_customer_sk = c_store.c_customer_sk
+LEFT JOIN customer_demographics cd_store
+       ON ss.ss_cdemo_sk = cd_store.cd_demo_sk
+LEFT JOIN customer_address ca_store
+       ON ss.ss_addr_sk = ca_store.ca_address_sk
+LEFT JOIN promotion p_ss
+       ON ss.ss_promo_sk = p_ss.p_promo_sk
+
+LEFT JOIN store_returns sr
+       ON sr.sr_ticket_number = ss.ss_ticket_number
+      AND sr.sr_item_sk = i.i_item_sk
+LEFT JOIN time_dim t_sr
+       ON sr.sr_return_time_sk = t_sr.t_time_sk
+LEFT JOIN customer c_sr
+       ON sr.sr_customer_sk = c_sr.c_customer_sk
+LEFT JOIN customer_demographics cd_sr
+       ON sr.sr_cdemo_sk = cd_sr.cd_demo_sk
+LEFT JOIN customer_address ca_sr
+       ON sr.sr_addr_sk = ca_sr.ca_address_sk
+LEFT JOIN store s_sr
+       ON sr.sr_store_sk = s_sr.s_store_sk
+
+LEFT JOIN inventory inv
+       ON inv.inv_item_sk = i.i_item_sk
+LEFT JOIN promotion p_item
+       ON p_item.p_item_sk = i.i_item_sk
+
+LEFT JOIN web_page wp
+       ON wp.wp_customer_sk = c_bill.c_customer_sk
+
+CROSS JOIN overall_avg oa
+
+GROUP BY
+    i.i_item_id,
+    i.i_product_name,
+    s.s_store_name,
+    s.s_state,
+    oa.avg_discount,
+    wp.wp_url
+HAVING
+    COALESCE(SUM(cs.cs_net_paid), 0) + COALESCE(SUM(ss.ss_net_paid), 0) > 10000
+ORDER BY
+    (COALESCE(SUM(cs.cs_net_paid), 0) + COALESCE(SUM(ss.ss_net_paid), 0)) DESC

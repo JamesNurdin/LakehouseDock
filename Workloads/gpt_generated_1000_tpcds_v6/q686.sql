@@ -1,45 +1,49 @@
-WITH avg_profit AS (
-    SELECT avg(ws_net_profit) AS avg_ws_net_profit
-    FROM tpcds.web_sales
+WITH catalog_agg AS (
+    SELECT
+        cs.cs_item_sk AS item_sk,
+        SUM(cs.cs_net_profit) AS net_profit,
+        COUNT(DISTINCT cs.cs_bill_customer_sk) AS distinct_customers
+    FROM catalog_sales cs
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    WHERE regexp_like(i.i_product_name, '[A-Z]{2}[0-9]{3}')
+      AND i.i_product_name LIKE '%PLUS%'
+      AND regexp_like(c.c_email_address, '\\.com$')
+    GROUP BY cs.cs_item_sk
+),
+web_agg AS (
+    SELECT
+        ws.ws_item_sk AS item_sk,
+        SUM(ws.ws_net_profit) AS net_profit,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) AS distinct_customers
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE regexp_like(i.i_product_name, '[A-Z]{2}[0-9]{3}')
+      AND i.i_product_name LIKE '%PLUS%'
+      AND regexp_like(c.c_email_address, '\\.com$')
+    GROUP BY ws.ws_item_sk
+),
+combined AS (
+    SELECT
+        COALESCE(c.item_sk, w.item_sk) AS item_sk,
+        SUM(COALESCE(c.net_profit, 0) + COALESCE(w.net_profit, 0)) AS total_net_profit,
+        SUM(COALESCE(c.distinct_customers, 0) + COALESCE(w.distinct_customers, 0)) AS total_distinct_customers
+    FROM catalog_agg c
+    FULL OUTER JOIN web_agg w ON c.item_sk = w.item_sk
+    GROUP BY COALESCE(c.item_sk, w.item_sk)
 )
-SELECT order_number,
-       return_amount,
-       reason,
-       county
-FROM (
-    SELECT wr.wr_order_number AS order_number,
-           wr.wr_return_amt   AS return_amount,
-           r.r_reason_desc    AS reason,
-           ca.ca_county       AS county
-    FROM tpcds.web_returns wr
-    JOIN tpcds.web_sales ws
-      ON wr.wr_order_number = ws.ws_order_number
-    JOIN tpcds.reason r
-      ON wr.wr_reason_sk = r.r_reason_sk
-    JOIN tpcds.customer_address ca
-      ON wr.wr_refunded_addr_sk = ca.ca_address_sk
-    WHERE ws.ws_net_profit > (SELECT avg_ws_net_profit FROM avg_profit)
-      AND r.r_reason_desc LIKE '%color%'
-) 
-UNION ALL
-SELECT order_number,
-       return_amount,
-       reason,
-       county
-FROM (
-    SELECT wr.wr_order_number AS order_number,
-           wr.wr_return_amt   AS return_amount,
-           r.r_reason_desc    AS reason,
-           ca.ca_county       AS county
-    FROM tpcds.web_returns wr
-    JOIN tpcds.web_sales ws
-      ON wr.wr_order_number = ws.ws_order_number
-    JOIN tpcds.reason r
-      ON wr.wr_reason_sk = r.r_reason_sk
-    JOIN tpcds.customer_address ca
-      ON wr.wr_refunded_addr_sk = ca.ca_address_sk
-    WHERE ws.ws_net_profit <= (SELECT avg_ws_net_profit FROM avg_profit)
-      AND r.r_reason_desc LIKE '%damaged%'
-) 
-ORDER BY return_amount DESC
+SELECT
+    i.i_brand,
+    i.i_category,
+    i.i_product_name,
+    combined.total_net_profit,
+    combined.total_distinct_customers,
+    substring(i.i_product_name, 1, 10) AS product_name_prefix,
+    regexp_extract(i.i_product_name, '([A-Z]{2}[0-9]{3})', 1) AS extracted_code,
+    concat(i.i_brand, ' - ', i.i_category) AS brand_category_concat
+FROM combined
+JOIN item i ON i.i_item_sk = combined.item_sk
+WHERE i.i_product_name LIKE '%COOL%'
+ORDER BY combined.total_net_profit DESC
 LIMIT 100

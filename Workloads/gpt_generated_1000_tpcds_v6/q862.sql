@@ -1,45 +1,55 @@
-WITH store_returns_agg AS (
+/*
+  Goal: Identify high‑value customers with significant net loss from store returns in 2001 (months 1200‑1210),
+  focusing on households with mid‑range income, strong buying potential and multiple dependents. The query aggregates
+  return metrics per customer, year, and buy‑potential, filters groups by net loss, and compares each group's average
+  return amount to the overall average across all returns.
+*/
+WITH filtered_returns AS (
     SELECT
-        sr.sr_store_sk AS sr_store_sk,
-        d.d_year AS d_year,
-        SUM(sr.sr_return_amt) AS total_return_amt,
-        SUM(sr.sr_return_tax) AS total_return_tax,
-        COUNT(*) AS return_cnt
+        sr.sr_customer_sk,
+        sr.sr_returned_date_sk,
+        sr.sr_return_amt,
+        sr.sr_net_loss,
+        sr.sr_ticket_number,
+        sr.sr_hdemo_sk,
+        sr.sr_return_quantity
     FROM store_returns sr
-    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
-    WHERE d.d_year BETWEEN 2000 AND 2005
-      AND d.d_month_seq IN (1, 2, 3)
-      AND d.d_week_seq >= 10
-      AND d.d_fy_week_seq <= 20
-      AND d.d_fy_week_seq >= 5
-      AND d.d_week_seq <= 30
-    GROUP BY sr.sr_store_sk, d.d_year
-    HAVING SUM(sr.sr_return_amt) > 1000
+    WHERE sr.sr_return_amt > 100
+      AND sr.sr_return_quantity >= 1
+      AND sr.sr_returned_date_sk IN (
+          SELECT d.d_date_sk
+          FROM date_dim d
+          WHERE d.d_year = 2001
+            AND d.d_month_seq BETWEEN 1200 AND 1210
+      )
 )
 SELECT
-    s.s_store_id,
-    agg.d_year,
-    agg.total_return_amt,
-    agg.total_return_tax,
-    agg.return_cnt,
-    s.s_state,
-    s.s_tax_percentage,
-    ROW_NUMBER() OVER (PARTITION BY agg.d_year ORDER BY agg.total_return_amt DESC) AS rn,
-    CASE
-        WHEN agg.total_return_tax > (
-            SELECT MAX(sr2.sr_return_tax)
-            FROM store_returns sr2
-            WHERE sr2.sr_store_sk = s.s_store_sk
-        ) THEN 'HIGH_TAX'
-        ELSE 'NORMAL_TAX'
-    END AS tax_category
-FROM store_returns_agg agg
-JOIN store s ON agg.sr_store_sk = s.s_store_sk
-WHERE s.s_tax_percentage >= 0.05
-  AND s.s_state = 'CA'
-  AND s.s_city IN ('Los Angeles', 'San Francisco')
-  AND s.s_number_employees > 50
-  AND s.s_floor_space BETWEEN 2000 AND 5000
-  AND s.s_gmt_offset = -8.00
-ORDER BY agg.d_year, rn
+    c.c_customer_id,
+    d.d_year,
+    hd.hd_buy_potential,
+    SUM(fr.sr_net_loss)               AS total_net_loss,
+    AVG(fr.sr_return_amt)             AS avg_return_amt,
+    COUNT(DISTINCT fr.sr_ticket_number) AS distinct_tickets,
+    (
+        SELECT AVG(sr2.sr_return_amt)
+        FROM store_returns sr2
+    )                                 AS overall_avg_return_amt
+FROM filtered_returns fr
+JOIN date_dim d
+  ON fr.sr_returned_date_sk = d.d_date_sk
+JOIN customer c
+  ON fr.sr_customer_sk = c.c_customer_sk
+LEFT JOIN household_demographics hd
+  ON c.c_current_hdemo_sk = hd.hd_demo_sk
+WHERE hd.hd_income_band_sk IN (10, 18)
+  AND hd.hd_buy_potential = '1001-5000'
+  AND hd.hd_dep_count >= 4
+  AND c.c_preferred_cust_flag = 'Y'
+  AND c.c_birth_year BETWEEN 1950 AND 1970
+GROUP BY
+    c.c_customer_id,
+    d.d_year,
+    hd.hd_buy_potential
+HAVING SUM(fr.sr_net_loss) > 1000
+ORDER BY total_net_loss DESC
 LIMIT 100

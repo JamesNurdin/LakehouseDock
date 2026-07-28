@@ -1,52 +1,39 @@
-/*
-Goal: Compute, for each customer birth year, the average store‑return amount (including tax) and related activity metrics, only for customers that have at least one product‑type web page. The query first aggregates per‑customer data (including possible missing returns or web pages via LEFT OUTER JOINs), then performs a higher‑level aggregation with a HAVING clause that compares each birth‑year average to the overall average.
-*/
-WITH per_customer AS (
+WITH sales_data AS (
     SELECT
-        c.c_customer_sk,
-        c.c_birth_year,
-        COALESCE(SUM(sr.sr_return_amt_inc_tax), 0)               AS total_return_inc_tax,
-        COUNT(sr.sr_ticket_number)                               AS return_cnt,
-        COALESCE(SUM(wp.wp_max_ad_count), 0)                     AS total_max_ad,
-        COUNT(DISTINCT wp.wp_web_page_sk)                        AS web_page_cnt
+        wsite.web_name,
+        d.d_year,
+        SUM(ss.ss_net_paid) AS store_net_paid,
+        SUM(ws.ws_net_paid) AS web_net_paid,
+        SUM(p.p_cost) AS promo_cost,
+        SUM(COALESCE(cr.cr_net_loss, 0)) AS total_return_loss,
+        (SUM(ss.ss_net_profit) + SUM(ws.ws_net_profit) - SUM(p.p_cost) - SUM(COALESCE(cr.cr_net_loss, 0))) AS total_profit
     FROM
-        customer c
-        LEFT JOIN web_page wp
-            ON wp.wp_customer_sk = c.c_customer_sk
-        LEFT JOIN store_returns sr
-            ON sr.sr_customer_sk = c.c_customer_sk
+        tpcds.date_dim d
+        INNER JOIN tpcds.store_sales ss ON ss.ss_sold_date_sk = d.d_date_sk
+        INNER JOIN tpcds.promotion p ON ss.ss_promo_sk = p.p_promo_sk
+        LEFT  JOIN tpcds.catalog_returns cr ON cr.cr_returned_date_sk = d.d_date_sk
+        LEFT  JOIN tpcds.catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+        LEFT  JOIN tpcds.reason r ON cr.cr_reason_sk = r.r_reason_sk
+        INNER JOIN tpcds.web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+        INNER JOIN tpcds.web_site wsite ON ws.ws_web_site_sk = wsite.web_site_sk
     WHERE
-        c.c_birth_year BETWEEN 1950 AND 1990                     -- predicate 1
-        AND c.c_current_addr_sk > 1000000                         -- predicate 2
-        AND (sr.sr_reversed_charge IS NULL OR sr.sr_reversed_charge > 100) -- predicate 3
-        AND (wp.wp_max_ad_count IS NULL OR wp.wp_max_ad_count <= 3)          -- predicate 4
-        AND wp.wp_rec_start_date >= DATE '1999-01-01'            -- predicate 5 (date column)
-        AND wp.wp_rec_start_date <= DATE '2001-12-31'            -- predicate 6
+        d.d_year = 2001
+        AND p.p_discount_active = 'Y'
+        AND wsite.web_manager = 'Marshall Conner'
     GROUP BY
-        c.c_customer_sk,
-        c.c_birth_year
+        ROLLUP (wsite.web_name, d.d_year)
 )
 SELECT
-    pc.c_birth_year,
-    AVG(pc.total_return_inc_tax)               AS avg_return_inc_tax,
-    SUM(pc.return_cnt)                         AS total_returns,
-    SUM(pc.total_max_ad)                       AS total_max_ad,
-    COUNT(*)                                   AS customers_in_year
+    web_name,
+    d_year,
+    store_net_paid,
+    web_net_paid,
+    promo_cost,
+    total_return_loss,
+    total_profit,
+    RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
 FROM
-    per_customer pc
-WHERE
-    EXISTS (
-        SELECT 1
-        FROM web_page wp2
-        WHERE wp2.wp_customer_sk = pc.c_customer_sk
-          AND wp2.wp_type = 'product'
-    )
-GROUP BY
-    pc.c_birth_year
-HAVING
-    AVG(pc.total_return_inc_tax) > (
-        SELECT AVG(total_return_inc_tax) FROM per_customer
-    )
+    sales_data
 ORDER BY
-    avg_return_inc_tax DESC
+    profit_rank
 LIMIT 100

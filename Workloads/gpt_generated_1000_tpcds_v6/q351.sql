@@ -1,53 +1,58 @@
-WITH joined_data AS (
+WITH
+  sales AS (
     SELECT
-        c.c_customer_id,
-        CASE WHEN td.t_hour < 12 THEN 'Morning' ELSE 'Afternoon' END AS day_part,
-        ws.ws_net_profit,
-        sr.sr_net_loss,
-        ws.ws_order_number,
-        sr.sr_ticket_number
-    FROM web_sales ws
-    JOIN customer c
-        ON ws.ws_bill_customer_sk = c.c_customer_sk
-    JOIN time_dim td
-        ON ws.ws_sold_time_sk = td.t_time_sk
-    JOIN warehouse w
-        ON ws.ws_warehouse_sk = w.w_warehouse_sk
-    JOIN web_site
-        ON ws.ws_web_site_sk = web_site.web_site_sk
-    JOIN web_page
-        ON ws.ws_web_page_sk = web_page.wp_web_page_sk
-    LEFT JOIN store_returns sr
-        ON sr.sr_customer_sk = c.c_customer_sk
-        AND sr.sr_return_time_sk = td.t_time_sk
-    WHERE td.t_hour BETWEEN 9 AND 17
-      AND w.w_country = 'United States'
-      AND web_site.web_site_id = 'AAAAAAAABAAAAAA'
-      AND c.c_birth_year BETWEEN 1970 AND 1985
-),
-aggregated AS (
+      i.i_category AS category,
+      'sales' AS metric,
+      SUM(cs.cs_ext_sales_price) AS amount,
+      CASE
+        WHEN SUM(cs.cs_net_profit) > 0 THEN 'Profit'
+        ELSE 'Loss'
+      END AS flag
+    FROM catalog_sales cs
+    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    WHERE d.d_year = 2001
+      AND regexp_like(i.i_item_desc, '.*[A-Z]{2}[0-9]{3}.*')
+      AND cp.cp_type LIKE 'C%'
+    GROUP BY i.i_category
+  ),
+
+  returns AS (
     SELECT
-        c_customer_id,
-        day_part,
-        SUM(ws_net_profit) AS total_web_profit,
-        SUM(sr_net_loss) AS total_store_loss,
-        COUNT(DISTINCT ws_order_number) AS web_orders,
-        COUNT(sr_ticket_number) AS total_returns
-    FROM joined_data
-    GROUP BY c_customer_id, day_part
-)
-SELECT
-    c_customer_id,
-    day_part,
-    total_web_profit,
-    total_store_loss,
-    web_orders,
-    total_returns,
-    SUM(total_web_profit) OVER (
-        PARTITION BY day_part
-        ORDER BY total_web_profit DESC
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS running_profit_by_part
-FROM aggregated
-ORDER BY total_web_profit DESC
+      i.i_category AS category,
+      'return' AS metric,
+      SUM(cr.cr_return_amount) AS amount,
+      CASE
+        WHEN SUM(cr.cr_return_amount) > 1000 THEN 'High'
+        ELSE 'Low'
+      END AS flag
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+    WHERE d.d_year = 2001
+      AND r.r_reason_desc LIKE '%damaged%'
+      AND regexp_extract(i.i_item_desc, '(SPECIAL)-\w+', 1) = 'SPECIAL'
+    GROUP BY i.i_category
+  ),
+
+  filtered_categories AS (
+    SELECT DISTINCT i.i_category AS category
+    FROM item i
+    WHERE regexp_like(i.i_category, '^\\w+$')
+  )
+
+SELECT DISTINCT
+  u.category,
+  u.metric,
+  u.amount,
+  u.flag
+FROM (
+  SELECT * FROM sales
+  UNION ALL
+  SELECT * FROM returns
+) u
+WHERE u.category IN (SELECT category FROM filtered_categories)
+ORDER BY u.category, u.metric DESC, u.amount DESC
 LIMIT 100

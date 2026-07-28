@@ -1,64 +1,67 @@
-WITH base AS (
-    SELECT
-        c.c_customer_sk,
-        c.c_birth_year,
-        ca.ca_state,
-        hd.hd_buy_potential,
-        ib.ib_lower_bound,
-        ib.ib_upper_bound,
-        cr.cr_return_amount,
-        cr.cr_net_loss,
-        sr.sr_return_amt,
-        sr.sr_net_loss,
-        w.w_warehouse_name,
-        wp.wp_type,
-        COALESCE(cr.cr_net_loss, 0) + COALESCE(sr.sr_net_loss, 0) AS total_net_loss
-    FROM catalog_returns cr
-    INNER JOIN customer c
-        ON cr.cr_refunded_customer_sk = c.c_customer_sk
-    INNER JOIN household_demographics hd
-        ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
-    INNER JOIN customer_address ca
-        ON cr.cr_refunded_addr_sk = ca.ca_address_sk
-    INNER JOIN warehouse w
-        ON cr.cr_warehouse_sk = w.w_warehouse_sk
-    INNER JOIN income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    LEFT OUTER JOIN store_returns sr
-        ON sr.sr_customer_sk = c.c_customer_sk
-        AND sr.sr_hdemo_sk = hd.hd_demo_sk
-        AND sr.sr_addr_sk = ca.ca_address_sk
-    LEFT OUTER JOIN web_page wp
-        ON wp.wp_customer_sk = c.c_customer_sk
-    WHERE c.c_birth_year BETWEEN 1960 AND 1970
-      AND ca.ca_state IN ('CA', 'TX', 'NY')
-      AND hd.hd_buy_potential = '5001-10000'
-      AND ib.ib_lower_bound >= 50000
-      AND cr.cr_return_amount > 100
-      AND sr.sr_return_amt IS NOT NULL
-      AND cr.cr_return_quantity > 0
-), filtered AS (
-    SELECT
-        ca_state,
-        wp_type,
-        c_customer_sk,
-        total_net_loss
-    FROM base b
-    WHERE EXISTS (
-        SELECT 1
-        FROM store_returns sr2
-        WHERE sr2.sr_customer_sk = b.c_customer_sk
-          AND sr2.sr_net_loss > 200
+WITH avg_income AS (
+        SELECT AVG(ib_upper_bound) AS avg_ub
+        FROM income_band
     )
-)
 SELECT
-    ca_state,
-    wp_type,
-    COUNT(DISTINCT c_customer_sk) AS num_customers,
-    SUM(total_net_loss) AS sum_net_loss,
-    AVG(total_net_loss) AS avg_net_loss
-FROM filtered
-GROUP BY ca_state, wp_type
-HAVING SUM(total_net_loss) > 500
-ORDER BY sum_net_loss DESC
+    s.s_store_name,
+    s.s_division_name,
+    cc.cc_name,
+    r.r_reason_desc,
+    SUM(ss.ss_net_profit)               AS store_net_profit,
+    SUM(cs.cs_net_profit)               AS catalog_net_profit,
+    (SELECT avg_ub FROM avg_income)    AS avg_income_upper_bound
+FROM store s
+JOIN store_sales ss
+    ON s.s_store_sk = ss.ss_store_sk
+JOIN time_dim td
+    ON ss.ss_sold_time_sk = td.t_time_sk
+JOIN customer c_bill
+    ON ss.ss_customer_sk = c_bill.c_customer_sk
+JOIN customer_address ca_bill
+    ON ss.ss_addr_sk = ca_bill.ca_address_sk
+JOIN household_demographics hd_bill
+    ON ss.ss_hdemo_sk = hd_bill.hd_demo_sk
+JOIN income_band ib_bill
+    ON hd_bill.hd_income_band_sk = ib_bill.ib_income_band_sk
+JOIN catalog_sales cs
+    ON cs.cs_order_number = ss.ss_ticket_number
+JOIN call_center cc
+    ON cs.cs_call_center_sk = cc.cc_call_center_sk
+JOIN ship_mode sm
+    ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN warehouse w
+    ON cs.cs_warehouse_sk = w.w_warehouse_sk
+JOIN customer c_ship
+    ON cs.cs_ship_customer_sk = c_ship.c_customer_sk
+JOIN household_demographics hd_ship
+    ON cs.cs_ship_hdemo_sk = hd_ship.hd_demo_sk
+JOIN income_band ib_ship
+    ON hd_ship.hd_income_band_sk = ib_ship.ib_income_band_sk
+JOIN customer_address ca_ship
+    ON cs.cs_ship_addr_sk = ca_ship.ca_address_sk
+JOIN store_returns sr
+    ON sr.sr_ticket_number = ss.ss_ticket_number
+JOIN reason r
+    ON sr.sr_reason_sk = r.r_reason_sk
+JOIN catalog_returns cr
+    ON cr.cr_order_number = cs.cs_order_number
+JOIN web_returns wr
+    ON wr.wr_order_number = cs.cs_order_number
+WHERE ss.ss_ticket_number IN (
+        SELECT sr2.sr_ticket_number FROM store_returns sr2
+        UNION
+        SELECT cr2.cr_order_number FROM catalog_returns cr2
+    )
+  AND EXISTS (
+        SELECT 1 FROM web_returns wr2
+        WHERE wr2.wr_returned_date_sk = ss.ss_sold_date_sk
+          AND wr2.wr_reason_sk = r.r_reason_sk
+    )
+GROUP BY
+    s.s_store_name,
+    s.s_division_name,
+    cc.cc_name,
+    r.r_reason_desc,
+    ib_bill.ib_upper_bound
+ORDER BY store_net_profit DESC
 LIMIT 100

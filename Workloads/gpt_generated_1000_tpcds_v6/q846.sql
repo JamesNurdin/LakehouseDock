@@ -1,45 +1,30 @@
-WITH ss_with_avg AS (
+WITH inv_agg AS (
     SELECT
-        ss.*,
-        (SELECT AVG(ss2.ss_ext_discount_amt)
-         FROM store_sales ss2
-         WHERE ss2.ss_hdemo_sk = ss.ss_hdemo_sk) AS avg_discount_hdemo
-    FROM store_sales ss
+        i.inv_warehouse_sk,
+        COUNT(DISTINCT i.inv_item_sk) AS distinct_items,
+        SUM(i.inv_quantity_on_hand) AS total_qty,
+        AVG(i.inv_quantity_on_hand) AS avg_qty,
+        MAX(i.inv_date_sk) AS latest_date_sk
+    FROM inventory i
+    WHERE i.inv_quantity_on_hand > 500
+      AND i.inv_date_sk BETWEEN 2450960 AND 2451088
+      AND i.inv_warehouse_sk IS NOT NULL
+    GROUP BY i.inv_warehouse_sk
+    HAVING SUM(i.inv_quantity_on_hand) > 2000
 )
 SELECT
-    cd.cd_demo_sk,
-    cd.cd_gender,
-    cd.cd_marital_status,
-    ib.ib_income_band_sk,
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    ss_with_avg.ss_sold_date_sk,
-    ss_with_avg.ss_ext_sales_price,
-    ss_with_avg.ss_net_profit,
-    COALESCE(ws.ws_order_number, -1) AS ws_order_number,
-    ss_with_avg.avg_discount_hdemo,
-    ROW_NUMBER() OVER (PARTITION BY ib.ib_income_band_sk ORDER BY ss_with_avg.ss_net_profit DESC) AS profit_rank,
-    CASE
-        WHEN ss_with_avg.ss_net_profit > 10000 THEN 'HIGH'
-        WHEN ss_with_avg.ss_net_profit > 5000 THEN 'MEDIUM'
-        ELSE 'LOW'
-    END AS profit_category
-FROM ss_with_avg
-JOIN customer_demographics cd
-    ON ss_with_avg.ss_cdemo_sk = cd.cd_demo_sk
-JOIN household_demographics hd
-    ON ss_with_avg.ss_hdemo_sk = hd.hd_demo_sk
-JOIN income_band ib
-    ON hd.hd_income_band_sk = ib.ib_income_band_sk
-LEFT JOIN web_sales ws
-    ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-   AND ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-WHERE ss_with_avg.ss_ext_wholesale_cost > 5000
-  AND ss_with_avg.ss_ext_discount_amt BETWEEN 100 AND 2000
-  AND ib.ib_upper_bound >= 50000
-  AND cd.cd_gender = 'F'
-  AND cd.cd_credit_rating = 'A'
-  AND hd.hd_vehicle_count >= 2
-  AND (ws.ws_quantity > 0 OR ws.ws_quantity IS NULL)
-ORDER BY ib.ib_income_band_sk, profit_rank
+    w.w_warehouse_id,
+    w.w_warehouse_name,
+    w.w_city,
+    inv_agg.distinct_items,
+    inv_agg.total_qty,
+    inv_agg.avg_qty,
+    inv_agg.latest_date_sk
+FROM inv_agg
+LEFT JOIN warehouse w
+    ON inv_agg.inv_warehouse_sk = w.w_warehouse_sk
+WHERE w.w_warehouse_sq_ft > 600000
+  AND w.w_street_type IN ('Street', 'Way', 'RD')
+  AND w.w_state = 'CA'
+ORDER BY inv_agg.total_qty DESC
 LIMIT 100

@@ -1,56 +1,55 @@
-WITH warehouse_sales AS (
+WITH filtered_items AS (
     SELECT
-        w.w_warehouse_name,
-        SUM(ws.ws_net_profit) AS total_profit,
-        COUNT(*) AS order_cnt
-    FROM web_sales ws
-    JOIN warehouse w
-        ON ws.ws_warehouse_sk = w.w_warehouse_sk
-    JOIN date_dim d
-        ON ws.ws_sold_date_sk = d.d_date_sk
-    WHERE d.d_year = 2002
-      AND d.d_month_seq BETWEEN 1200 AND 1203
-    GROUP BY w.w_warehouse_name
+        i_item_sk,
+        i_product_name,
+        i_brand,
+        i_manufact,
+        i_item_desc,
+        CONCAT(i_brand, ' ', i_manufact) AS brand_manufact,
+        regexp_extract(i_item_desc, '(\\d{2})', 1) AS two_digit_code
+    FROM item
+    WHERE regexp_like(i_item_desc, '\\d{2}')
+      AND i_brand LIKE 'A%'
 ),
-promo_sales AS (
+store_agg AS (
     SELECT
-        p.p_promo_name,
-        SUM(ws.ws_net_profit) AS total_profit,
-        COUNT(*) AS order_cnt
-    FROM web_sales ws
-    JOIN promotion p
-        ON ws.ws_promo_sk = p.p_promo_sk
-    JOIN date_dim d
-        ON ws.ws_sold_date_sk = d.d_date_sk
-    WHERE p.p_discount_active = 'Y'
-      AND p.p_channel_email = 'Y'
-      AND EXISTS (
-          SELECT 1
-          FROM warehouse w2
-          WHERE w2.w_warehouse_sk = ws.ws_warehouse_sk
-            AND w2.w_city = 'Chicago'
-      )
-    GROUP BY p.p_promo_name
+        fi.i_item_sk,
+        d.d_year,
+        SUM(ss.ss_ext_sales_price) AS store_sales_total,
+        COUNT(*) AS store_transactions
+    FROM filtered_items fi
+    JOIN store_sales ss ON ss.ss_item_sk = fi.i_item_sk
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    WHERE hd.hd_buy_potential IN ('>10000', '5001-10000')
+    GROUP BY fi.i_item_sk, d.d_year
+),
+web_agg AS (
+    SELECT
+        fi.i_item_sk,
+        d.d_year,
+        SUM(ws.ws_ext_sales_price) AS web_sales_total,
+        COUNT(*) AS web_transactions
+    FROM filtered_items fi
+    JOIN web_sales ws ON ws.ws_item_sk = fi.i_item_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN household_demographics hd ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+    WHERE hd.hd_buy_potential IN ('>10000', '5001-10000')
+    GROUP BY fi.i_item_sk, d.d_year
 )
-SELECT DISTINCT
-    src.source_type,
-    src.name,
-    src.total_profit,
-    src.order_cnt
-FROM (
-    SELECT
-        'Warehouse' AS source_type,
-        ws.w_warehouse_name AS name,
-        ws.total_profit,
-        ws.order_cnt
-    FROM warehouse_sales ws
-    UNION ALL
-    SELECT
-        'Promotion' AS source_type,
-        ps.p_promo_name AS name,
-        ps.total_profit,
-        ps.order_cnt
-    FROM promo_sales ps
-) src
-ORDER BY src.total_profit DESC
+SELECT
+    fi.i_product_name,
+    fi.brand_manufact,
+    SUBSTRING(fi.i_item_desc FROM 1 FOR 15) AS short_desc,
+    fi.two_digit_code,
+    COALESCE(sa.store_sales_total, 0) AS store_sales_total,
+    COALESCE(wa.web_sales_total, 0) AS web_sales_total,
+    COALESCE(sa.store_sales_total, 0) + COALESCE(wa.web_sales_total, 0) AS total_sales,
+    COALESCE(sa.store_transactions, 0) AS store_transactions,
+    COALESCE(wa.web_transactions, 0) AS web_transactions,
+    COALESCE(sa.d_year, wa.d_year) AS sales_year
+FROM filtered_items fi
+LEFT JOIN store_agg sa ON fi.i_item_sk = sa.i_item_sk
+LEFT JOIN web_agg wa ON fi.i_item_sk = wa.i_item_sk
+ORDER BY total_sales DESC
 LIMIT 100

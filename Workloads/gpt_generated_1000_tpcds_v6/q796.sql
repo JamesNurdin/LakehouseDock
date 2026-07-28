@@ -1,60 +1,45 @@
-WITH sales_summary AS (
+WITH daily_sales AS (
     SELECT
-        cs_bill_hdemo_sk,
-        cs_promo_sk,
-        COUNT(*) AS order_cnt,
-        SUM(cs_net_paid_inc_ship_tax) AS sum_net_paid,
-        AVG(cs_net_paid_inc_ship_tax) AS avg_net_paid,
-        MIN(cs_net_paid_inc_ship_tax) AS min_net_paid,
-        MAX(cs_net_paid_inc_ship_tax) AS max_net_paid
-    FROM catalog_sales
-    WHERE cs_net_paid_inc_ship_tax > 1500
-      AND cs_quantity >= 2
-      AND cs_ext_discount_amt < 500
-      AND cs_sold_date_sk BETWEEN 2450000 AND 2450200
-      AND cs_ship_mode_sk IN (1, 2, 3)
-      AND cs_call_center_sk <> 0
-    GROUP BY cs_bill_hdemo_sk, cs_promo_sk
+        d_sold.d_date AS sold_date,
+        sm.sm_carrier,
+        sm.sm_contract,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        SUM(ws.ws_ext_discount_amt) AS total_discount,
+        COUNT(*) AS order_cnt
+    FROM web_sales ws
+    JOIN date_dim d_sold
+        ON ws.ws_sold_date_sk = d_sold.d_date_sk
+    JOIN ship_mode sm
+        ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    LEFT JOIN date_dim d_ship
+        ON ws.ws_ship_date_sk = d_ship.d_date_sk
+    WHERE d_sold.d_year = 2000                     -- predicate 1
+      AND sm.sm_carrier IN ('MSC', 'TBS')           -- predicate 2
+      AND ws.ws_wholesale_cost > 30                -- predicate 3
+      AND ws.ws_quantity >= 2                      -- predicate 4
+      AND (d_ship.d_month_seq IS NULL               -- handling left join nulls
+           OR d_ship.d_month_seq = d_sold.d_month_seq)
+    GROUP BY d_sold.d_date, sm.sm_carrier, sm.sm_contract
 )
 SELECT
-    p.p_promo_name,
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    hd.hd_buy_potential,
-    ss.order_cnt,
-    ss.sum_net_paid,
-    ss.avg_net_paid,
-    CASE
-        WHEN ss.avg_net_paid > 3000 THEN 'High'
-        WHEN ss.avg_net_paid BETWEEN 2000 AND 3000 THEN 'Medium'
-        ELSE 'Low'
-    END AS avg_spend_category,
-    COUNT(DISTINCT hd.hd_demo_sk) AS household_count
-FROM sales_summary ss
-JOIN household_demographics hd
-  ON ss.cs_bill_hdemo_sk = hd.hd_demo_sk
-JOIN income_band ib
-  ON hd.hd_income_band_sk = ib.ib_income_band_sk
-JOIN promotion p
-  ON ss.cs_promo_sk = p.p_promo_sk
-WHERE hd.hd_dep_count <= 4
-  AND hd.hd_vehicle_count > 0
-  AND ib.ib_lower_bound >= 80000
-  AND p.p_discount_active = 'Y'
-  AND p.p_channel_email = 'Y'
-  AND p.p_promo_name LIKE '%Summer%'
-GROUP BY
-    p.p_promo_name,
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    hd.hd_buy_potential,
-    ss.order_cnt,
-    ss.sum_net_paid,
-    ss.avg_net_paid,
-    CASE
-        WHEN ss.avg_net_paid > 3000 THEN 'High'
-        WHEN ss.avg_net_paid BETWEEN 2000 AND 3000 THEN 'Medium'
-        ELSE 'Low'
-    END
-ORDER BY ss.sum_net_paid DESC
+    carrier,
+    contract,
+    AVG(total_net_paid) AS avg_net_paid,
+    SUM(order_cnt) AS total_orders,
+    MAX(total_discount) AS max_discount
+FROM (
+    SELECT
+        sm_carrier AS carrier,
+        sm_contract AS contract,
+        total_net_paid,
+        total_discount,
+        order_cnt
+    FROM daily_sales ds
+    WHERE ds.total_net_paid > (
+        SELECT AVG(total_net_paid) FROM daily_sales
+    )
+) filtered
+GROUP BY carrier, contract
+HAVING COUNT(*) >= 3
+ORDER BY avg_net_paid DESC
 LIMIT 100

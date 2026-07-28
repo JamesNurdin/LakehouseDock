@@ -1,42 +1,40 @@
-WITH billed AS (
+WITH sales AS (
     SELECT
-        ws.ws_order_number,
-        ws.ws_net_paid,
-        ws.ws_net_profit,
-        c.c_customer_sk,
-        c.c_first_name,
-        c.c_last_name,
-        c.c_email_address,
-        ca.ca_city,
-        ca.ca_street_name,
-        ca.ca_suite_number,
-        ca.ca_zip,
-        regexp_extract(c.c_email_address, '@(.+)$', 1) AS email_domain,
-        CASE
-            WHEN regexp_like(ca.ca_street_name, '^Oak') THEN 'StartsWithOak'
-            WHEN regexp_like(ca.ca_street_name, 'Oak$') THEN 'EndsWithOak'
-            ELSE 'Other'
-        END AS oak_category
-    FROM web_sales ws
-    JOIN customer c
-        ON ws.ws_bill_customer_sk = c.c_customer_sk
-    JOIN customer_address ca
-        ON ws.ws_bill_addr_sk = ca.ca_address_sk
-    WHERE ca.ca_city LIKE 'San %'
-      AND regexp_like(ca.ca_street_name, 'Oak')
+        i.i_item_id,
+        i.i_product_name,
+        SUM(cs.cs_ext_sales_price) AS total_amount,
+        CASE WHEN MAX(p.p_discount_active) = 'Y' THEN 'Active' ELSE 'Inactive' END AS status_flag
+    FROM catalog_sales cs
+    INNER JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    INNER JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    WHERE p.p_channel_dmail = 'Y'
+      AND i.i_category_id = 2
+    GROUP BY i.i_item_id, i.i_product_name
+),
+returns AS (
+    SELECT
+        i.i_item_id,
+        i.i_product_name,
+        SUM(cr.cr_return_amount) AS total_amount,
+        CASE WHEN SUM(cr.cr_return_quantity) > 5 THEN 'HighQty' ELSE 'LowQty' END AS status_flag
+    FROM catalog_returns cr
+    INNER JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    WHERE i.i_category_id = 2
+    GROUP BY i.i_item_id, i.i_product_name
 )
 SELECT
-    oak_category,
-    email_domain,
-    COUNT(DISTINCT ws_order_number) AS distinct_orders,
-    SUM(ws_net_paid) AS total_paid,
-    SUM(ws_net_profit) AS total_profit,
-    CASE
-        WHEN SUM(ws_net_profit) > 0 THEN 'Profitable'
-        ELSE 'NotProfitable'
-    END AS profit_flag
-FROM billed
-GROUP BY oak_category, email_domain
-HAVING COUNT(DISTINCT ws_order_number) > 5
-ORDER BY total_paid DESC
+    s.i_item_id,
+    s.i_product_name,
+    'sales'   AS record_type,
+    s.total_amount,
+    s.status_flag
+FROM sales s
+UNION ALL
+SELECT
+    r.i_item_id,
+    r.i_product_name,
+    'returns' AS record_type,
+    r.total_amount,
+    r.status_flag
+FROM returns r
 LIMIT 100

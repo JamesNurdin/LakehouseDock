@@ -1,41 +1,63 @@
-WITH filtered_dates AS (
-    SELECT d_date_sk, d_year
-    FROM date_dim
-    WHERE d_year BETWEEN 1998 AND 2000
+WITH base AS (
+    SELECT
+        wr.wr_returned_date_sk,
+        wr.wr_returned_time_sk,
+        wr.wr_return_quantity,
+        wr.wr_return_amt,
+        wr.wr_net_loss,
+        td.t_time,
+        td.t_hour,
+        td.t_minute,
+        cd_ret.cd_education_status,
+        cd_ret.cd_gender,
+        cd_ret.cd_dep_count
+    FROM tpcds.web_returns AS wr
+    JOIN tpcds.time_dim AS td
+      ON wr.wr_returned_time_sk = td.t_time_sk
+    JOIN tpcds.customer_demographics AS cd_ret
+      ON wr.wr_returning_cdemo_sk = cd_ret.cd_demo_sk
+    JOIN tpcds.customer_demographics AS cd_ref
+      ON wr.wr_refunded_cdemo_sk = cd_ref.cd_demo_sk
+    WHERE td.t_hour BETWEEN 9 AND 17                         -- predicate 1
+      AND td.t_minute IN (0, 15, 30, 45)                     -- predicate 2
+      AND cd_ret.cd_gender = 'M'                           -- predicate 3
+      AND cd_ret.cd_education_status IN ('College', 'Advanced Degree') -- predicate 4
+      AND wr.wr_return_quantity > 0                       -- predicate 5
+),
+agg AS (
+    SELECT
+        t_time,
+        t_hour,
+        t_minute,
+        cd_education_status,
+        cd_gender,
+        SUM(wr_return_quantity)   AS total_qty,
+        SUM(wr_return_amt)        AS total_return_amt,
+        SUM(wr_net_loss)          AS total_net_loss
+    FROM base
+    GROUP BY
+        t_time,
+        t_hour,
+        t_minute,
+        cd_education_status,
+        cd_gender
 )
-SELECT source_type,
-       year,
-       SUM(net_loss) AS total_net_loss
-FROM (
-    SELECT 'catalog' AS source_type,
-           d.d_year AS year,
-           cr.cr_net_loss AS net_loss
-    FROM catalog_returns cr
-    JOIN filtered_dates d
-        ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN customer_address ca
-        ON cr.cr_refunded_addr_sk = ca.ca_address_sk
-    WHERE ca.ca_county = 'Oldham County'
-      AND cr.cr_return_quantity > 0
-    UNION ALL
-    SELECT 'web' AS source_type,
-           d.d_year AS year,
-           wr.wr_net_loss AS net_loss
-    FROM web_returns wr
-    JOIN filtered_dates d
-        ON wr.wr_returned_date_sk = d.d_date_sk
-    JOIN customer_address ca
-        ON wr.wr_refunded_addr_sk = ca.ca_address_sk
-    JOIN web_page wp
-        ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    WHERE wp.wp_type = 'product'
-      AND EXISTS (
-          SELECT 1
-          FROM customer_address ca2
-          WHERE ca2.ca_address_sk = wr.wr_refunded_addr_sk
-            AND ca2.ca_city = 'Farmington'
-      )
-) AS combined
-GROUP BY source_type, year
-ORDER BY source_type, year DESC
+SELECT
+    t_time,
+    t_hour,
+    t_minute,
+    cd_education_status,
+    cd_gender,
+    total_qty,
+    total_return_amt,
+    total_net_loss,
+    RANK() OVER (PARTITION BY cd_education_status ORDER BY total_net_loss DESC) AS loss_rank_by_edu,
+    ROW_NUMBER() OVER (ORDER BY total_net_loss DESC)                     AS overall_rank,
+    CASE
+        WHEN total_net_loss > 10000 THEN 'HIGH'
+        WHEN total_net_loss > 5000  THEN 'MEDIUM'
+        ELSE 'LOW'
+    END AS loss_category
+FROM agg
+ORDER BY total_net_loss DESC
 LIMIT 100

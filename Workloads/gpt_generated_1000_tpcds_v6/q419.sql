@@ -1,31 +1,41 @@
-WITH filtered AS (
-    SELECT
-        ws.ws_web_page_sk,
-        ws.ws_order_number,
-        ws.ws_net_paid,
-        ws.ws_quantity,
-        wp.wp_url,
-        wp.wp_type,
-        wp.wp_rec_start_date,
-        regexp_extract(wp.wp_url, 'https?://([^/]+)/', 1) AS domain,
-        regexp_extract(wp.wp_url, '/([^/]+)$', 1) AS last_path
-    FROM tpcds.web_sales ws
-    JOIN tpcds.web_page wp
-        ON ws.ws_web_page_sk = wp.wp_web_page_sk
-    WHERE wp.wp_rec_start_date >= DATE '2000-01-01'
-      AND wp.wp_rec_start_date < DATE '2001-01-01'
-      AND regexp_like(wp.wp_url, '\\.com')
-      AND wp.wp_type LIKE 'C%'
+WITH returns AS (
+  SELECT
+    'Return' AS segment,
+    r.r_reason_desc AS description,
+    i.i_category AS category,
+    SUM(cr.cr_return_amount) AS total_amount,
+    COUNT(*) AS transaction_count,
+    CASE WHEN SUM(cr.cr_return_amount) > 200 THEN 'High' ELSE 'Low' END AS amount_category,
+    ROW_NUMBER() OVER (PARTITION BY r.r_reason_desc ORDER BY SUM(cr.cr_return_amount) DESC) AS rn
+  FROM catalog_returns cr
+  JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+  JOIN item i ON cr.cr_item_sk = i.i_item_sk
+  WHERE cr.cr_returned_date_sk BETWEEN 2450000 AND 2450150
+  GROUP BY GROUPING SETS (
+    (r.r_reason_desc, i.i_category),
+    (r.r_reason_desc),
+    (i.i_category),
+    ()
+  )
+),
+sales AS (
+  SELECT
+    'Sale' AS segment,
+    p.p_promo_name AS description,
+    i.i_category AS category,
+    SUM(ws.ws_ext_sales_price) AS total_amount,
+    COUNT(*) AS transaction_count,
+    CASE WHEN SUM(ws.ws_ext_sales_price) > 1000 THEN 'High' ELSE 'Low' END AS amount_category,
+    ROW_NUMBER() OVER (PARTITION BY p.p_promo_name ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rn
+  FROM web_sales ws
+  JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+  JOIN item i ON ws.ws_item_sk = i.i_item_sk
+  WHERE ws.ws_sold_date_sk BETWEEN 2450000 AND 2450150
+  GROUP BY ROLLUP (p.p_promo_name, i.i_category)
 )
-SELECT
-    domain,
-    wp_type,
-    COUNT(DISTINCT ws_order_number) AS distinct_orders,
-    SUM(ws_net_paid) AS total_net_paid,
-    AVG(ws_quantity) AS avg_quantity,
-    CONCAT('Domain: ', domain) AS label
-FROM filtered
-GROUP BY domain, wp_type, CONCAT('Domain: ', domain)
-HAVING SUM(ws_net_paid) > 1000
-ORDER BY total_net_paid DESC
+SELECT *
+FROM returns
+UNION ALL
+SELECT *
+FROM sales
 LIMIT 100

@@ -1,65 +1,35 @@
-WITH
-  /* Alias date_dim for different roles */
-  date_sales AS (SELECT * FROM date_dim),
-  date_return AS (SELECT * FROM date_dim)
+WITH sales_agg AS (
+    SELECT
+        w.w_warehouse_id,
+        w.w_warehouse_name,
+        d.d_weekend,
+        SUM(cs.cs_net_paid) AS total_net_paid,
+        SUM(cs.cs_ext_sales_price) AS total_sales_price,
+        COUNT(DISTINCT cs.cs_order_number) AS orders_cnt
+    FROM catalog_sales cs
+    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    WHERE cs.cs_ext_list_price > 5000
+      AND cs.cs_ext_tax > 0
+      AND w.w_gmt_offset = -5.00
+      AND d.d_year BETWEEN 2000 AND 2002
+    GROUP BY w.w_warehouse_id, w.w_warehouse_name, d.d_weekend
+)
 SELECT
-  s.s_store_name,
-  i.i_category,
-  p.p_promo_name,
-  ds.d_year,
-  SUM(ss.ss_ext_sales_price) AS total_store_sales,
-  SUM(cs.cs_ext_sales_price) AS total_catalog_sales,
-  SUM(cr.cr_return_amount) AS total_catalog_returns,
-  SUM(wr.wr_return_amt) AS total_web_returns,
-  (SUM(ss.ss_net_profit) - SUM(cr.cr_net_loss) - SUM(wr.wr_net_loss)) AS net_profit_adjusted
-FROM
-  store_sales ss
-  JOIN date_sales ds
-    ON ss.ss_sold_date_sk = ds.d_date_sk
-  JOIN store s
-    ON ss.ss_store_sk = s.s_store_sk
-  JOIN item i
-    ON ss.ss_item_sk = i.i_item_sk
-  JOIN promotion p
-    ON ss.ss_promo_sk = p.p_promo_sk
-  JOIN household_demographics hd_ss
-    ON ss.ss_hdemo_sk = hd_ss.hd_demo_sk
-  JOIN income_band ib_ss
-    ON hd_ss.hd_income_band_sk = ib_ss.ib_income_band_sk
-  JOIN catalog_sales cs
-    ON ss.ss_item_sk = cs.cs_item_sk
-   AND ss.ss_sold_date_sk = cs.cs_sold_date_sk
-  JOIN catalog_returns cr
-    ON cs.cs_order_number = cr.cr_order_number
-   AND i.i_item_sk = cr.cr_item_sk
-  JOIN catalog_page cp
-    ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-  JOIN ship_mode sm
-    ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-  JOIN call_center cc
-    ON cr.cr_call_center_sk = cc.cc_call_center_sk
-  JOIN date_return dr
-    ON cr.cr_returned_date_sk = dr.d_date_sk
-  JOIN web_returns wr
-    ON i.i_item_sk = wr.wr_item_sk
-   AND ds.d_date_sk = wr.wr_returned_date_sk
-  JOIN web_site ws
-    ON ws.web_open_date_sk = ds.d_date_sk
-WHERE
-  EXISTS (
-    SELECT 1
-    FROM web_returns wr2
-    WHERE wr2.wr_item_sk = ss.ss_item_sk
-      AND wr2.wr_returned_date_sk = ds.d_date_sk
-      AND wr2.wr_return_quantity > 0
-  )
-  AND p.p_channel_tv = 'N'
-  AND s.s_country = 'United States'
-GROUP BY
-  s.s_store_name,
-  i.i_category,
-  p.p_promo_name,
-  ds.d_year
-ORDER BY
-  net_profit_adjusted DESC
+    s.w_warehouse_id,
+    s.w_warehouse_name,
+    s.d_weekend,
+    s.total_net_paid,
+    s.total_sales_price,
+    s.orders_cnt,
+    AVG(s.total_net_paid) OVER (PARTITION BY s.w_warehouse_id) AS avg_net_paid_per_warehouse,
+    RANK() OVER (ORDER BY s.total_net_paid DESC) AS sales_rank,
+    (SELECT MAX(cs2.cs_net_profit) FROM catalog_sales cs2) AS max_net_profit_overall
+FROM sales_agg s
+WHERE s.total_sales_price > (
+        SELECT AVG(cs3.cs_ext_sales_price)
+        FROM catalog_sales cs3
+        WHERE cs3.cs_ext_list_price > 5000
+    )
+ORDER BY s.total_net_paid DESC
 LIMIT 100

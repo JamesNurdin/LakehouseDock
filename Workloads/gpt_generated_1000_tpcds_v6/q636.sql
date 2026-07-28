@@ -1,40 +1,47 @@
-WITH joined_data AS (
+WITH sales_summary AS (
     SELECT
-        i.i_item_id,
-        i.i_brand,
-        i.i_class,
-        cr.cr_return_amount,
-        ws.ws_net_profit,
-        hd.hd_income_band_sk,
-        w.w_state
-    FROM catalog_returns cr
-    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN item i ON cr.cr_item_sk = i.i_item_sk
-    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
-    JOIN household_demographics hd ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN store_returns sr ON sr.sr_item_sk = i.i_item_sk
-        AND sr.sr_hdemo_sk = hd.hd_demo_sk
-    JOIN web_sales ws ON ws.ws_item_sk = i.i_item_sk
-        AND ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-        AND ws.ws_warehouse_sk = w.w_warehouse_sk
-    JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk
-        AND inv.inv_warehouse_sk = w.w_warehouse_sk
-    WHERE i.i_class_id IN (2, 3, 4)
-      AND i.i_brand = 'brandbrand #4'
-      AND hd.hd_income_band_sk >= 10
-      AND w.w_state = 'CA'
-      AND cr.cr_return_amount > 100
-      AND ws.ws_sold_date_sk BETWEEN 2450000 AND 2450100
+        td.t_time_sk,
+        i.i_category,
+        sm.sm_carrier,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(*) AS sales_cnt
+    FROM web_sales ws
+    JOIN time_dim td ON ws.ws_sold_time_sk = td.t_time_sk
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+    WHERE i.i_color IN ('red', 'purple')
+      AND sm.sm_carrier = 'USPS'
+      AND cd.cd_credit_rating = 'Good'
+      AND cd.cd_marital_status = 'M'
+      AND td.t_hour BETWEEN 8 AND 17
+    GROUP BY td.t_time_sk, i.i_category, sm.sm_carrier
 )
 SELECT
-    jd.i_item_id,
-    jd.i_brand,
-    jd.i_class,
-    SUM(jd.cr_return_amount) AS total_return_amount,
-    SUM(jd.ws_net_profit) AS total_net_profit,
-    (SELECT AVG(i2.i_current_price) FROM item i2 WHERE i2.i_brand = jd.i_brand) AS avg_price_by_brand,
-    RANK() OVER (PARTITION BY jd.i_brand ORDER BY SUM(jd.cr_return_amount) DESC) AS brand_return_rank
-FROM joined_data jd
-GROUP BY jd.i_item_id, jd.i_brand, jd.i_class
-ORDER BY brand_return_rank, total_return_amount DESC
+    ss.i_category,
+    ss.sm_carrier,
+    SUM(ss.total_sales) AS sum_sales,
+    SUM(ss.total_profit) AS sum_profit,
+    COUNT(DISTINCT ss.t_time_sk) AS distinct_time_slots,
+    COALESCE(SUM(sr.sr_return_amt), 0) AS total_store_return_amount,
+    COALESCE(SUM(cr.cr_return_amount), 0) AS total_catalog_return_amount
+FROM sales_summary ss
+LEFT JOIN store_returns sr ON ss.t_time_sk = sr.sr_return_time_sk
+LEFT JOIN item i_sr ON sr.sr_item_sk = i_sr.i_item_sk
+LEFT JOIN customer_demographics cd_sr ON sr.sr_cdemo_sk = cd_sr.cd_demo_sk
+LEFT JOIN catalog_returns cr ON ss.t_time_sk = cr.cr_returned_time_sk
+LEFT JOIN ship_mode sm_cr ON cr.cr_ship_mode_sk = sm_cr.sm_ship_mode_sk
+LEFT JOIN customer_demographics cd_cr ON cr.cr_refunded_cdemo_sk = cd_cr.cd_demo_sk
+WHERE i_sr.i_category = ss.i_category
+  AND cd_sr.cd_credit_rating = 'Good'
+GROUP BY GROUPING SETS (
+    (ss.i_category, ss.sm_carrier),
+    (ss.i_category),
+    (ss.sm_carrier)
+)
+HAVING SUM(ss.total_sales) > (
+    SELECT AVG(total_sales) FROM sales_summary
+)
+ORDER BY sum_sales DESC
 LIMIT 100

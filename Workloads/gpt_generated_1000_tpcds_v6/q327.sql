@@ -1,58 +1,46 @@
-/* goal: Identify the top-performing warehouses per call center, enriched with call‑center and household demographics details, applying multiple business filters and ranking the results */
-WITH sales_agg AS (
-    SELECT
-        cs.cs_warehouse_sk,
-        cs.cs_call_center_sk,
-        cs.cs_bill_hdemo_sk,
-        SUM(cs.cs_net_profit)               AS total_profit,
-        SUM(cs.cs_ext_ship_cost)            AS total_ship_cost,
-        COUNT(*)                            AS order_cnt
-    FROM catalog_sales cs
-    WHERE cs.cs_ext_ship_cost > 500
-      AND cs.cs_ext_discount_amt < 2000
-      AND cs.cs_net_paid_inc_tax > 1000
-      AND cs.cs_quantity >= 1
-      AND cs.cs_sold_date_sk BETWEEN 2451545 AND 2451910
-      AND cs.cs_sold_time_sk IS NOT NULL
-    GROUP BY cs.cs_warehouse_sk, cs.cs_call_center_sk, cs.cs_bill_hdemo_sk
+WITH high_return_items AS (
+    SELECT i.i_category AS i_category,
+           SUM(wr.wr_return_amt) AS total_return_amt
+    FROM web_returns wr
+    JOIN item i ON wr.wr_item_sk = i.i_item_sk
+    JOIN customer_demographics cd ON wr.wr_refunded_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_credit_rating = 'Good'
+    GROUP BY i.i_category
+    HAVING SUM(wr.wr_return_amt) > 1000
 )
-SELECT
-    cc.cc_call_center_id,
-    cc.cc_name,
-    w.w_warehouse_id,
-    w.w_city AS warehouse_city,
-    hd.hd_buy_potential,
-    hd.hd_dep_count,
-    sa.total_profit,
-    sa.total_ship_cost,
-    sa.order_cnt,
-    CASE
-        WHEN sa.total_profit > 10000 THEN 'High'
-        WHEN sa.total_profit > 0    THEN 'Medium'
-        ELSE 'Low'
-    END AS profit_category,
-    ROW_NUMBER() OVER (PARTITION BY cc.cc_call_center_sk ORDER BY sa.total_profit DESC) AS warehouse_rank,
-    (
-        SELECT MAX(cs2.cs_ext_ship_cost)
-        FROM catalog_sales cs2
-        WHERE cs2.cs_warehouse_sk = sa.cs_warehouse_sk
-    ) AS max_ship_cost_per_warehouse
-FROM sales_agg sa
-INNER JOIN call_center cc
-        ON sa.cs_call_center_sk = cc.cc_call_center_sk
-INNER JOIN warehouse w
-        ON sa.cs_warehouse_sk = w.w_warehouse_sk
-INNER JOIN household_demographics hd
-        ON sa.cs_bill_hdemo_sk = hd.hd_demo_sk
-WHERE cc.cc_state = 'CA'
-  AND w.w_gmt_offset = -6.00
-  AND hd.hd_buy_potential IN ('1001-5000','501-1000')
-  AND hd.hd_dep_count BETWEEN 1 AND 5
-  AND EXISTS (
+SELECT combined.category,
+       combined.metric_type,
+       combined.amount
+FROM (
+    -- Store sales aggregation
+    SELECT i.i_category AS category,
+           'sales'   AS metric_type,
+           SUM(ss.ss_ext_sales_price) AS amount
+    FROM store_sales ss
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE s.s_market_desc LIKE '%Local%'
+    GROUP BY i.i_category
+    HAVING SUM(ss.ss_ext_sales_price) > 5000
+
+    UNION ALL
+
+    -- Web returns aggregation
+    SELECT i.i_category AS category,
+           'returns'   AS metric_type,
+           SUM(wr.wr_return_amt) AS amount
+    FROM web_returns wr
+    JOIN item i ON wr.wr_item_sk = i.i_item_sk
+    WHERE EXISTS (
         SELECT 1
-        FROM household_demographics hd2
-        WHERE hd2.hd_income_band_sk = 3
-          AND hd2.hd_demo_sk = sa.cs_bill_hdemo_sk
+        FROM customer c
+        JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+        WHERE c.c_customer_sk = wr.wr_refunded_customer_sk
+          AND cd.cd_gender = 'F'
     )
-ORDER BY profit_category, sa.total_profit DESC
+    GROUP BY i.i_category
+    HAVING SUM(wr.wr_return_amt) > 2000
+) AS combined
+WHERE combined.category IN (SELECT i_category FROM high_return_items)
+ORDER BY combined.amount DESC
 LIMIT 100

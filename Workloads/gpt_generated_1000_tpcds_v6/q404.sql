@@ -1,43 +1,33 @@
-WITH per_center_mode AS (
-    SELECT
-        cc.cc_call_center_id,
-        cc.cc_company,
-        cc.cc_county,
-        sm.sm_carrier,
-        sm.sm_contract,
-        SUM(cr.cr_return_amount) AS total_return_amount,
-        COUNT(*) AS return_cnt,
-        AVG(cr.cr_fee) AS avg_fee
-    FROM catalog_returns cr
-    JOIN call_center cc
-        ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    JOIN ship_mode sm
-        ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-    WHERE cc.cc_company IN (2, 4, 5, 6)
-      AND cc.cc_county LIKE '%County'
-      AND sm.sm_carrier IN ('PRIVATECARRIER', 'ORIENTAL', 'AIRBORNE')
-      AND cr.cr_fee BETWEEN 20 AND 80
-    GROUP BY
-        cc.cc_call_center_id,
-        cc.cc_company,
-        cc.cc_county,
-        sm.sm_carrier,
-        sm.sm_contract
+WITH high_loss AS (
+    SELECT r.r_reason_desc,
+           SUM(sr.sr_return_amt_inc_tax) AS total_inc_tax,
+           COUNT(DISTINCT sr.sr_ticket_number) AS distinct_tickets,
+           CASE WHEN SUM(sr.sr_net_loss) > 2000 THEN 'Very High Loss' ELSE 'High Loss' END AS loss_category
+    FROM store_returns sr
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    WHERE sr.sr_net_loss > 300
+    GROUP BY r.r_reason_desc
+),
+low_loss AS (
+    SELECT r.r_reason_desc,
+           SUM(sr.sr_return_amt_inc_tax) AS total_inc_tax,
+           COUNT(DISTINCT sr.sr_ticket_number) AS distinct_tickets,
+           CASE WHEN AVG(sr.sr_return_amt_inc_tax) > 500 THEN 'Expensive Return' ELSE 'Regular Return' END AS loss_category
+    FROM (
+        SELECT DISTINCT sr_reason_sk,
+                        sr_ticket_number,
+                        sr_return_amt_inc_tax,
+                        sr_net_loss
+        FROM store_returns
+        WHERE sr_net_loss < 100
+    ) sr
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY r.r_reason_desc
 )
-SELECT
-    cc_call_center_id,
-    cc_company,
-    cc_county,
-    sm_carrier,
-    SUM(total_return_amount) AS sum_return_amount,
-    SUM(return_cnt) AS total_returns,
-    AVG(avg_fee) AS overall_avg_fee
-FROM per_center_mode
-GROUP BY
-    cc_call_center_id,
-    cc_company,
-    cc_county,
-    sm_carrier
-HAVING SUM(total_return_amount) > 10000
-ORDER BY overall_avg_fee DESC
+SELECT *
+FROM high_loss
+UNION ALL
+SELECT *
+FROM low_loss
+ORDER BY total_inc_tax DESC
 LIMIT 100

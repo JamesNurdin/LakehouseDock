@@ -1,46 +1,70 @@
-WITH cs_w AS (
-    SELECT
-        cs.cs_sold_date_sk,
-        cs.cs_quantity,
-        cs.cs_ext_sales_price,
-        cs.cs_net_profit,
-        cs.cs_promo_sk,
-        cs.cs_warehouse_sk,
-        w.w_warehouse_id,
-        w.w_warehouse_sq_ft,
-        w.w_city
-    FROM catalog_sales cs
-    JOIN warehouse w
-        ON cs.cs_warehouse_sk = w.w_warehouse_sk
-    WHERE w.w_warehouse_sq_ft > 500000
-      AND cs.cs_quantity BETWEEN 1 AND 5
+WITH ss AS (
+   SELECT
+       i.i_item_id AS item_id,
+       i.i_product_name,
+       substring(i.i_product_name, 1, 15) AS prod_prefix,
+       SUM(ss.ss_ext_sales_price) AS sales_amount,
+       COUNT(*) AS sales_cnt,
+       (SELECT avg(i2.i_current_price)
+        FROM item i2
+        WHERE i2.i_category = i.i_category) AS avg_category_price
+   FROM store_sales ss
+   JOIN item i ON ss.ss_item_sk = i.i_item_sk
+   JOIN store s ON ss.ss_store_sk = s.s_store_sk
+   JOIN time_dim t ON ss.ss_sold_time_sk = t.t_time_sk
+   WHERE regexp_like(i.i_product_name, '(?i)blue')
+     AND s.s_state LIKE 'C%'
+     AND t.t_hour BETWEEN 9 AND 17
+   GROUP BY i.i_item_id, i.i_product_name, i.i_category, substring(i.i_product_name, 1, 15), s.s_state
+   HAVING SUM(ss.ss_ext_sales_price) > 500
+),
+ws AS (
+   SELECT
+       i.i_item_id AS item_id,
+       i.i_product_name,
+       substring(i.i_product_name, 1, 15) AS prod_prefix,
+       SUM(ws.ws_ext_sales_price) AS sales_amount,
+       COUNT(*) AS sales_cnt,
+       (SELECT avg(i2.i_current_price)
+        FROM item i2
+        WHERE i2.i_category = i.i_category) AS avg_category_price
+   FROM web_sales ws
+   JOIN item i ON ws.ws_item_sk = i.i_item_sk
+   JOIN time_dim t ON ws.ws_sold_time_sk = t.t_time_sk
+   WHERE regexp_like(i.i_product_name, '(?i)red')
+     AND EXISTS (
+         SELECT 1
+         FROM web_returns wr
+         JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
+         WHERE wr.wr_order_number = ws.ws_order_number
+           AND r.r_reason_desc LIKE '%defect%'
+     )
+     AND t.t_meal_time = 'Dinner'
+   GROUP BY i.i_item_id, i.i_product_name, i.i_category, substring(i.i_product_name, 1, 15)
+   HAVING COUNT(*) >= 3
 )
 SELECT
-    p.p_promo_id,
-    cs_w.w_warehouse_id,
-    cs_w.cs_sold_date_sk,
-    SUM(cs_w.cs_ext_sales_price) AS total_sales,
-    SUM(cs_w.cs_net_profit) AS total_profit,
-    AVG(ss.ss_sales_price) AS avg_store_sales_price,
-    COUNT(DISTINCT ss.ss_ticket_number) AS distinct_tickets,
-    SUM(sr.sr_net_loss) AS total_return_loss
-FROM cs_w
-JOIN promotion p
-    ON cs_w.cs_promo_sk = p.p_promo_sk
-JOIN store_sales ss
-    ON ss.ss_promo_sk = p.p_promo_sk
-JOIN store_returns sr
-    ON sr.sr_item_sk = ss.ss_item_sk
-   AND sr.sr_ticket_number = ss.ss_ticket_number
-WHERE p.p_channel_event = 'N'
-  AND p.p_channel_catalog = 'N'
-  AND p.p_promo_id = 'AAAAAAAAPAAAAAAA'
-  AND ss.ss_sales_price > 20.00
-  AND sr.sr_return_quantity >= 1
-  AND ss.ss_wholesale_cost < (
-        SELECT AVG(cs_ext_sales_price) FROM catalog_sales
-    )
-GROUP BY p.p_promo_id, cs_w.w_warehouse_id, cs_w.cs_sold_date_sk
-HAVING SUM(cs_w.cs_ext_sales_price) > 10000
-ORDER BY total_sales DESC
+   item_id,
+   prod_prefix,
+   sales_amount,
+   sales_cnt,
+   avg_category_price,
+   CASE
+       WHEN sales_amount > avg_category_price * 10 THEN 'High Performer'
+       ELSE 'Normal'
+   END AS performance_tag
+FROM ss
+UNION ALL
+SELECT
+   item_id,
+   prod_prefix,
+   sales_amount,
+   sales_cnt,
+   avg_category_price,
+   CASE
+       WHEN sales_amount > avg_category_price * 10 THEN 'High Performer'
+       ELSE 'Normal'
+   END AS performance_tag
+FROM ws
+ORDER BY sales_amount DESC
 LIMIT 100

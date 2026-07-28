@@ -1,32 +1,36 @@
-WITH sales_agg AS (
+/*
+Goal: Identify top warehouses (by total net profit) whose names contain 'National' or 'Local', have zip codes starting with '64', and have at least one order whose order number matches the pattern ^1[3-9]$ (i.e., 13‑19). The query demonstrates string processing with REGEXP_LIKE, REGEXP_EXTRACT, LIKE, CONCAT, SUBSTRING, and uses a subquery in an EXISTS clause, plus aggregation and ordering.
+*/
+WITH ws_agg AS (
     SELECT
-        sm.sm_carrier,
-        hd.hd_buy_potential,
-        SUM(ws.ws_ext_sales_price) AS total_sales,
-        AVG(ws.ws_quantity) AS avg_qty,
-        COUNT(DISTINCT ws.ws_order_number) AS order_cnt
+        ws.ws_warehouse_sk,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(*) AS order_cnt,
+        AVG(ws.ws_quantity) AS avg_quantity
     FROM web_sales ws
-    JOIN customer c
-        ON ws.ws_bill_customer_sk = c.c_customer_sk
-    JOIN household_demographics hd
-        ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-    JOIN ship_mode sm
-        ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-    WHERE c.c_first_shipto_date_sk = 2451068
-      AND c.c_last_review_date = 2452430
-      AND ws.ws_ext_sales_price > 500
-      AND ws.ws_list_price BETWEEN 50 AND 200
-      AND sm.sm_carrier = 'FEDEX'
-      AND ws.ws_quantity >= 2
-    GROUP BY sm.sm_carrier, hd.hd_buy_potential
+    WHERE ws.ws_ship_mode_sk IN (5, 10, 13)
+    GROUP BY ws.ws_warehouse_sk
 )
 SELECT
-    sm_carrier,
-    hd_buy_potential,
-    total_sales,
-    avg_qty,
-    order_cnt,
-    SUM(total_sales) OVER (ORDER BY total_sales DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_sales
-FROM sales_agg
-ORDER BY total_sales DESC
+    w.w_warehouse_id,
+    w.w_warehouse_name,
+    REGEXP_EXTRACT(w.w_warehouse_name, '(National|Local)', 1) AS matched_name_part,
+    CONCAT(SUBSTRING(w.w_warehouse_name, 1, 5), '_', w.w_city) AS warehouse_label,
+    w.w_zip,
+    ws_agg.total_net_profit,
+    ws_agg.order_cnt,
+    ws_agg.avg_quantity
+FROM warehouse w
+JOIN ws_agg
+    ON w.w_warehouse_sk = ws_agg.ws_warehouse_sk
+WHERE
+    REGEXP_LIKE(w.w_warehouse_name, '(National|Local)')
+    AND w.w_zip LIKE '64%'
+    AND EXISTS (
+        SELECT 1
+        FROM web_sales ws2
+        WHERE ws2.ws_warehouse_sk = w.w_warehouse_sk
+          AND REGEXP_LIKE(CAST(ws2.ws_order_number AS VARCHAR), '^1[3-9]$')
+    )
+ORDER BY ws_agg.total_net_profit DESC
 LIMIT 100

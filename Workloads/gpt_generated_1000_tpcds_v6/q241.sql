@@ -1,84 +1,84 @@
-WITH base AS (
+WITH
+sales_agg AS (
     SELECT
-        d.d_year,
-        d.d_month_seq,
-        cd.cd_gender,
-        cd.cd_education_status,
-        hd.hd_income_band_sk,
-        hd.hd_vehicle_count,
-        wp.wp_char_count,
-        sr.sr_return_amt,
-        sr.sr_net_loss,
-        ws.ws_net_paid_inc_ship_tax,
-        ws.ws_warehouse_sk,
-        ws.ws_order_number
-    FROM store_returns sr
-    JOIN date_dim d
-        ON sr.sr_returned_date_sk = d.d_date_sk
-    JOIN customer_demographics cd
-        ON sr.sr_cdemo_sk = cd.cd_demo_sk
-    JOIN household_demographics hd
-        ON sr.sr_hdemo_sk = hd.hd_demo_sk
-    JOIN web_sales ws
-        ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-        AND ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-    JOIN web_page wp
-        ON ws.ws_web_page_sk = wp.wp_web_page_sk
-    WHERE d.d_year = 2001
-      AND d.d_month_seq BETWEEN 1200 AND 1220
-      AND cd.cd_gender = 'F'
-      AND cd.cd_education_status IN ('College', 'Graduate')
-      AND hd.hd_vehicle_count >= 1
-      AND wp.wp_char_count > 2000
+        w.w_warehouse_id,
+        c.c_customer_id,
+        SUM(cs.cs_net_paid_inc_tax) AS total_catalog_net,
+        SUM(ss.ss_net_paid) AS total_store_net,
+        CASE
+            WHEN SUM(cs.cs_net_paid_inc_tax) > 5000 THEN 'High'
+            WHEN SUM(cs.cs_net_paid_inc_tax) > 2000 THEN 'Medium'
+            ELSE 'Low'
+        END AS catalog_spend_category,
+        CAST(NULL AS decimal(7,2)) AS total_return_loss,
+        CAST(NULL AS varchar) AS return_loss_category
+    FROM catalog_sales cs
+    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN store_sales ss ON ss.ss_customer_sk = c.c_customer_sk
+    WHERE w.w_zip = '36098'
+      AND cs.cs_net_paid_inc_tax > 1000
+      AND ca.ca_state = 'CA'
+      AND ss.ss_ext_tax > 10
+    GROUP BY w.w_warehouse_id, c.c_customer_id
+    HAVING SUM(cs.cs_net_paid_inc_tax) > 1200
 ),
-agg AS (
+returns_agg AS (
     SELECT
-        d_year,
-        d_month_seq,
-        cd_gender,
-        cd_education_status,
-        hd_income_band_sk,
-        hd_vehicle_count,
-        wp_char_count,
-        ws_warehouse_sk,
-        SUM(sr_return_amt) AS total_return_amount,
-        SUM(sr_net_loss) AS total_net_loss,
-        SUM(ws_net_paid_inc_ship_tax) AS total_sales,
-        COUNT(DISTINCT ws_order_number) AS distinct_orders
-    FROM base
-    GROUP BY
-        d_year,
-        d_month_seq,
-        cd_gender,
-        cd_education_status,
-        hd_income_band_sk,
-        hd_vehicle_count,
-        wp_char_count,
-        ws_warehouse_sk
+        w.w_warehouse_id,
+        c.c_customer_id,
+        CAST(NULL AS decimal(7,2)) AS total_catalog_net,
+        CAST(NULL AS decimal(7,2)) AS total_store_net,
+        CAST(NULL AS varchar) AS catalog_spend_category,
+        SUM(cr.cr_net_loss) AS total_return_loss,
+        CASE
+            WHEN SUM(cr.cr_net_loss) > 2000 THEN 'Lossy'
+            ELSE 'Minor'
+        END AS return_loss_category
+    FROM catalog_returns cr
+    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    JOIN customer c ON cr.cr_refunded_customer_sk = c.c_customer_sk
+    JOIN customer_address ca ON cr.cr_refunded_addr_sk = ca.ca_address_sk
+    WHERE w.w_zip = '36098'
+      AND cr.cr_return_quantity > 0
+      AND ca.ca_state = 'CA'
+    GROUP BY w.w_warehouse_id, c.c_customer_id
+    HAVING SUM(cr.cr_net_loss) > 100
+),
+combined AS (
+    SELECT * FROM sales_agg
+    UNION ALL
+    SELECT * FROM returns_agg
+),
+ranked AS (
+    SELECT
+        w_warehouse_id,
+        c_customer_id,
+        total_catalog_net,
+        total_store_net,
+        catalog_spend_category,
+        total_return_loss,
+        return_loss_category,
+        (COALESCE(total_catalog_net, 0) + COALESCE(total_store_net, 0) - COALESCE(total_return_loss, 0)) AS net_amount,
+        ROW_NUMBER() OVER (
+            PARTITION BY w_warehouse_id
+            ORDER BY (COALESCE(total_catalog_net, 0) + COALESCE(total_store_net, 0) - COALESCE(total_return_loss, 0)) DESC
+        ) AS revenue_rank
+    FROM combined
 )
 SELECT
-    a.d_year,
-    a.d_month_seq,
-    a.cd_gender,
-    a.cd_education_status,
-    a.hd_income_band_sk,
-    a.hd_vehicle_count,
-    a.wp_char_count,
-    a.total_return_amount,
-    a.total_net_loss,
-    a.total_sales,
-    a.distinct_orders,
-    RANK() OVER (PARTITION BY a.cd_gender ORDER BY a.total_return_amount DESC) AS gender_return_rank,
-    DENSE_RANK() OVER (ORDER BY a.total_sales DESC) AS sales_dense_rank,
-    ROW_NUMBER() OVER (ORDER BY a.total_sales DESC) AS overall_row_num,
-    CASE
-        WHEN a.hd_vehicle_count > 2 THEN 'HighVehicle'
-        WHEN a.hd_vehicle_count = 2 THEN 'MediumVehicle'
-        ELSE 'LowVehicle'
-    END AS vehicle_category,
-    (SELECT AVG(ws2.ws_net_profit)
-     FROM web_sales ws2
-     WHERE ws2.ws_warehouse_sk = a.ws_warehouse_sk) AS avg_warehouse_profit
-FROM agg a
-ORDER BY a.total_sales DESC
+    w_warehouse_id,
+    c_customer_id,
+    total_catalog_net,
+    total_store_net,
+    catalog_spend_category,
+    total_return_loss,
+    return_loss_category,
+    net_amount,
+    revenue_rank
+FROM ranked
+WHERE net_amount > 1500
+  AND revenue_rank <= 10
+ORDER BY net_amount DESC
 LIMIT 100

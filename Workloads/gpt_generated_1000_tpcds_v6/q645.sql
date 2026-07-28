@@ -1,57 +1,85 @@
-/*
-Goal: Identify the top customers by total shipping cost across catalog and web sales, categorizing their catalog shipping cost, and ranking them using window functions while applying multiple business filters.
-*/
-WITH cs_agg AS (
-    SELECT
-        cs_bill_customer_sk AS customer_sk,
-        SUM(cs_ext_ship_cost) AS sum_ship_cost,
-        SUM(cs_ext_list_price) AS sum_list_price,
-        COUNT(*) AS cs_order_cnt,
-        CASE WHEN SUM(cs_ext_ship_cost) > 1000 THEN 'High' ELSE 'Low' END AS ship_cost_category
-    FROM catalog_sales
-    WHERE cs_ext_ship_cost > 100                         -- predicate 1
-      AND cs_ext_list_price BETWEEN 500 AND 10000       -- predicate 2
-      AND cs_quantity > 1                               -- predicate 3
-      AND cs_sold_date_sk BETWEEN 2450000 AND 2455000  -- predicate 4 (surrogate date key)
-      AND cs_net_profit > 0                             -- predicate 5
-    GROUP BY cs_bill_customer_sk
-),
-ws_agg AS (
-    SELECT
-        ws_bill_customer_sk AS customer_sk,
-        ws_web_page_sk,
-        SUM(ws_ext_ship_cost) AS ws_sum_ship_cost,
-        SUM(ws_net_profit) AS ws_sum_profit,
-        COUNT(*) AS ws_order_cnt
-    FROM web_sales
-    WHERE ws_ext_ship_cost > 100                         -- predicate 6
-      AND ws_ext_list_price < 8000                       -- predicate 7
-      AND ws_quantity > 1                                -- predicate 8
-      AND ws_sold_date_sk BETWEEN 2450000 AND 2455000   -- predicate 9 (surrogate date key)
-      AND ws_net_profit > 0                              -- predicate 10
-    GROUP BY ws_bill_customer_sk, ws_web_page_sk
+WITH joined_data AS (
+  SELECT
+    s.s_store_sk,
+    s.s_store_name,
+    s.s_state,
+    ss.ss_sold_date_sk,
+    i.i_item_sk,
+    i.i_item_id,
+    i.i_product_name,
+    i.i_current_price,
+    inv.inv_quantity_on_hand,
+    ss.ss_net_profit          AS store_net_profit,
+    ws.ws_net_profit          AS web_net_profit,
+    sr.sr_net_loss            AS store_return_loss,
+    wr.wr_net_loss            AS web_return_loss
+  FROM store_sales ss
+  JOIN time_dim t_ss
+    ON ss.ss_sold_time_sk = t_ss.t_time_sk
+  JOIN item i
+    ON ss.ss_item_sk = i.i_item_sk
+  JOIN customer_demographics cd_ss
+    ON ss.ss_cdemo_sk = cd_ss.cd_demo_sk
+  JOIN household_demographics hd_ss
+    ON ss.ss_hdemo_sk = hd_ss.hd_demo_sk
+  JOIN store s
+    ON ss.ss_store_sk = s.s_store_sk
+  JOIN store_returns sr
+    ON ss.ss_ticket_number = sr.sr_ticket_number
+   AND ss.ss_item_sk = sr.sr_item_sk
+  JOIN time_dim t_sr
+    ON sr.sr_return_time_sk = t_sr.t_time_sk
+  JOIN reason r_sr
+    ON sr.sr_reason_sk = r_sr.r_reason_sk
+  JOIN customer_demographics cd_sr
+    ON sr.sr_cdemo_sk = cd_sr.cd_demo_sk
+  JOIN household_demographics hd_sr
+    ON sr.sr_hdemo_sk = hd_sr.hd_demo_sk
+  JOIN web_sales ws
+    ON ws.ws_item_sk = i.i_item_sk
+  JOIN time_dim t_ws
+    ON ws.ws_sold_time_sk = t_ws.t_time_sk
+  JOIN ship_mode sm
+    ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+  JOIN web_page wp
+    ON ws.ws_web_page_sk = wp.wp_web_page_sk
+  JOIN web_returns wr
+    ON wr.wr_order_number = ws.ws_order_number
+   AND wr.wr_item_sk = ws.ws_item_sk
+  JOIN time_dim t_wr
+    ON wr.wr_returned_time_sk = t_wr.t_time_sk
+  JOIN reason r_wr
+    ON wr.wr_reason_sk = r_wr.r_reason_sk
+  JOIN customer_demographics cd_wr_refunded
+    ON wr.wr_refunded_cdemo_sk = cd_wr_refunded.cd_demo_sk
+  JOIN household_demographics hd_wr_refunded
+    ON wr.wr_refunded_hdemo_sk = hd_wr_refunded.hd_demo_sk
+  JOIN inventory inv
+    ON inv.inv_item_sk = i.i_item_sk
+  WHERE t_ss.t_meal_time = 'lunch'
+    AND i.i_current_price > 50
+    AND s.s_state = 'CA'
+    AND sm.sm_type = 'AIR'
 )
 SELECT
-    c.c_customer_sk,
-    c.c_first_name,
-    c.c_last_name,
-    cs.sum_ship_cost,
-    cs.ship_cost_category,
-    ws.ws_sum_ship_cost,
-    ws.ws_sum_profit,
-    wp.wp_image_count,
-    wp.wp_max_ad_count,
-    ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY cs.sum_ship_cost DESC) AS rn_ship_cost,
-    RANK() OVER (ORDER BY (cs.sum_ship_cost + ws.ws_sum_ship_cost) DESC) AS total_ship_cost_rank,
-    (cs.sum_ship_cost + ws.ws_sum_ship_cost) AS total_ship_cost
-FROM cs_agg cs
-JOIN customer c ON cs.customer_sk = c.c_customer_sk
-JOIN ws_agg ws ON ws.customer_sk = c.c_customer_sk
-JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
-WHERE c.c_birth_year BETWEEN 1950 AND 1990                     -- predicate 11
-  AND c.c_current_hdemo_sk IN (2821, 6121, 2373)                -- predicate 12
-  AND wp.wp_image_count >= 2                                   -- predicate 13
-  AND wp.wp_rec_end_date >= DATE '2000-01-01'                  -- predicate 14 (date column)
-  AND wp.wp_max_ad_count <= 3                                 -- predicate 15
-ORDER BY total_ship_cost DESC
+  s_store_name,
+  s_state,
+  ss_sold_date_sk,
+  i_item_id,
+  i_product_name,
+  SUM(store_net_profit)                     AS total_store_profit,
+  SUM(web_net_profit)                       AS total_web_profit,
+  SUM(store_return_loss)                    AS total_store_return_loss,
+  SUM(web_return_loss)                      AS total_web_return_loss,
+  SUM(inv_quantity_on_hand)                 AS total_inventory_qty,
+  (SUM(store_net_profit) + SUM(web_net_profit) - SUM(store_return_loss) - SUM(web_return_loss)) AS total_net_profit,
+  RANK() OVER (PARTITION BY s_store_name ORDER BY (SUM(store_net_profit) + SUM(web_net_profit) - SUM(store_return_loss) - SUM(web_return_loss)) DESC) AS profit_rank_per_store
+FROM joined_data
+GROUP BY
+  s_store_name,
+  s_state,
+  ss_sold_date_sk,
+  i_item_id,
+  i_product_name
+ORDER BY profit_rank_per_store, total_net_profit DESC
 LIMIT 100

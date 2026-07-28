@@ -1,42 +1,29 @@
-WITH filtered AS (
+WITH filtered_sales AS (
     SELECT
-        cr.cr_returned_date_sk,
-        cr.cr_return_amount,
-        cr.cr_return_quantity,
-        cr.cr_fee,
-        cr.cr_net_loss,
-        cr.cr_warehouse_sk,
-        cr.cr_reason_sk,
-        cr.cr_order_number,
-        r.r_reason_desc,
-        w.w_warehouse_name,
-        w.w_state,
-        CASE WHEN cr.cr_net_loss > 100 THEN 'High' ELSE 'Low' END AS loss_category
-    FROM catalog_returns cr
-    JOIN reason r
-        ON cr.cr_reason_sk = r.r_reason_sk
-    LEFT JOIN warehouse w
-        ON cr.cr_warehouse_sk = w.w_warehouse_sk
-    WHERE cr.cr_return_amount > 50
-      AND cr.cr_return_quantity >= 2
-      AND cr.cr_fee BETWEEN 20 AND 80
-      AND r.r_reason_id LIKE 'AAAAAAA%'
-      AND (w.w_state = 'CA' OR w.w_state IS NULL)
+        ss.ss_net_paid,
+        s.s_store_id,
+        s.s_store_name,
+        d.d_year,
+        d.d_month_seq,
+        i.i_product_name,
+        p.p_promo_name
+    FROM store_sales ss
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    WHERE regexp_like(i.i_product_name, '^[A-Za-z]+\\s+.*')
+      AND p.p_promo_name LIKE '%Discount%'
+      AND d.d_year = 2002
 )
 SELECT
-    loss_category,
-    r_reason_desc,
-    COALESCE(w_warehouse_name, 'UNKNOWN') AS warehouse_name,
-    SUM(cr_return_amount) OVER (
-        PARTITION BY loss_category
-        ORDER BY cr_return_amount DESC
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS running_total_amount,
-    ROW_NUMBER() OVER (
-        PARTITION BY loss_category
-        ORDER BY cr_return_amount DESC
-    ) AS rn,
-    COUNT(*) OVER (PARTITION BY loss_category) AS cnt_per_category
-FROM filtered
-ORDER BY loss_category, rn
+    s_store_id,
+    s_store_name,
+    CONCAT(CAST(d_year AS varchar), '-', LPAD(CAST(d_month_seq AS varchar), 2, '0')) AS year_month,
+    COUNT(*) AS sales_transactions,
+    SUM(ss_net_paid) AS total_net_paid,
+    REGEXP_EXTRACT(MIN(i_product_name), '[A-Za-z]+') AS first_word_product
+FROM filtered_sales
+GROUP BY s_store_id, s_store_name, d_year, d_month_seq
+ORDER BY total_net_paid DESC
 LIMIT 100

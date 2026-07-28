@@ -1,49 +1,48 @@
-WITH base_data AS (
-  SELECT
-    cp.cp_department AS cp_department,
-    d.d_year AS d_year,
-    hd.hd_buy_potential AS hd_buy_potential,
-    hd.hd_vehicle_count,
-    c.c_customer_id,
-    p.p_cost,
-    wp.wp_char_count,
-    cp.cp_type,
-    p.p_discount_active
-  FROM catalog_page cp
-  JOIN date_dim d
-    ON cp.cp_start_date_sk = d.d_date_sk
-  JOIN promotion p
-    ON p.p_start_date_sk = d.d_date_sk
-  JOIN web_page wp
-    ON wp.wp_creation_date_sk = d.d_date_sk
-  JOIN customer c
-    ON wp.wp_customer_sk = c.c_customer_sk
-  JOIN household_demographics hd
-    ON c.c_current_hdemo_sk = hd.hd_demo_sk
-  WHERE d.d_year = 2001
-    AND cp.cp_type = 'monthly'
-    AND hd.hd_vehicle_count >= 2
-    AND p.p_discount_active = 'Y'
-),
-agg_data AS (
-  SELECT
-    cp_department,
-    d_year,
-    hd_buy_potential,
-    COUNT(DISTINCT c_customer_id) AS unique_customers,
-    SUM(p_cost) AS total_promo_cost,
-    AVG(wp_char_count) AS avg_char_count
-  FROM base_data
-  GROUP BY cp_department, d_year, hd_buy_potential
-  HAVING COUNT(DISTINCT c_customer_id) > 5
+WITH expensive_items AS (
+    SELECT i_item_sk,
+           i_category,
+           i_current_price
+    FROM   item
+    WHERE  i_current_price > 150.00
 )
 SELECT
-  cp_department,
-  d_year,
-  hd_buy_potential,
-  unique_customers,
-  total_promo_cost,
-  avg_char_count,
-  ROW_NUMBER() OVER (PARTITION BY cp_department ORDER BY total_promo_cost DESC) AS dept_rank
-FROM agg_data
-ORDER BY total_promo_cost DESC, cp_department
+    src,
+    CASE WHEN i_category IS NULL THEN 'All Categories' ELSE i_category END AS category,
+    SUM(amount)                                 AS total_amount,
+    AVG(price)                                  AS avg_price,
+    (SELECT AVG(i_current_price) FROM item)    AS overall_avg_price
+FROM (
+    SELECT
+        'Return' AS src,
+        i.i_category,
+        cr.cr_return_amount   AS amount,
+        i.i_current_price     AS price
+    FROM   catalog_returns cr
+    JOIN   item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN   reason r ON cr.cr_reason_sk = r.r_reason_sk
+    JOIN   catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    WHERE  r.r_reason_desc LIKE '%size%'
+      AND  cp.cp_type = 'monthly'
+      AND  cr.cr_return_amount > 50
+
+    UNION ALL
+
+    SELECT
+        'Sale' AS src,
+        i.i_category,
+        ws.ws_ext_sales_price AS amount,
+        i.i_current_price     AS price
+    FROM   web_sales ws
+    JOIN   expensive_items ei ON ws.ws_item_sk = ei.i_item_sk
+    JOIN   item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN   ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE  sm.sm_type = 'AIR'
+      AND  ws.ws_ext_sales_price > 200
+) u
+GROUP BY GROUPING SETS (
+    (src, i_category),
+    (src),
+    ()
+)
+ORDER BY src, category
+LIMIT 100

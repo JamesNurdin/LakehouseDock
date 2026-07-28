@@ -1,75 +1,55 @@
 WITH sales_agg AS (
-  SELECT
-    cc.cc_call_center_id,
-    cc.cc_name,
-    w.w_warehouse_id,
-    w.w_warehouse_sk,
-    w.w_city,
-    d_date.d_year AS year,
-    cd.cd_gender,
-    SUM(ss.ss_ext_sales_price) AS store_sales_total,
-    SUM(ws.ws_ext_sales_price) AS web_sales_total,
-    SUM(ss.ss_net_profit) AS store_profit,
-    SUM(ws.ws_net_profit) AS web_profit,
-    COUNT(DISTINCT ss.ss_ticket_number) AS store_txn_cnt,
-    COUNT(DISTINCT ws.ws_order_number) AS web_order_cnt,
-    CASE
-      WHEN SUM(ss.ss_ext_sales_price) > 100000 THEN 'HIGH'
-      WHEN SUM(ss.ss_ext_sales_price) > 50000 THEN 'MEDIUM'
-      ELSE 'LOW'
-    END AS sales_category
-  FROM call_center cc
-  INNER JOIN date_dim d_date
-    ON cc.cc_closed_date_sk = d_date.d_date_sk
-  INNER JOIN store_sales ss
-    ON ss.ss_sold_date_sk = d_date.d_date_sk
-  INNER JOIN time_dim t_time
-    ON ss.ss_sold_time_sk = t_time.t_time_sk
-  INNER JOIN customer_demographics cd
-    ON ss.ss_cdemo_sk = cd.cd_demo_sk
-  INNER JOIN web_sales ws
-    ON ws.ws_sold_date_sk = d_date.d_date_sk
-   AND ws.ws_sold_time_sk = t_time.t_time_sk
-   AND ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-  INNER JOIN warehouse w
-    ON ws.ws_warehouse_sk = w.w_warehouse_sk
-  WHERE
-    d_date.d_year = 2001
-    AND cd.cd_gender = 'M'
-    AND w.w_city IN ('Ash Laurel', 'Miller Broadway')
-    AND t_time.t_hour BETWEEN 9 AND 17
-    AND ss.ss_ext_sales_price > 20
-    AND cc.cc_state = 'CA'
-    AND EXISTS (
-      SELECT 1 FROM warehouse w2
-      WHERE w2.w_state = cc.cc_state
-        AND w2.w_city = 'Ash Laurel'
-    )
-  GROUP BY
-    cc.cc_call_center_id,
-    cc.cc_name,
-    w.w_warehouse_id,
-    w.w_warehouse_sk,
-    w.w_city,
-    d_date.d_year,
-    cd.cd_gender
+    SELECT
+        cc.cc_call_center_sk,
+        cc.cc_name,
+        i.i_category,
+        t.t_hour,
+        SUM(cs.cs_net_paid) AS sum_cs_net_paid,
+        SUM(ss.ss_net_paid) AS sum_ss_net_paid,
+        SUM(COALESCE(cr.cr_return_amount, 0)) AS sum_return_amount,
+        COUNT(DISTINCT cs.cs_order_number) AS order_cnt,
+        COUNT(DISTINCT cr.cr_return_quantity) AS return_cnt,
+        CASE WHEN SUM(cs.cs_net_paid) > 0 THEN SUM(cr.cr_return_amount) / SUM(cs.cs_net_paid) ELSE 0 END AS return_rate,
+        ROW_NUMBER() OVER (PARTITION BY cc.cc_name ORDER BY SUM(cs.cs_net_paid) DESC) AS rn
+    FROM catalog_sales cs
+    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN time_dim t ON cs.cs_sold_time_sk = t.t_time_sk
+    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    LEFT JOIN store_sales ss ON ss.ss_item_sk = i.i_item_sk
+        AND ss.ss_sold_time_sk = t.t_time_sk
+    LEFT JOIN catalog_returns cr ON cr.cr_order_number = cs.cs_order_number
+        AND cr.cr_item_sk = i.i_item_sk
+    LEFT JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+    LEFT JOIN web_page wp ON wp.wp_customer_sk = c.c_customer_sk
+    LEFT JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk
+    WHERE
+        cc.cc_state = 'CA'
+        AND i.i_current_price > 100
+        AND c.c_preferred_cust_flag = 'Y'
+        AND hd.hd_vehicle_count >= 2
+        AND ib.ib_lower_bound >= 50000
+        AND r.r_reason_desc LIKE '%color%'
+        AND wp.wp_image_count >= 3
+        AND inv.inv_quantity_on_hand > 0
+        AND t.t_hour BETWEEN 9 AND 17
+    GROUP BY
+        cc.cc_call_center_sk,
+        cc.cc_name,
+        i.i_category,
+        t.t_hour
 )
 SELECT
-  cc_call_center_id,
-  cc_name,
-  w_warehouse_id,
-  w_city,
-  year,
-  cd_gender,
-  store_sales_total,
-  web_sales_total,
-  (store_sales_total + web_sales_total) AS total_sales,
-  sales_category,
-  ROW_NUMBER() OVER (PARTITION BY cc_call_center_id ORDER BY (store_sales_total + web_sales_total) DESC) AS rn,
-  (SELECT AVG(ws2.ws_net_paid)
-     FROM web_sales ws2
-    WHERE ws2.ws_warehouse_sk = sales_agg.w_warehouse_sk) AS avg_warehouse_net_paid
+    cc_name,
+    AVG(return_rate) AS avg_return_rate,
+    SUM(sum_cs_net_paid) AS total_cs_net_paid,
+    SUM(sum_ss_net_paid) AS total_ss_net_paid,
+    COUNT(*) AS category_hour_cnt
 FROM sales_agg
-WHERE (store_sales_total + web_sales_total) > 50000
-ORDER BY total_sales DESC
+WHERE rn = 1
+GROUP BY cc_name
+ORDER BY avg_return_rate DESC
 LIMIT 100

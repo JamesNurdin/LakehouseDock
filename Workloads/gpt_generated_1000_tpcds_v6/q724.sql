@@ -1,62 +1,46 @@
-/* goal: Analyze store return amounts by income band and time shift, extracting numeric ranges from the household buy‑potential field, filtering time IDs with a LIKE pattern, classifying total returns with CASE, and showing a running total per hour */
-WITH filtered_returns AS (
+WITH store_metrics AS (
     SELECT
-        sr.sr_return_amt,
-        sr.sr_return_quantity,
-        sr.sr_return_tax,
-        sr.sr_net_loss,
-        sr.sr_return_time_sk,
-        sr.sr_hdemo_sk,
-        hd.hd_income_band_sk,
-        hd.hd_buy_potential,
-        ib.ib_income_band_sk,
-        td.t_time_id,
-        td.t_shift,
-        td.t_hour,
-        -- extract the lower bound of the buy‑potential range (e.g., "5001-10000" -> 5001)
-        CAST(regexp_extract(hd.hd_buy_potential, '^([0-9]+)-', 1) AS integer) AS buy_potential_low,
-        -- extract the upper bound of the buy‑potential range (e.g., "5001-10000" -> 10000)
-        CAST(regexp_extract(hd.hd_buy_potential, '-([0-9]+)$', 1) AS integer) AS buy_potential_high
-    FROM store_returns sr
-    JOIN household_demographics hd
-        ON sr.sr_hdemo_sk = hd.hd_demo_sk
-    JOIN income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    JOIN time_dim td
-        ON sr.sr_return_time_sk = td.t_time_sk
-    WHERE td.t_time_id LIKE 'AAAAAAA%AAAAAAA'                     -- pattern match on the time identifier
-      AND regexp_like(hd.hd_buy_potential, '^[0-9]+-[0-9]+$')      -- keep only numeric ranges
-      AND CAST(regexp_extract(hd.hd_buy_potential, '^([0-9]+)-', 1) AS integer) >= 5000
-)
-,
-aggregated AS (
+        i.i_item_id AS item_id,
+        i.i_product_name AS product_name,
+        'StoreNetProfit' AS metric_name,
+        SUM(ss.ss_net_profit) AS metric_value,
+        DATE_FORMAT(d.d_date, '%Y') AS year
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE s.s_state = 'CA'
+      AND d.d_date BETWEEN DATE '2002-01-01' AND DATE '2002-12-31'
+    GROUP BY i.i_item_id, i.i_product_name, DATE_FORMAT(d.d_date, '%Y')
+),
+catalog_metrics AS (
     SELECT
-        ib_income_band_sk,
-        CONCAT('Band_', CAST(ib_income_band_sk AS varchar)) AS income_band_label,
-        t_shift,
-        t_hour,
-        COUNT(*) AS returns_count,
-        SUM(sr_return_amt) AS total_return_amt,
-        AVG(sr_return_amt) AS avg_return_amt,
-        CASE
-            WHEN SUM(sr_return_amt) > 10000 THEN 'High'
-            ELSE 'Medium'
-        END AS return_level
-    FROM filtered_returns
-    GROUP BY ib_income_band_sk, t_shift, t_hour
+        i.i_item_id AS item_id,
+        i.i_product_name AS product_name,
+        'CatalogSales' AS metric_name,
+        SUM(cs.cs_ext_sales_price) AS metric_value,
+        DATE_FORMAT(d.d_date, '%Y') AS year
+    FROM catalog_sales cs
+    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    WHERE cc.cc_state = 'TX'
+      AND d.d_date BETWEEN DATE '2002-01-01' AND DATE '2002-12-31'
+    GROUP BY i.i_item_id, i.i_product_name, DATE_FORMAT(d.d_date, '%Y')
+),
+combined AS (
+    SELECT * FROM store_metrics
+    UNION ALL
+    SELECT * FROM catalog_metrics
 )
 SELECT
-    ib_income_band_sk,
-    income_band_label,
-    t_shift,
-    t_hour,
-    returns_count,
-    total_return_amt,
-    avg_return_amt,
-    return_level,
-    -- running total of return amount per income band ordered by hour
-    SUM(total_return_amt) OVER (PARTITION BY ib_income_band_sk ORDER BY t_hour
-                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_return_by_hour
-FROM aggregated
-ORDER BY total_return_amt DESC
+    c.item_id,
+    c.product_name,
+    c.metric_name,
+    c.metric_value,
+    c.year,
+    (SELECT AVG(metric_value) FROM combined WHERE year = c.year) AS avg_metric_value_year
+FROM combined c
+WHERE c.metric_value > (SELECT AVG(metric_value) FROM combined)
+ORDER BY c.year DESC, c.metric_value DESC
 LIMIT 100

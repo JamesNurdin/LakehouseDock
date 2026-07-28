@@ -1,57 +1,53 @@
-WITH bill_sales AS (
-   SELECT
-       c.c_customer_id,
-       CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
-       regexp_extract(c.c_email_address, '@([^@]+)$', 1) AS email_domain,
-       substring(c.c_last_name, 1, 3) AS last_name_prefix,
-       SUM(cs.cs_net_paid) AS total_amount,
-       SUM(cs.cs_quantity) AS total_quantity
-   FROM catalog_sales cs
-   JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
-   JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
-   JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
-   WHERE regexp_like(c.c_email_address, '@example\\.com$')
-     AND c.c_first_name LIKE 'J%'
-     AND ib.ib_upper_bound BETWEEN 50000 AND 100000
-     AND cs.cs_net_paid > (
-         SELECT avg(cs2.cs_net_paid)
-         FROM catalog_sales cs2
-         JOIN customer c2 ON cs2.cs_bill_customer_sk = c2.c_customer_sk
-         JOIN household_demographics hd2 ON c2.c_current_hdemo_sk = hd2.hd_demo_sk
-         JOIN income_band ib2 ON hd2.hd_income_band_sk = ib2.ib_income_band_sk
-         WHERE ib2.ib_upper_bound BETWEEN 50000 AND 100000
-     )
-   GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name, c.c_email_address
-),
-ship_sales AS (
-   SELECT
-       c.c_customer_id,
-       CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
-       regexp_extract(c.c_email_address, '@([^@]+)$', 1) AS email_domain,
-       substring(c.c_last_name, 1, 3) AS last_name_prefix,
-       SUM(cs.cs_net_paid) AS total_amount,
-       SUM(cs.cs_quantity) AS total_quantity
-   FROM catalog_sales cs
-   JOIN customer c ON cs.cs_ship_customer_sk = c.c_customer_sk
-   JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
-   JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
-   WHERE cs.cs_quantity > 5
-     AND EXISTS (
-         SELECT 1
-         FROM catalog_sales cs3
-         WHERE cs3.cs_bill_customer_sk = c.c_customer_sk
-           AND cs3.cs_quantity > 10
-           AND cs3.cs_net_paid > 1000
-     )
-     AND ib.ib_lower_bound >= 20000
-   GROUP BY c.c_customer_id, c.c_first_name, c.c_last_name, c.c_email_address
-   HAVING SUM(cs.cs_quantity) > 100
+WITH sales_item AS (
+    SELECT
+        cs.cs_sold_date_sk,
+        cs.cs_call_center_sk,
+        cs.cs_item_sk,
+        cs.cs_catalog_page_sk,
+        cs.cs_quantity,
+        cs.cs_net_paid,
+        cs.cs_net_profit,
+        i.i_manager_id,
+        i.i_container,
+        i.i_wholesale_cost,
+        cc.cc_state,
+        cc.cc_county,
+        cc.cc_open_date_sk
+    FROM catalog_sales cs
+    JOIN call_center cc
+        ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN item i
+        ON cs.cs_item_sk = i.i_item_sk
+    WHERE cc.cc_state = 'CA'
+      AND cc.cc_county = 'Barrow County'
+      AND i.i_manager_id = 34
+      AND i.i_container = 'Unknown'
+      AND i.i_wholesale_cost > 1.0
+      AND cs.cs_quantity >= 5
+      AND cs.cs_sold_date_sk BETWEEN 2450000 AND 2450100
 )
-SELECT *
-FROM (
-   SELECT * FROM bill_sales
-   UNION ALL
-   SELECT * FROM ship_sales
-) AS combined
-ORDER BY total_amount DESC
+SELECT
+    si.cc_state,
+    si.cc_county,
+    si.i_manager_id,
+    COUNT(*) AS order_count,
+    SUM(si.cs_net_paid) AS total_net_paid,
+    AVG(si.cs_net_profit) AS avg_net_profit,
+    MIN(si.cs_net_paid) AS min_net_paid,
+    MAX(si.cs_net_paid) AS max_net_paid
+FROM sales_item si
+WHERE EXISTS (
+        SELECT 1
+        FROM catalog_page cp
+        WHERE cp.cp_catalog_page_sk = si.cs_catalog_page_sk
+          AND cp.cp_department = 'Electronics'
+    )
+  AND NOT EXISTS (
+        SELECT 1
+        FROM catalog_sales cs_neg
+        WHERE cs_neg.cs_item_sk = si.cs_item_sk
+          AND cs_neg.cs_net_profit < 0
+    )
+GROUP BY si.cc_state, si.cc_county, si.i_manager_id
+ORDER BY total_net_paid DESC
 LIMIT 100

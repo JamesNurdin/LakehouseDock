@@ -1,38 +1,66 @@
-WITH filtered_sales AS (
+WITH store_part AS (
     SELECT
-        cs.cs_net_profit,
-        d.d_year,
-        c.c_email_address,
-        ca.ca_state,
-        i.i_category,
-        i.i_item_desc,
-        CASE
-            WHEN cs.cs_net_profit > 1000 THEN 'High'
-            ELSE 'Low'
-        END AS profit_level,
-        SUBSTRING(c.c_email_address, 1, POSITION('@' IN c.c_email_address) - 1) AS email_user
-    FROM catalog_sales cs
-    JOIN date_dim d
-        ON cs.cs_sold_date_sk = d.d_date_sk
-    JOIN customer c
-        ON cs.cs_bill_customer_sk = c.c_customer_sk
-    JOIN customer_address ca
-        ON cs.cs_bill_addr_sk = ca.ca_address_sk
-    JOIN item i
-        ON cs.cs_item_sk = i.i_item_sk
-    WHERE d.d_year = 2001
-      AND regexp_like(c.c_email_address, '\\.com$')
-      AND regexp_like(i.i_item_desc, '(?i)premium|deluxe')
-      AND i.i_item_desc LIKE '%Size%'
+        d1.d_year,
+        p.p_promo_name,
+        SUM(sr.sr_return_amt) AS total_store_return_amt,
+        COUNT(*) AS store_return_cnt,
+        CASE WHEN p.p_discount_active = 'Y' THEN 'Active' ELSE 'Inactive' END AS promo_status
+    FROM store_returns sr
+    JOIN date_dim d1 ON sr.sr_returned_date_sk = d1.d_date_sk
+    JOIN promotion p ON p.p_start_date_sk = d1.d_date_sk
+    JOIN catalog_page cp ON cp.cp_start_date_sk = d1.d_date_sk
+    JOIN web_site ws ON ws.web_open_date_sk = d1.d_date_sk
+    JOIN web_page wp ON wp.wp_creation_date_sk = d1.d_date_sk
+    WHERE d1.d_year = 2000
+      AND p.p_promo_name = 'Promotion A'
+      AND ws.web_manager = 'Herbert Hawes'
+    GROUP BY d1.d_year,
+             p.p_promo_name,
+             CASE WHEN p.p_discount_active = 'Y' THEN 'Active' ELSE 'Inactive' END
+),
+web_part AS (
+    SELECT
+        d2.d_year,
+        p2.p_promo_name,
+        SUM(wr.wr_return_amt) AS total_web_return_amt,
+        COUNT(*) AS web_return_cnt,
+        CASE WHEN p2.p_discount_active = 'Y' THEN 'Active' ELSE 'Inactive' END AS promo_status
+    FROM web_returns wr
+    JOIN date_dim d2 ON wr.wr_returned_date_sk = d2.d_date_sk
+    JOIN promotion p2 ON p2.p_start_date_sk = d2.d_date_sk
+    JOIN web_page wp2 ON wr.wr_web_page_sk = wp2.wp_web_page_sk
+    JOIN catalog_page cp2 ON cp2.cp_end_date_sk = d2.d_date_sk
+    JOIN web_site ws2 ON ws2.web_close_date_sk = d2.d_date_sk
+    WHERE d2.d_year = 2000
+      AND p2.p_promo_name = 'Promotion B'
+      AND ws2.web_manager = 'Harold Wilson'
+    GROUP BY d2.d_year,
+             p2.p_promo_name,
+             CASE WHEN p2.p_discount_active = 'Y' THEN 'Active' ELSE 'Inactive' END
 )
-SELECT
-    ca_state,
-    i_category,
-    profit_level,
-    COUNT(*) AS orders,
-    SUM(cs_net_profit) AS total_profit,
-    MAX(email_user) AS sample_user
-FROM filtered_sales
-GROUP BY ca_state, i_category, profit_level
-ORDER BY total_profit DESC
+SELECT *
+FROM (
+    SELECT
+        d_year,
+        p_promo_name,
+        total_store_return_amt,
+        store_return_cnt,
+        promo_status,
+        CAST(NULL AS decimal(7,2)) AS total_web_return_amt,
+        CAST(NULL AS integer) AS web_return_cnt,
+        ROW_NUMBER() OVER (PARTITION BY d_year ORDER BY total_store_return_amt DESC) AS rn
+    FROM store_part
+    UNION ALL
+    SELECT
+        d_year,
+        p_promo_name,
+        CAST(NULL AS decimal(7,2)) AS total_store_return_amt,
+        CAST(NULL AS integer) AS store_return_cnt,
+        promo_status,
+        total_web_return_amt,
+        web_return_cnt,
+        ROW_NUMBER() OVER (PARTITION BY d_year ORDER BY total_web_return_amt DESC) AS rn
+    FROM web_part
+) combined
+ORDER BY d_year, rn
 LIMIT 100

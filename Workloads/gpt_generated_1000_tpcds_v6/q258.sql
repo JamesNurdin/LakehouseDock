@@ -1,60 +1,70 @@
-/*
-Goal: Analyze net sales, profit, and return amounts by store, region (derived from state), and promotion. The query counts unique customers, aggregates net paid, net profit, total return amount, and high‑tax return metrics, and filters to only those customers who also have a catalog sale for the same promotion on the same sold date.
-*/
-SELECT
-    s.s_store_name,
-    s.s_state,
-    CASE WHEN s.s_state = 'CA' THEN 'West' ELSE 'Other' END AS region_category,
-    p_ss.p_promo_name,
-    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
-    SUM(ss.ss_net_paid) AS total_net_paid,
-    SUM(ss.ss_net_profit) AS total_net_profit,
-    SUM(sr.sr_return_amt) AS total_return_amount,
-    SUM(CASE WHEN sr.sr_return_tax > 20 THEN sr.sr_return_tax ELSE 0 END) AS high_tax_returns,
-    COUNT(*) FILTER (WHERE sr.sr_return_tax > 20) AS high_tax_return_count
-FROM
-    store_sales ss
-JOIN customer c
-    ON ss.ss_customer_sk = c.c_customer_sk
-JOIN household_demographics hd_ss
-    ON ss.ss_hdemo_sk = hd_ss.hd_demo_sk
-JOIN customer_address ca_ss
-    ON ss.ss_addr_sk = ca_ss.ca_address_sk
-JOIN store s
-    ON ss.ss_store_sk = s.s_store_sk
-JOIN promotion p_ss
-    ON ss.ss_promo_sk = p_ss.p_promo_sk
-JOIN store_returns sr
-    ON sr.sr_ticket_number = ss.ss_ticket_number
-   AND sr.sr_item_sk = ss.ss_item_sk
-JOIN store s_sr
-    ON sr.sr_store_sk = s_sr.s_store_sk
-JOIN customer c_sr
-    ON sr.sr_customer_sk = c_sr.c_customer_sk
-JOIN household_demographics hd_sr
-    ON sr.sr_hdemo_sk = hd_sr.hd_demo_sk
-JOIN customer_address ca_sr
-    ON sr.sr_addr_sk = ca_sr.ca_address_sk
-JOIN catalog_sales cs
-    ON cs.cs_bill_customer_sk = c.c_customer_sk
-JOIN household_demographics hd_cs
-    ON cs.cs_bill_hdemo_sk = hd_cs.hd_demo_sk
-JOIN customer_address ca_cs
-    ON cs.cs_bill_addr_sk = ca_cs.ca_address_sk
-JOIN promotion p_cs
-    ON cs.cs_promo_sk = p_cs.p_promo_sk
-WHERE EXISTS (
-    SELECT 1
-    FROM catalog_sales cs2
-    WHERE cs2.cs_bill_customer_sk = c.c_customer_sk
-      AND cs2.cs_promo_sk = p_ss.p_promo_sk
-      AND cs2.cs_sold_date_sk = ss.ss_sold_date_sk
+WITH base AS (
+    SELECT
+        cs.cs_order_number,
+        cs.cs_net_paid,
+        cs.cs_net_profit,
+        cs.cs_sold_date_sk,
+        cc.cc_call_center_sk,
+        cc.cc_name,
+        cc.cc_state,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        r.r_reason_desc,
+        ws.ws_list_price,
+        ws.ws_net_profit AS ws_net_profit,
+        wr.wr_return_amt
+    FROM tpcds.catalog_sales cs
+    JOIN tpcds.customer c
+        ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN tpcds.customer_address ca
+        ON cs.cs_bill_addr_sk = ca.ca_address_sk
+    JOIN tpcds.customer_demographics cd
+        ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+    JOIN tpcds.household_demographics hd
+        ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+    JOIN tpcds.call_center cc
+        ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN tpcds.ship_mode sm
+        ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN tpcds.catalog_returns cr
+        ON cr.cr_order_number = cs.cs_order_number
+    JOIN tpcds.reason r
+        ON cr.cr_reason_sk = r.r_reason_sk
+    JOIN tpcds.web_sales ws
+        ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN tpcds.web_returns wr
+        ON wr.wr_order_number = ws.ws_order_number
+    WHERE cc.cc_state = 'CA'
+      AND cd.cd_gender = 'M'
+      AND hd.hd_income_band_sk BETWEEN 10 AND 20
+      AND r.r_reason_desc LIKE '%Customer%'
+      AND ws.ws_list_price > 50
 )
-GROUP BY
-    s.s_store_name,
-    s.s_state,
-    CASE WHEN s.s_state = 'CA' THEN 'West' ELSE 'Other' END,
-    p_ss.p_promo_name
-ORDER BY
-    total_net_profit DESC
+SELECT
+    b.cc_name,
+    b.cc_state,
+    b.cd_gender,
+    b.hd_income_band_sk,
+    b.r_reason_desc,
+    b.cs_net_paid,
+    b.cs_net_profit,
+    b.ws_list_price,
+    b.ws_net_profit,
+    b.wr_return_amt,
+    ROW_NUMBER() OVER (PARTITION BY b.cc_name ORDER BY b.cs_net_paid DESC) AS rn_net_paid,
+    RANK() OVER (ORDER BY b.cs_net_paid + COALESCE(b.wr_return_amt, 0) DESC) AS rank_total,
+    AVG(b.cs_net_paid) OVER (PARTITION BY b.cc_name) AS avg_net_paid_by_cc,
+    (
+        SELECT AVG(cs2.cs_net_paid)
+        FROM tpcds.catalog_sales cs2
+        WHERE cs2.cs_call_center_sk = b.cc_call_center_sk
+    ) AS avg_net_paid_for_cc
+FROM base b
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM tpcds.web_returns wr2
+    WHERE wr2.wr_order_number = b.cs_order_number
+      AND wr2.wr_return_amt > 0
+)
+ORDER BY rank_total
 LIMIT 100

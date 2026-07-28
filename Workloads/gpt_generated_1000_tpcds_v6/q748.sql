@@ -1,60 +1,64 @@
 WITH base AS (
     SELECT
-        d.d_date,
-        d.d_year,
-        d.d_weekend,
-        c.c_customer_id,
-        c.c_first_name,
-        c.c_last_name,
-        ss.ss_ticket_number,
-        ss.ss_net_paid,
-        ss.ss_net_profit,
-        sr.sr_net_loss,
-        cr.cr_return_amount,
-        cp.cp_type,
-        inv.inv_quantity_on_hand,
-        ws.web_name
-    FROM tpcds.date_dim d
-    JOIN tpcds.store_sales ss
-        ON ss.ss_sold_date_sk = d.d_date_sk
-    JOIN tpcds.customer c
-        ON ss.ss_customer_sk = c.c_customer_sk
-    JOIN tpcds.store_returns sr
-        ON sr.sr_item_sk = ss.ss_item_sk
-        AND sr.sr_ticket_number = ss.ss_ticket_number
-    JOIN tpcds.catalog_page cp
-        ON cp.cp_start_date_sk = d.d_date_sk
-    JOIN tpcds.catalog_returns cr
-        ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-        AND cr.cr_returned_date_sk = d.d_date_sk
-    JOIN tpcds.inventory inv
-        ON inv.inv_date_sk = d.d_date_sk
-    JOIN tpcds.web_site ws
-        ON ws.web_open_date_sk = d.d_date_sk
-    WHERE d.d_weekend = 'N'
-      AND d.d_year = 2000
-      AND sr.sr_fee > 20
-      AND cp.cp_type = 'PROMO'
-      AND inv.inv_quantity_on_hand > 0
-),
-agg_customer AS (
-    SELECT
-        c_customer_id,
-        SUM(ss_net_paid) AS total_net_paid,
-        SUM(ss_net_profit) AS total_profit,
-        SUM(sr_net_loss) AS total_return_loss,
-        AVG(cr_return_amount) AS avg_return_amount
-    FROM base
-    GROUP BY c_customer_id
+        d.d_year AS d_year,
+        s.s_store_name AS s_store_name,
+        i.i_category AS i_category,
+        p.p_promo_name AS p_promo_name,
+        r.r_reason_desc AS r_reason_desc,
+        ss.ss_net_paid AS ss_net_paid,
+        ws.ws_net_paid AS ws_net_paid,
+        cs.cs_net_paid AS cs_net_paid,
+        sr.sr_return_amt AS sr_return_amt,
+        c.c_customer_sk AS c_customer_sk
+    FROM
+        date_dim d
+        JOIN store_sales ss ON ss.ss_sold_date_sk = d.d_date_sk
+        JOIN item i ON ss.ss_item_sk = i.i_item_sk
+        JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+        JOIN customer_demographics cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
+        JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+        JOIN store s ON ss.ss_store_sk = s.s_store_sk
+        JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+        JOIN catalog_sales cs ON cs.cs_sold_date_sk = d.d_date_sk
+            AND cs.cs_bill_customer_sk = c.c_customer_sk
+            AND cs.cs_item_sk = i.i_item_sk
+            AND cs.cs_promo_sk = p.p_promo_sk
+        JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+        JOIN web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+            AND ws.ws_bill_customer_sk = c.c_customer_sk
+            AND ws.ws_item_sk = i.i_item_sk
+        JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+        JOIN web_site we ON ws.ws_web_site_sk = we.web_site_sk
+        JOIN store_returns sr ON sr.sr_ticket_number = ss.ss_ticket_number
+            AND sr.sr_item_sk = i.i_item_sk
+        JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    WHERE
+        d.d_year = 2001
+        AND i.i_color = 'red'
+        AND w.w_county = 'Franklin Parish'
+        AND p.p_discount_active = 'Y'
+        AND r.r_reason_desc = 'Wrong size'
 )
 SELECT
-    a.c_customer_id,
-    a.total_net_paid,
-    a.total_profit,
-    a.total_return_loss,
-    a.avg_return_amount
-FROM agg_customer a
-WHERE a.total_profit > (SELECT AVG(total_profit) FROM agg_customer)
-  AND a.total_return_loss < 5000
-ORDER BY a.total_profit DESC
+    s_store_name,
+    d_year,
+    i_category,
+    p_promo_name,
+    r_reason_desc,
+    SUM(ss_net_paid) AS total_store_sales,
+    SUM(ws_net_paid) AS total_web_sales,
+    SUM(cs_net_paid) AS total_catalog_sales,
+    SUM(sr_return_amt) AS total_returns,
+    COUNT(DISTINCT c_customer_sk) AS unique_customers
+FROM base
+GROUP BY
+    s_store_name,
+    d_year,
+    i_category,
+    p_promo_name,
+    r_reason_desc
+HAVING
+    SUM(ss_net_paid) > 10000
+ORDER BY
+    total_store_sales DESC
 LIMIT 100

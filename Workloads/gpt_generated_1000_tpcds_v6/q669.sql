@@ -1,42 +1,62 @@
-WITH joined_data AS (
+WITH
+  ws_agg AS (
     SELECT
-        s.s_division_name,
-        t.t_hour,
-        ss.ss_net_profit,
-        ss.ss_quantity,
-        inv.inv_quantity_on_hand,
-        cd.cd_purchase_estimate,
-        COALESCE(cc.cc_name, 'No Call Center') AS call_center_name
+      i.i_item_id,
+      i.i_color,
+      SUM(ws.ws_ext_sales_price) AS total_sales,
+      SUM(ws.ws_quantity) AS total_qty,
+      COUNT(*) AS txn_count,
+      MAX(ws.ws_sold_date_sk) AS latest_sold_date_sk,
+      ROW_NUMBER() OVER (PARTITION BY i.i_item_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN time_dim t ON ws.ws_sold_time_sk = t.t_time_sk
+    WHERE regexp_like(i.i_product_name, '^.*[Aa]dvanced.*$')
+      AND i.i_color LIKE 'r%'
+      AND t.t_hour BETWEEN 8 AND 20
+    GROUP BY i.i_item_id, i.i_color
+    HAVING SUM(ws.ws_ext_sales_price) > 1000
+  ),
+  ss_agg AS (
+    SELECT
+      i.i_item_id,
+      i.i_color,
+      SUM(ss.ss_ext_sales_price) AS total_sales,
+      SUM(ss.ss_quantity) AS total_qty,
+      COUNT(*) AS txn_count,
+      MAX(ss.ss_sold_date_sk) AS latest_sold_date_sk,
+      ROW_NUMBER() OVER (PARTITION BY i.i_item_id ORDER BY SUM(ss.ss_ext_sales_price) DESC) AS sales_rank
     FROM store_sales ss
-    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
     JOIN time_dim t ON ss.ss_sold_time_sk = t.t_time_sk
-    JOIN customer_demographics cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
-    JOIN store s ON ss.ss_store_sk = s.s_store_sk
-    JOIN inventory inv ON inv.inv_date_sk = d.d_date_sk
-    LEFT JOIN call_center cc ON cc.cc_closed_date_sk = d.d_date_sk
-    WHERE d.d_year = 2002
-      AND s.s_state = 'CA'
-      AND cd.cd_gender = 'M'
-),
-agg1 AS (
-    SELECT
-        s_division_name,
-        t_hour,
-        SUM(ss_net_profit) AS total_profit,
-        SUM(ss_quantity) AS total_quantity,
-        AVG(cd_purchase_estimate) AS avg_estimate,
-        SUM(inv_quantity_on_hand) AS total_inventory,
-        COUNT(*) AS txn_count
-    FROM joined_data
-    GROUP BY s_division_name, t_hour
-)
+    WHERE regexp_like(i.i_product_name, '^.*[Aa]dvanced.*$')
+      AND i.i_color LIKE 'r%'
+      AND t.t_hour BETWEEN 8 AND 20
+    GROUP BY i.i_item_id, i.i_color
+    HAVING SUM(ss.ss_ext_sales_price) > 1000
+  )
 SELECT
-    s_division_name,
-    AVG(total_profit) AS avg_hourly_profit,
-    SUM(total_quantity) AS total_quantity,
-    AVG(avg_estimate) AS avg_purchase_estimate
-FROM agg1
-GROUP BY s_division_name
-HAVING AVG(total_profit) > 10000
-ORDER BY avg_hourly_profit DESC
+  i_item_id,
+  i_color,
+  total_sales,
+  total_qty,
+  txn_count,
+  latest_sold_date_sk,
+  sales_rank,
+  CASE WHEN total_sales > 5000 THEN 'HIGH' ELSE 'NORMAL' END AS sales_category,
+  concat(i_color, '-', cast(total_qty AS varchar)) AS color_qty_key
+FROM ws_agg
+UNION ALL
+SELECT
+  i_item_id,
+  i_color,
+  total_sales,
+  total_qty,
+  txn_count,
+  latest_sold_date_sk,
+  sales_rank,
+  CASE WHEN total_sales > 5000 THEN 'HIGH' ELSE 'NORMAL' END AS sales_category,
+  concat(i_color, '-', cast(total_qty AS varchar)) AS color_qty_key
+FROM ss_agg
+ORDER BY total_sales DESC
 LIMIT 100

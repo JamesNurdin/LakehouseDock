@@ -1,40 +1,55 @@
-WITH per_address AS (
+/*
+Goal: Calculate per‑state yearly return statistics for the year 2001 for items whose manufacturer name ends with "able" and whose product name contains "Table", exclude items from the discontinued brand, and show a cumulative sum of the average return amount across states.
+*/
+WITH filtered_returns AS (
     SELECT
-        ca.ca_state,
-        ca.ca_city,
-        ca.ca_zip,
-        SUM(sr.sr_return_amt) AS store_return_sum,
-        SUM(wr.wr_return_amt) AS web_return_sum,
-        SUM(sr.sr_net_loss + wr.wr_net_loss) AS total_net_loss,
-        COUNT(DISTINCT sr.sr_ticket_number) AS store_return_cnt,
-        COUNT(DISTINCT wr.wr_order_number) AS web_return_cnt
-    FROM tpcds.store_returns sr
-    JOIN tpcds.customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
-    JOIN tpcds.web_returns wr ON wr.wr_refunded_addr_sk = ca.ca_address_sk
-    WHERE ca.ca_state IN ('CA', 'TX', 'NY')
-      AND ca.ca_zip LIKE '9%'
-      AND ca.ca_city <> 'Unknown'
-      AND sr.sr_return_tax > 1.00
-      AND wr.wr_reversed_charge < 500
-      AND sr.sr_return_quantity >= 1
-      AND wr.wr_return_quantity >= 1
-    GROUP BY ca.ca_state, ca.ca_city, ca.ca_zip
+        cr.cr_return_amount,
+        d.d_year,
+        d.d_date,
+        w.w_state,
+        i.i_brand,
+        i.i_category,
+        i.i_manufact,
+        i.i_product_name,
+        w.w_warehouse_name
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    WHERE d.d_date BETWEEN DATE '2001-01-01' AND DATE '2001-12-31'
+      AND regexp_like(i.i_manufact, '.*able$')
+      AND i.i_product_name LIKE '%Table%'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM item i2
+          WHERE i2.i_item_sk = cr.cr_item_sk
+            AND i2.i_brand = 'Discontinued'
+      )
+),
+aggregated AS (
+    SELECT
+        w_state,
+        d_year,
+        CONCAT(i_brand, '-', i_category) AS brand_category,
+        SUBSTRING(w_warehouse_name, 1, 5) AS wh_prefix,
+        COUNT(*) AS returns_cnt,
+        AVG(cr_return_amount) AS avg_return_amount,
+        MAX(d_date) AS max_date
+    FROM filtered_returns
+    GROUP BY w_state, d_year, i_brand, i_category, w_warehouse_name
 )
 SELECT
-    per_address.ca_state,
-    per_address.ca_city,
-    per_address.ca_zip,
-    per_address.store_return_sum,
-    per_address.web_return_sum,
-    per_address.total_net_loss,
-    per_address.store_return_cnt,
-    per_address.web_return_cnt,
-    SUM(per_address.store_return_sum) OVER (
-        PARTITION BY per_address.ca_state
-        ORDER BY per_address.store_return_sum DESC
+    w_state,
+    d_year,
+    brand_category,
+    wh_prefix,
+    returns_cnt,
+    avg_return_amount,
+    SUM(avg_return_amount) OVER (
+        PARTITION BY w_state
+        ORDER BY max_date
         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS cum_store_return_by_state
-FROM per_address
-WHERE per_address.total_net_loss > 1000
-  AND per_address.store_return_cnt > 5
-ORDER BY per_address.total_net_loss DESC
+    ) AS cum_avg_return_amount
+FROM aggregated
+ORDER BY cum_avg_return_amount DESC
+LIMIT 100

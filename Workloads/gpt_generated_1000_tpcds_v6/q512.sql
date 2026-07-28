@@ -1,42 +1,38 @@
-WITH base AS (
+WITH sales_agg AS (
     SELECT
-        sr.sr_returned_date_sk,
-        sr.sr_return_quantity,
-        sr.sr_return_amt,
-        sr.sr_ticket_number,
-        d.d_year,
-        d.d_current_year
-    FROM store_returns sr
-    JOIN date_dim d
-        ON sr.sr_returned_date_sk = d.d_date_sk
-    WHERE d.d_year = 1999
-      AND d.d_current_year = 'Y'
-      AND sr.sr_return_quantity > 0
+        ss.ss_store_sk AS ss_store_sk,
+        ss.ss_sold_date_sk AS ss_sold_date_sk,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        SUM(ss.ss_quantity) AS total_qty,
+        COUNT(DISTINCT ss.ss_ticket_number) AS distinct_tickets
+    FROM tpcds.store_sales ss
+    JOIN tpcds.date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2002
+      AND d.d_dow IN (1, 2)
+      AND d.d_current_day = 'N'
+    GROUP BY ss.ss_store_sk, ss.ss_sold_date_sk
 )
 SELECT
-    cp.cp_department,
-    p.p_promo_name,
-    wp.wp_type,
-    COUNT(DISTINCT base.sr_ticket_number) AS distinct_tickets,
-    SUM(base.sr_return_amt) AS total_return_amount,
-    AVG(p.p_cost) AS avg_promo_cost,
-    CASE WHEN p.p_discount_active = 'Y' THEN 'Active' ELSE 'Inactive' END AS promo_status,
-    MIN(base.sr_return_amt) AS min_return,
-    MAX(base.sr_return_amt) AS max_return
-FROM base
-JOIN catalog_page cp
-    ON cp.cp_end_date_sk = base.sr_returned_date_sk
-JOIN promotion p
-    ON p.p_start_date_sk = base.sr_returned_date_sk
-JOIN web_page wp
-    ON wp.wp_creation_date_sk = base.sr_returned_date_sk
-WHERE cp.cp_type = 'Catalog'
-  AND p.p_cost > 10
-  AND wp.wp_type = 'Home'
-GROUP BY
-    cp.cp_department,
-    p.p_promo_name,
-    wp.wp_type,
-    CASE WHEN p.p_discount_active = 'Y' THEN 'Active' ELSE 'Inactive' END
-ORDER BY total_return_amount DESC
+    s.s_state,
+    d.d_year,
+    SUM(sa.total_sales) AS sum_sales,
+    AVG(sa.total_sales) AS avg_sales,
+    MIN(sa.total_sales) AS min_sales,
+    MAX(sa.total_sales) AS max_sales,
+    SUM(i.inv_quantity_on_hand) AS total_inventory,
+    COUNT(DISTINCT s.s_store_id) AS store_count
+FROM sales_agg sa
+JOIN tpcds.store s ON sa.ss_store_sk = s.s_store_sk
+JOIN tpcds.date_dim d ON sa.ss_sold_date_sk = d.d_date_sk
+JOIN tpcds.inventory i ON i.inv_date_sk = d.d_date_sk
+WHERE s.s_market_id = 2
+  AND s.s_suite_number = 'Suite 80  '
+  AND i.inv_quantity_on_hand > 0
+  AND d.d_month_seq BETWEEN 1200 AND 1300
+GROUP BY GROUPING SETS (
+    (s.s_state, d.d_year),
+    (s.s_state),
+    ()
+)
+ORDER BY sum_sales DESC
 LIMIT 100
