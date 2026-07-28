@@ -50,8 +50,8 @@ from trino_stack.profile import NodeProfiler
 from trino_stack.resource_logger import NodeLogger
 from trino_stack.resource_profile import LakehouseResourceProfiler
 
-# query_generator (v7.1: online additive plan-feedback, no calibration)
-from workload_generation.query_generator_v71 import (
+# query_generator (v7.2: ceiling-raising plan-feedback; plan_feedback=False == v6)
+from workload_generation.query_generator_v72 import (
     load_schema,
     make_openai_client,
     warm_up_model,
@@ -60,7 +60,7 @@ from workload_generation.query_generator_v71 import (
     write_workload_directory,
     fetch_table_columns,
     fetch_schema_table_columns,
-    DiversityTrackerV71,
+    DiversityTrackerV72,
 )
 
 @dataclass
@@ -713,10 +713,10 @@ class Lakehouse:
         rng = random.Random(random_seed)
 
         # One tracker is shared across every generation batch so the online
-        # plan-space coverage + lever->operator attribution accumulate over the
-        # whole workload. v7.1 needs no calibration phase; feedback is online and
-        # additive. plan_feedback=False disables steering -> v7.1 == v6 exactly.
-        tracker = DiversityTrackerV71()
+        # n-gram coverage + lever attribution + UCB/exotic exploration + plateau
+        # escalation accumulate over the whole workload. No calibration phase.
+        # plan_feedback=False disables the whole mechanism -> v7.2 == v6 exactly.
+        tracker = DiversityTrackerV72()
         tracker.feedback_enabled = plan_feedback
 
 
