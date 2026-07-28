@@ -1,33 +1,45 @@
-WITH filtered_returns AS (
-    SELECT
-        sr.sr_store_sk,
-        sr.sr_reason_sk,
-        sr.sr_item_sk,
-        sr.sr_addr_sk,
-        sr.sr_return_amt_inc_tax,
-        sr.sr_net_loss
-    FROM store_returns sr
-    JOIN item i ON sr.sr_item_sk = i.i_item_sk
-    JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
-    WHERE regexp_like(i.i_item_desc, '(?i)premium')
-      AND ca.ca_county LIKE 'M%'
+WITH sales_agg AS (
+  SELECT
+    c.c_customer_id,
+    c.c_customer_sk,
+    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+    regexp_extract(c.c_email_address, '@(.*)$', 1) AS email_domain,
+    d.d_year,
+    SUM(ss.ss_net_profit) AS total_store_profit,
+    COUNT(*) AS txn_count
+  FROM store_sales ss
+  JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+  JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+  JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+  WHERE d.d_year = 2001
+    AND c.c_email_address LIKE '%@example.com'
+    AND regexp_like(c.c_last_name, '^[A-M].*')
+  GROUP BY
+    c.c_customer_id,
+    c.c_customer_sk,
+    CONCAT(c.c_first_name, ' ', c.c_last_name),
+    regexp_extract(c.c_email_address, '@(.*)$', 1),
+    d.d_year
 )
+
 SELECT
-    s.s_store_name,
-    r.r_reason_desc,
-    regexp_extract(i.i_item_desc, '^([^ ]+)', 1) AS first_word,
-    CONCAT(s.s_store_name, ' - ', r.r_reason_desc) AS store_reason_label,
-    COUNT(*) AS return_cnt,
-    SUM(fr.sr_return_amt_inc_tax) AS total_return_inc_tax,
-    SUM(fr.sr_net_loss) AS total_net_loss
-FROM filtered_returns fr
-JOIN store s ON fr.sr_store_sk = s.s_store_sk
-JOIN reason r ON fr.sr_reason_sk = r.r_reason_sk
-JOIN item i ON fr.sr_item_sk = i.i_item_sk
-GROUP BY
-    s.s_store_name,
-    r.r_reason_desc,
-    regexp_extract(i.i_item_desc, '^([^ ]+)', 1),
-    CONCAT(s.s_store_name, ' - ', r.r_reason_desc)
-ORDER BY total_return_inc_tax DESC
+  s.c_customer_id,
+  s.full_name,
+  s.email_domain,
+  s.d_year,
+  s.total_store_profit,
+  s.txn_count,
+  (
+    SELECT AVG(ss2.ss_net_profit)
+    FROM store_sales ss2
+    JOIN date_dim d2 ON ss2.ss_sold_date_sk = d2.d_date_sk
+    WHERE d2.d_year = s.d_year
+  ) AS avg_profit_all_customers
+FROM sales_agg s
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM catalog_returns cr
+    WHERE cr.cr_returning_customer_sk = s.c_customer_sk
+)
+ORDER BY s.total_store_profit DESC
 LIMIT 100

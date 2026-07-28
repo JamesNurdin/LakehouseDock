@@ -1,34 +1,50 @@
-WITH opened_centers AS (
+WITH promo_sales AS (
     SELECT
-        cc.cc_call_center_sk,
-        cc.cc_market_manager,
-        cc.cc_division,
-        cc.cc_employees,
-        cc.cc_street_name,
-        cc.cc_street_type,
-        d_open.d_year AS open_year,
-        d_open.d_date AS open_date
-    FROM tpcds.call_center cc
-    JOIN tpcds.date_dim d_open
-        ON cc.cc_open_date_sk = d_open.d_date_sk
-    WHERE regexp_like(cc.cc_street_name, '^A.*')
-      AND cc.cc_street_type LIKE '%avenue%'
+        d.d_year AS sales_year,
+        'With Promo' AS promo_type,
+        SUM(ss.ss_net_profit) AS total_net_profit
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE ib.ib_upper_bound > 100000
+      AND d.d_year BETWEEN 2020 AND 2022
+      AND EXISTS (
+            SELECT 1
+            FROM store_sales ss2
+            JOIN promotion p2 ON ss2.ss_promo_sk = p2.p_promo_sk
+            WHERE ss2.ss_customer_sk = ss.ss_customer_sk
+              AND ss2.ss_sold_date_sk = ss.ss_sold_date_sk
+              AND p2.p_start_date_sk = p.p_start_date_sk
+              AND p2.p_end_date_sk = p.p_end_date_sk
+        )
+    GROUP BY d.d_year
+),
+no_promo_sales AS (
+    SELECT
+        d.d_year AS sales_year,
+        'No Promo' AS promo_type,
+        SUM(ss.ss_net_profit) AS total_net_profit
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    LEFT JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE p.p_promo_sk IS NULL
+      AND ib.ib_upper_bound <= 100000
+      AND d.d_year BETWEEN 2020 AND 2022
+    GROUP BY d.d_year
 )
-SELECT
-    om.cc_market_manager,
-    om.open_year,
-    COUNT(*) AS centers_count,
-    SUM(om.cc_employees) AS total_employees,
-    AVG(om.cc_employees) AS avg_employees,
-    CONCAT(om.cc_market_manager, ' (', CAST(om.open_year AS VARCHAR), ')') AS manager_year_label,
-    MIN(REGEXP_EXTRACT(om.cc_street_name, '([A-Za-z]+)')) AS sample_street_word
-FROM opened_centers om
-WHERE om.cc_employees > (
-        SELECT AVG(cc2.cc_employees)
-        FROM tpcds.call_center cc2
-        WHERE cc2.cc_division = om.cc_division
-    )
-GROUP BY om.cc_market_manager, om.open_year
-HAVING COUNT(*) >= 2
-ORDER BY total_employees DESC
-LIMIT 20
+SELECT sales_year,
+       promo_type,
+       total_net_profit
+FROM promo_sales
+UNION ALL
+SELECT sales_year,
+       promo_type,
+       total_net_profit
+FROM no_promo_sales
+ORDER BY sales_year DESC,
+         total_net_profit DESC
+LIMIT 100

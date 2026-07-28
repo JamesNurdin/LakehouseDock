@@ -1,68 +1,63 @@
-WITH distinct_income AS (
-    SELECT DISTINCT ib_income_band_sk, ib_lower_bound, ib_upper_bound
-    FROM income_band
-    WHERE ib_lower_bound >= 100000
-),
-catalog_agg AS (
-    SELECT
-        d_sold.d_year AS year,
-        ib.ib_income_band_sk AS income_band_sk,
-        COUNT(DISTINCT cr.cr_order_number) AS distinct_orders,
-        SUM(cr.cr_return_amount) AS total_return_amount,
-        AVG(cr.cr_fee) AS avg_fee,
-        SUM(cs.cs_net_profit) AS total_net_profit
-    FROM catalog_returns cr
-    JOIN catalog_sales cs
-        ON cr.cr_order_number = cs.cs_order_number
-       AND cr.cr_item_sk = cs.cs_item_sk
-    JOIN date_dim d_sold
-        ON cs.cs_sold_date_sk = d_sold.d_date_sk
-    JOIN household_demographics hd_refunded
-        ON cr.cr_refunded_hdemo_sk = hd_refunded.hd_demo_sk
-    JOIN household_demographics hd_returning
-        ON cr.cr_returning_hdemo_sk = hd_returning.hd_demo_sk
-    JOIN income_band ib
-        ON hd_refunded.hd_income_band_sk = ib.ib_income_band_sk
-    JOIN distinct_income di
-        ON ib.ib_income_band_sk = di.ib_income_band_sk
-    WHERE d_sold.d_date BETWEEN DATE '2000-01-01' AND DATE '2000-12-31'
-      AND cr.cr_call_center_sk IN (1, 7, 38)
-      AND cr.cr_fee > 20
-      AND ib.ib_upper_bound <= 150000
-      AND cs.cs_quantity >= 2
-      AND cs.cs_ship_mode_sk = 2
-    GROUP BY d_sold.d_year, ib.ib_income_band_sk
-),
-web_agg AS (
-    SELECT
-        d_ret.d_year AS year,
-        ib.ib_income_band_sk AS income_band_sk,
-        COUNT(DISTINCT wr.wr_order_number) AS distinct_orders,
-        SUM(wr.wr_return_amt) AS total_return_amount,
-        AVG(wr.wr_fee) AS avg_fee,
-        SUM(wr.wr_net_loss) AS total_net_loss
-    FROM web_returns wr
-    JOIN date_dim d_ret
-        ON wr.wr_returned_date_sk = d_ret.d_date_sk
-    JOIN household_demographics hd_refunded
-        ON wr.wr_refunded_hdemo_sk = hd_refunded.hd_demo_sk
-    JOIN household_demographics hd_returning
-        ON wr.wr_returning_hdemo_sk = hd_returning.hd_demo_sk
-    JOIN income_band ib
-        ON hd_refunded.hd_income_band_sk = ib.ib_income_band_sk
-    JOIN distinct_income di
-        ON ib.ib_income_band_sk = di.ib_income_band_sk
-    WHERE d_ret.d_date BETWEEN DATE '2000-01-01' AND DATE '2000-12-31'
-      AND wr.wr_fee > 20
-      AND ib.ib_lower_bound >= 100000
-      AND wr.wr_return_quantity >= 1
-      AND wr.wr_returned_time_sk BETWEEN 1000 AND 2000
-      AND wr.wr_web_page_sk = 5
-    GROUP BY d_ret.d_year, ib.ib_income_band_sk
+WITH joined_data AS (
+  SELECT
+    s.s_store_id,
+    s.s_state,
+    d.d_year AS sales_year,
+    p.p_promo_name,
+    sm.sm_type AS ship_mode_type,
+    wp.wp_type AS web_page_type,
+    ca_bill.ca_city AS bill_city,
+    ca_ship.ca_city AS ship_city,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    ss.ss_ext_sales_price AS store_sales_amount,
+    ss.ss_net_profit AS store_profit,
+    ws.ws_ext_sales_price AS web_sales_amount,
+    ws.ws_net_profit AS web_profit,
+    wr.wr_return_amt AS return_amount,
+    CASE
+      WHEN ss.ss_net_profit + ws.ws_net_profit - COALESCE(wr.wr_return_amt, 0) > 1000 THEN 'High'
+      ELSE 'Medium'
+    END AS profit_category
+  FROM store_sales ss
+  JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+  JOIN store s ON ss.ss_store_sk = s.s_store_sk
+  JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+  JOIN customer_address ca_store ON ss.ss_addr_sk = ca_store.ca_address_sk
+  JOIN customer_demographics cd_store ON ss.ss_cdemo_sk = cd_store.cd_demo_sk
+  JOIN household_demographics hd_store ON ss.ss_hdemo_sk = hd_store.hd_demo_sk
+  JOIN income_band ib ON hd_store.hd_income_band_sk = ib.ib_income_band_sk
+  -- web side joins
+  JOIN web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+  JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+  JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+  JOIN customer_address ca_bill ON ws.ws_bill_addr_sk = ca_bill.ca_address_sk
+  JOIN customer_address ca_ship ON ws.ws_ship_addr_sk = ca_ship.ca_address_sk
+  JOIN customer_demographics cd_bill ON ws.ws_bill_cdemo_sk = cd_bill.cd_demo_sk
+  JOIN customer_demographics cd_ship ON ws.ws_ship_cdemo_sk = cd_ship.cd_demo_sk
+  JOIN household_demographics hd_bill ON ws.ws_bill_hdemo_sk = hd_bill.hd_demo_sk
+  JOIN household_demographics hd_ship ON ws.ws_ship_hdemo_sk = hd_ship.hd_demo_sk
+  LEFT JOIN web_returns wr
+    ON wr.wr_order_number = ws.ws_order_number
+    AND wr.wr_returned_date_sk = d.d_date_sk
+  JOIN promotion p_ws ON ws.ws_promo_sk = p_ws.p_promo_sk
+  WHERE d.d_year = 2001
+    AND d.d_moy IN (1, 2, 3)
+    AND cd_store.cd_credit_rating = 'Good'
+    AND ib.ib_lower_bound >= 30000
+    AND p.p_channel_tv = 'Y'
+    AND sm.sm_type = 'AIR'
 )
-SELECT *
-FROM catalog_agg
-UNION ALL
-SELECT *
-FROM web_agg
+SELECT
+  s_store_id,
+  s_state,
+  sales_year,
+  profit_category,
+  SUM(store_sales_amount) AS total_store_sales,
+  SUM(web_sales_amount) AS total_web_sales,
+  SUM(store_profit + web_profit - COALESCE(return_amount, 0)) AS total_net_profit
+FROM joined_data
+GROUP BY s_store_id, s_state, sales_year, profit_category
+HAVING SUM(store_profit + web_profit - COALESCE(return_amount, 0)) > 5000
+ORDER BY total_net_profit DESC
 LIMIT 100

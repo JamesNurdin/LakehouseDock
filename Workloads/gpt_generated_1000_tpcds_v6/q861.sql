@@ -1,25 +1,36 @@
-WITH promo_filtered AS (
-    SELECT p_promo_sk
-    FROM promotion
-    WHERE regexp_like(p_promo_name, '^Summer.*')
-      AND p_discount_active = 'Y'
+WITH filtered AS (
+    SELECT
+        i.inv_warehouse_sk,
+        i.inv_quantity_on_hand,
+        i.inv_item_sk,
+        d.d_date,
+        w.w_warehouse_name,
+        w.w_city,
+        w.w_street_type,
+        w.w_suite_number,
+        w.w_zip,
+        regexp_extract(w.w_suite_number, '(\\d+)', 1) AS suite_num
+    FROM inventory i
+    JOIN date_dim d ON i.inv_date_sk = d.d_date_sk
+    JOIN warehouse w ON i.inv_warehouse_sk = w.w_warehouse_sk
+    WHERE d.d_current_year = 'Y'
+      AND d.d_date BETWEEN DATE '1998-01-01' AND DATE '1998-12-31'
+      AND regexp_like(w.w_street_type, '^R.*')
+      AND w.w_zip LIKE '78%'
+      AND CAST(regexp_extract(w.w_suite_number, '(\\d+)', 1) AS integer) > 100
 )
 SELECT
-    sm.sm_carrier,
-    cp.cp_department,
-    COUNT(DISTINCT cs.cs_order_number) AS order_cnt,
-    SUM(cs.cs_net_profit) AS total_profit,
-    AVG(cs.cs_net_profit) AS avg_profit
-FROM catalog_sales cs
-JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
-WHERE
-    regexp_like(cp.cp_description, '(Special|Discount)')
-    AND cp.cp_type LIKE 'A%'
-    AND cd.cd_credit_rating = 'Good'
-    AND cd.cd_dep_employed_count > 2
-    AND cs.cs_promo_sk IN (SELECT p_promo_sk FROM promo_filtered)
-GROUP BY sm.sm_carrier, cp.cp_department
-ORDER BY total_profit DESC
-LIMIT 100
+    w_warehouse_name,
+    w_city,
+    CONCAT(w_street_type, ' ', w_zip) AS street_zip,
+    suite_num,
+    SUM(inv_quantity_on_hand) AS total_qty_on_hand,
+    COUNT(DISTINCT inv_item_sk) AS distinct_items
+FROM filtered
+GROUP BY
+    w_warehouse_name,
+    w_city,
+    CONCAT(w_street_type, ' ', w_zip),
+    suite_num
+ORDER BY total_qty_on_hand DESC
+LIMIT 10

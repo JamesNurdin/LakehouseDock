@@ -1,118 +1,61 @@
-WITH
-  store_sales_agg AS (
-    SELECT
-      ss.ss_item_sk,
-      ss.ss_store_sk,
-      SUM(ss.ss_ext_sales_price) AS store_sales_total,
-      SUM(ss.ss_quantity) AS store_quantity
-    FROM store_sales ss
-    GROUP BY ss.ss_item_sk, ss.ss_store_sk
-  ),
-  web_sales_agg AS (
-    SELECT
-      ws.ws_item_sk,
-      SUM(ws.ws_ext_sales_price) AS web_sales_total,
-      SUM(ws.ws_quantity) AS web_quantity
-    FROM web_sales ws
-    GROUP BY ws.ws_item_sk
-  ),
-  catalog_sales_agg AS (
-    SELECT
-      cs.cs_item_sk,
-      SUM(cs.cs_ext_sales_price) AS catalog_sales_total,
-      SUM(cs.cs_quantity) AS catalog_quantity
-    FROM catalog_sales cs
-    GROUP BY cs.cs_item_sk
-  ),
-  returns_agg AS (
-    SELECT
-      wr.wr_item_sk,
-      SUM(wr.wr_return_amt) AS return_amount,
-      SUM(wr.wr_return_quantity) AS return_quantity
-    FROM web_returns wr
-    GROUP BY wr.wr_item_sk
-  ),
-  cs_mapping AS (
-    SELECT DISTINCT
-      cs.cs_item_sk,
-      cs.cs_call_center_sk,
-      cs.cs_warehouse_sk,
-      cs.cs_promo_sk
-    FROM catalog_sales cs
-  ),
-  ss_addr AS (
-    SELECT ss.ss_item_sk, MIN(ss.ss_addr_sk) AS ss_addr_sk
-    FROM store_sales ss
-    GROUP BY ss.ss_item_sk
-  ),
-  ss_demo AS (
-    SELECT ss.ss_item_sk, MIN(ss.ss_cdemo_sk) AS ss_cdemo_sk
-    FROM store_sales ss
-    GROUP BY ss.ss_item_sk
-  ),
-  ws_mapping AS (
-    SELECT ws.ws_item_sk,
-           MIN(ws.ws_web_page_sk) AS ws_web_page_sk,
-           MIN(ws.ws_web_site_sk) AS ws_web_site_sk
-    FROM web_sales ws
-    GROUP BY ws.ws_item_sk
-  )
-SELECT
-  i_store.i_item_id,
-  i_store.i_product_name,
-  s.s_store_name,
-  cc.cc_name AS call_center_name,
-  w.w_warehouse_name,
-  prom.p_promo_name,
-  ss_agg.store_sales_total,
-  ws_agg.web_sales_total,
-  cs_agg.catalog_sales_total,
-  ret_agg.return_amount,
-  inv.inv_quantity_on_hand,
-  ca.ca_city,
-  cd.cd_gender
-FROM store_sales_agg ss_agg
-JOIN item i_store
-  ON ss_agg.ss_item_sk = i_store.i_item_sk
-JOIN store s
-  ON ss_agg.ss_store_sk = s.s_store_sk
-LEFT JOIN cs_mapping cm
-  ON ss_agg.ss_item_sk = cm.cs_item_sk
-LEFT JOIN call_center cc
-  ON cm.cs_call_center_sk = cc.cc_call_center_sk
-LEFT JOIN warehouse w
-  ON cm.cs_warehouse_sk = w.w_warehouse_sk
-LEFT JOIN promotion prom
-  ON cm.cs_promo_sk = prom.p_promo_sk
-LEFT JOIN inventory inv
-  ON i_store.i_item_sk = inv.inv_item_sk
-     AND w.w_warehouse_sk = inv.inv_warehouse_sk
-LEFT JOIN ss_addr sa
-  ON ss_agg.ss_item_sk = sa.ss_item_sk
-LEFT JOIN customer_address ca
-  ON sa.ss_addr_sk = ca.ca_address_sk
-LEFT JOIN ss_demo sd
-  ON ss_agg.ss_item_sk = sd.ss_item_sk
-LEFT JOIN customer_demographics cd
-  ON sd.ss_cdemo_sk = cd.cd_demo_sk
-LEFT JOIN web_sales_agg ws_agg
-  ON i_store.i_item_sk = ws_agg.ws_item_sk
-LEFT JOIN item i_web
-  ON ws_agg.ws_item_sk = i_web.i_item_sk
-LEFT JOIN ws_mapping wm
-  ON i_store.i_item_sk = wm.ws_item_sk
-LEFT JOIN web_page wp
-  ON wm.ws_web_page_sk = wp.wp_web_page_sk
-LEFT JOIN web_site wsit
-  ON wm.ws_web_site_sk = wsit.web_site_sk
-LEFT JOIN catalog_sales_agg cs_agg
-  ON i_store.i_item_sk = cs_agg.cs_item_sk
-LEFT JOIN returns_agg ret_agg
-  ON i_store.i_item_sk = ret_agg.wr_item_sk
-WHERE EXISTS (
-    SELECT 1 FROM inventory inv2
-    WHERE inv2.inv_item_sk = i_store.i_item_sk
-      AND inv2.inv_quantity_on_hand > 0
+WITH grouped AS (
+   SELECT
+       s.s_store_id,
+       s.s_market_manager,
+       cp.cp_department,
+       r_cat.r_reason_desc AS catalog_return_reason,
+       r_web.r_reason_desc AS web_return_reason,
+       c.c_customer_id,
+       cd.cd_gender,
+       hd.hd_income_band_sk,
+       SUM(ss.ss_ext_sales_price) AS total_store_sales,
+       SUM(ws.ws_ext_sales_price) AS total_web_sales,
+       SUM(cr.cr_return_amount) AS total_catalog_return_amount,
+       SUM(wr.wr_return_amt) AS total_web_return_amount,
+       COUNT(*) AS txn_count,
+       AVG(ss.ss_quantity) AS avg_store_quantity,
+       MIN(ss.ss_ext_sales_price) AS min_store_sale,
+       MAX(ss.ss_ext_sales_price) AS max_store_sale
+   FROM store s
+   JOIN store_sales ss ON ss.ss_store_sk = s.s_store_sk
+   JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+   JOIN customer_demographics cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
+   JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+   JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+   JOIN catalog_returns cr ON cr.cr_refunded_customer_sk = c.c_customer_sk
+   JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+   JOIN reason r_cat ON cr.cr_reason_sk = r_cat.r_reason_sk
+   JOIN web_sales ws ON ws.ws_bill_customer_sk = c.c_customer_sk
+   JOIN web_returns wr ON wr.wr_order_number = ws.ws_order_number
+       AND wr.wr_item_sk = ws.ws_item_sk
+   JOIN reason r_web ON wr.wr_reason_sk = r_web.r_reason_sk
+   WHERE s.s_market_manager = 'Thomas Pollack'
+     AND cp.cp_department = 'Sports'
+     AND r_cat.r_reason_desc = 'Package was damaged'
+     AND r_web.r_reason_desc = 'Did not like the color'
+     AND ca.ca_state = 'CA'
+     AND NOT EXISTS (
+         SELECT 1
+         FROM catalog_returns cr2
+         WHERE cr2.cr_refunded_customer_sk = c.c_customer_sk
+           AND cr2.cr_reason_sk <> cr.cr_reason_sk
+     )
+   GROUP BY
+       s.s_store_id,
+       s.s_market_manager,
+       cp.cp_department,
+       r_cat.r_reason_desc,
+       r_web.r_reason_desc,
+       c.c_customer_id,
+       cd.cd_gender,
+       hd.hd_income_band_sk
+   HAVING SUM(ss.ss_ext_sales_price) > 10000
+      AND COUNT(*) >= 5
 )
-ORDER BY i_store.i_item_id, s.s_store_name
+SELECT
+    g.*,
+    RANK() OVER (PARTITION BY g.s_market_manager ORDER BY g.total_store_sales DESC) AS sales_rank,
+    SUM(g.total_store_sales) OVER (PARTITION BY g.s_market_manager) AS market_total_store_sales
+FROM grouped g
+ORDER BY g.total_store_sales DESC
 LIMIT 100

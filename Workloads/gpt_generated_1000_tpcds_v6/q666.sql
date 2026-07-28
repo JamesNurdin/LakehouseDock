@@ -1,45 +1,44 @@
-WITH high_value_customers AS (
-    SELECT c_customer_id
-    FROM customer
-    WHERE c_preferred_cust_flag = 'Y'
-)
-SELECT *
-FROM (
-    SELECT
-        c.c_customer_id AS customer_id,
-        cc.cc_name AS channel_name,
-        SUM(cr.cr_return_amount) AS total_return_amount,
-        COUNT(*) AS return_cnt,
-        'Catalog' AS source
+WITH avg_return AS (
+    SELECT AVG(cr.cr_return_amount) AS overall_avg
     FROM catalog_returns cr
-    JOIN item i ON cr.cr_item_sk = i.i_item_sk
-    JOIN customer c ON cr.cr_refunded_customer_sk = c.c_customer_sk
-    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    WHERE cr.cr_return_amount > 50
-      AND EXISTS (
-          SELECT 1
-          FROM promotion p
-          WHERE p.p_item_sk = i.i_item_sk
-            AND p.p_discount_active = 'Y'
-      )
-    GROUP BY c.c_customer_id, cc.cc_name
-
-    UNION ALL
-
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    WHERE d.d_year = 2020
+),
+returns_2020 AS (
     SELECT
-        c.c_customer_id AS customer_id,
-        wp.wp_url AS channel_name,
-        SUM(wr.wr_return_amt_inc_tax) AS total_return_amount,
-        COUNT(*) AS return_cnt,
-        'Web' AS source
-    FROM web_returns wr
-    JOIN item i ON wr.wr_item_sk = i.i_item_sk
-    JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
-    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    WHERE wr.wr_return_amt_inc_tax > 50
-      AND wp.wp_link_count > 10
-    GROUP BY c.c_customer_id, wp.wp_url
-) combined
-WHERE combined.customer_id IN (SELECT c_customer_id FROM high_value_customers)
-ORDER BY combined.total_return_amount DESC
+        i.i_class AS class,
+        SUM(cr.cr_return_amount) AS total_amount,
+        'Return' AS metric_type
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    WHERE d.d_year = 2020
+      AND r.r_reason_desc = 'Damaged'
+      AND w.w_country = 'United States'
+      AND cr.cr_return_amount > (SELECT overall_avg FROM avg_return)
+    GROUP BY i.i_class
+),
+sales_2020 AS (
+    SELECT
+        i.i_class AS class,
+        SUM(ws.ws_ext_sales_price) AS total_amount,
+        'Sales' AS metric_type
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE d.d_year = 2020
+    GROUP BY i.i_class
+)
+SELECT class,
+       total_amount,
+       metric_type
+FROM returns_2020
+UNION ALL
+SELECT class,
+       total_amount,
+       metric_type
+FROM sales_2020
+ORDER BY class ASC, metric_type DESC
 LIMIT 100

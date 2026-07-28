@@ -1,37 +1,45 @@
-WITH filtered_addr AS (
-    SELECT
-        ca_address_sk,
-        ca_state,
-        ca_suite_number,
-        ca_address_id,
-        ca_city,
-        CONCAT(ca_city, ', ', ca_state) AS city_state,
-        regexp_extract(ca_address_id, '(A{7})([A-Z])', 2) AS addr_code
-    FROM tpcds.customer_address
-    WHERE regexp_like(ca_suite_number, '^Suite [A-Z]')
-      AND ca_address_id LIKE 'AAAAAAA%'
-      AND CONCAT(ca_city, ca_state) LIKE '%York%'
+WITH store_data AS (
+  SELECT DISTINCT
+    p.p_promo_name,
+    ss.ss_net_profit
+  FROM store_sales ss
+  JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+  WHERE ss.ss_net_paid > 100
 ),
-sales_filtered AS (
-    SELECT
-        ws_bill_addr_sk,
-        ws_ext_list_price,
-        ws_net_profit,
-        ws_quantity
-    FROM tpcds.web_sales
-    WHERE ws_ext_list_price BETWEEN 2000 AND 15000
-      AND ws_quantity > 1
+store_agg AS (
+  SELECT
+    p_promo_name AS promo_name,
+    SUM(ss_net_profit) AS profit,
+    COUNT(*) AS txns
+  FROM store_data
+  GROUP BY p_promo_name
+),
+web_data AS (
+  SELECT DISTINCT
+    p.p_promo_name,
+    ws.ws_net_profit
+  FROM web_sales ws
+  JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+  JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+  WHERE sm.sm_type = 'AIR' AND ws.ws_net_paid > 100
+),
+web_agg AS (
+  SELECT
+    p_promo_name AS promo_name,
+    SUM(ws_net_profit) AS profit,
+    COUNT(*) AS txns
+  FROM web_data
+  GROUP BY p_promo_name
 )
 SELECT
-    fa.ca_state,
-    COUNT(DISTINCT fa.ca_address_id) AS distinct_address_cnt,
-    SUM(sf.ws_net_profit) AS total_net_profit,
-    AVG(sf.ws_ext_list_price) AS avg_ext_list_price,
-    MAX(fa.addr_code) AS sample_addr_code
-FROM filtered_addr fa
-JOIN sales_filtered sf
-    ON sf.ws_bill_addr_sk = fa.ca_address_sk
-GROUP BY fa.ca_state
-HAVING SUM(sf.ws_net_profit) > 0
-ORDER BY total_net_profit DESC
-LIMIT 20
+  promo_name,
+  SUM(profit) AS total_profit,
+  SUM(txns) AS total_transactions
+FROM (
+  SELECT promo_name, profit, txns FROM store_agg
+  UNION
+  SELECT promo_name, profit, txns FROM web_agg
+) u
+GROUP BY promo_name
+ORDER BY total_profit DESC
+LIMIT 10

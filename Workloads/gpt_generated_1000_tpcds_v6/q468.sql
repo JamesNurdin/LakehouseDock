@@ -1,46 +1,38 @@
-WITH catalog_agg AS (
-  SELECT
-    ca.ca_state AS state,
-    SUM(cr.cr_return_amount) AS total_return_amount,
-    COUNT(*) AS return_cnt,
-    'catalog' AS src
-  FROM catalog_returns cr
-  JOIN customer c ON cr.cr_refunded_customer_sk = c.c_customer_sk
-  JOIN customer_address ca ON cr.cr_refunded_addr_sk = ca.ca_address_sk
-  WHERE cr.cr_return_amount > 50
-  GROUP BY ca.ca_state
+WITH sales_by_item AS (
+    SELECT
+        i.i_class,
+        i.i_brand,
+        i.i_item_sk,
+        SUM(ws.ws_net_paid_inc_ship) AS total_sales,
+        COUNT(*) AS sales_cnt
+    FROM tpcds.item i
+    JOIN tpcds.web_sales ws ON ws.ws_item_sk = i.i_item_sk
+    JOIN tpcds.web_page wp ON wp.wp_web_page_sk = ws.ws_web_page_sk
+    WHERE i.i_size IN ('medium', 'small')
+      AND wp.wp_autogen_flag = 'N'
+      AND ws.ws_net_paid_inc_ship > 1000
+      AND i.i_rec_start_date >= DATE '2000-01-01'
+      AND EXISTS (
+          SELECT 1
+          FROM tpcds.web_page wp2
+          WHERE wp2.wp_web_page_sk = ws.ws_web_page_sk
+            AND wp2.wp_type = 'A'
+      )
+    GROUP BY i.i_class, i.i_brand, i.i_item_sk
 ),
-web_agg AS (
-  SELECT
-    ca.ca_state AS state,
-    SUM(wr.wr_return_amt) AS total_return_amount,
-    COUNT(*) AS return_cnt,
-    'web' AS src
-  FROM web_returns wr
-  JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
-  JOIN customer_address ca ON wr.wr_refunded_addr_sk = ca.ca_address_sk
-  JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-  WHERE wp.wp_max_ad_count >= 2
-  GROUP BY ca.ca_state
-),
-avg_return AS (
-  SELECT AVG(total_return_amount) AS avg_total_return_amount
-  FROM (
-    SELECT SUM(cr.cr_return_amount) AS total_return_amount FROM catalog_returns cr
-    UNION ALL
-    SELECT SUM(wr.wr_return_amt) AS total_return_amount FROM web_returns wr
-  ) t
+class_agg AS (
+    SELECT
+        i_class,
+        AVG(total_sales) AS avg_sales_per_item,
+        SUM(sales_cnt) AS total_transactions
+    FROM sales_by_item
+    GROUP BY i_class
 )
 SELECT
-  u.state,
-  u.src,
-  u.total_return_amount,
-  u.return_cnt,
-  a.avg_total_return_amount
-FROM (
-  SELECT state, src, total_return_amount, return_cnt FROM catalog_agg
-  UNION ALL
-  SELECT state, src, total_return_amount, return_cnt FROM web_agg
-) u
-CROSS JOIN avg_return a
-ORDER BY u.state, u.src
+    ca.i_class,
+    ca.avg_sales_per_item,
+    ca.total_transactions
+FROM class_agg ca
+WHERE ca.avg_sales_per_item > 2000
+ORDER BY ca.avg_sales_per_item DESC
+LIMIT 10

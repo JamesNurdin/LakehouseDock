@@ -1,63 +1,48 @@
-WITH sales_agg AS (
-   SELECT
-       hd_bill.hd_demo_sk AS demo_sk,
-       hd_bill.hd_buy_potential,
-       SUM(ws.ws_net_profit) AS total_net_profit,
-       COUNT(*) AS sales_cnt,
-       SUM(ws.ws_quantity) AS total_quantity,
-       AVG(ws.ws_sales_price) AS avg_sales_price
-   FROM tpcds.web_sales ws
-   JOIN tpcds.household_demographics hd_bill
-     ON ws.ws_bill_hdemo_sk = hd_bill.hd_demo_sk
-   WHERE ws.ws_sales_price > 20
-     AND ws.ws_quantity >= 1
-     AND hd_bill.hd_vehicle_count >= 0
-     AND hd_bill.hd_buy_potential IN ('1001-5000', '5001-10000')
-   GROUP BY hd_bill.hd_demo_sk, hd_bill.hd_buy_potential
-),
-
-returns_agg AS (
-   SELECT
-       hd_ref.hd_demo_sk AS demo_sk,
-       SUM(wr.wr_return_amt) AS total_return_amt,
-       SUM(wr.wr_account_credit) AS total_account_credit,
-       COUNT(*) AS return_cnt
-   FROM tpcds.web_returns wr
-   JOIN tpcds.household_demographics hd_ref
-     ON wr.wr_refunded_hdemo_sk = hd_ref.hd_demo_sk
-   WHERE wr.wr_return_amt > 0
-     AND wr.wr_account_credit > 10
-     AND hd_ref.hd_dep_count <= 5
-   GROUP BY hd_ref.hd_demo_sk
-),
-
-combined AS (
-   SELECT
-       s.demo_sk,
-       s.hd_buy_potential,
-       s.total_net_profit,
-       s.sales_cnt,
-       s.total_quantity,
-       s.avg_sales_price,
-       COALESCE(r.total_return_amt, 0) AS total_return_amt,
-       COALESCE(r.total_account_credit, 0) AS total_account_credit,
-       COALESCE(r.return_cnt, 0) AS return_cnt,
-       (s.total_net_profit - COALESCE(r.total_return_amt, 0)) AS net_profit_after_returns
-   FROM sales_agg s
-   LEFT JOIN returns_agg r
-     ON s.demo_sk = r.demo_sk
+WITH promo_sales AS (
+    SELECT
+        p.p_promo_sk,
+        concat(p.p_promo_name, ':', p.p_promo_id) AS promo_full_name,
+        regexp_extract(p.p_channel_details, '(\\w+)', 1) AS first_word_channel,
+        CASE WHEN regexp_like(p.p_promo_name, '^a') THEN 'StartsWithA' ELSE 'Other' END AS name_category,
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        COUNT(*) AS sales_cnt,
+        AVG(ss.ss_net_profit) AS avg_net_profit
+    FROM store_sales ss
+    JOIN promotion p
+        ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN household_demographics hd
+        ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib
+        ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE p.p_promo_name LIKE '%a%'
+    GROUP BY
+        p.p_promo_sk,
+        concat(p.p_promo_name, ':', p.p_promo_id),
+        regexp_extract(p.p_channel_details, '(\\w+)', 1),
+        CASE WHEN regexp_like(p.p_promo_name, '^a') THEN 'StartsWithA' ELSE 'Other' END,
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
 )
 SELECT
-   demo_sk,
-   hd_buy_potential,
-   net_profit_after_returns,
-   sales_cnt,
-   return_cnt,
-   avg_sales_price
-FROM combined
-WHERE net_profit_after_returns > 0
-  AND sales_cnt >= 10
-  AND return_cnt <= 5
-  AND avg_sales_price BETWEEN 30 AND 200
-ORDER BY net_profit_after_returns DESC
+    promo_full_name,
+    first_word_channel,
+    name_category,
+    ib_income_band_sk,
+    ib_lower_bound,
+    ib_upper_bound,
+    total_net_profit,
+    sales_cnt,
+    avg_net_profit,
+    CASE
+        WHEN total_net_profit > 100000 THEN 'High'
+        WHEN total_net_profit > 50000 THEN 'Medium'
+        ELSE 'Low'
+    END AS profit_category,
+    RANK() OVER (PARTITION BY ib_income_band_sk ORDER BY total_net_profit DESC) AS profit_rank_in_band
+FROM promo_sales
+ORDER BY total_net_profit DESC
 LIMIT 100

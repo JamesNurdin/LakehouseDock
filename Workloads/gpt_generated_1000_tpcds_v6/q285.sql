@@ -1,49 +1,49 @@
-WITH filtered_sales AS (
-    SELECT
-        cs.cs_sold_date_sk,
-        cs.cs_order_number,
-        cs.cs_item_sk,
-        cs.cs_warehouse_sk,
-        cs.cs_call_center_sk,
-        cs.cs_bill_cdemo_sk,
-        cs.cs_list_price,
-        cs.cs_sales_price,
-        cs.cs_net_profit,
-        cc.cc_name,
-        w.w_warehouse_name,
-        i.i_item_id,
-        i.i_class,
-        i.i_rec_start_date,
-        cd.cd_education_status,
-        cd.cd_dep_count
-    FROM catalog_sales cs
-    JOIN call_center cc
-        ON cs.cs_call_center_sk = cc.cc_call_center_sk
-    JOIN warehouse w
-        ON cs.cs_warehouse_sk = w.w_warehouse_sk
-    JOIN item i
-        ON cs.cs_item_sk = i.i_item_sk
-    JOIN customer_demographics cd
-        ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
-    WHERE cs.cs_list_price > 100
-      AND cs.cs_sales_price BETWEEN 50 AND 200
-      AND i.i_class IN ('shirts', 'sports-apparel')
-      AND w.w_state = 'CA'
-      AND cd.cd_education_status = 'Advanced Degree'
-      AND i.i_rec_start_date >= DATE '1999-01-01'
+WITH catalog_year_sales AS (
+  SELECT
+    d.d_year AS year,
+    SUM(cs.cs_net_paid) AS total_sales,
+    'catalog' AS channel
+  FROM tpcds.catalog_sales cs
+  JOIN tpcds.date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+  JOIN tpcds.call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+  WHERE d.d_year BETWEEN 1998 AND 2000
+    AND cc.cc_state = 'CA'
+  GROUP BY d.d_year
+),
+web_year_sales AS (
+  SELECT
+    d.d_year AS year,
+    SUM(ws.ws_net_paid) AS total_sales,
+    'web' AS channel
+  FROM tpcds.web_sales ws
+  JOIN tpcds.date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+  JOIN tpcds.web_site wsite ON ws.ws_web_site_sk = wsite.web_site_sk
+  WHERE d.d_year BETWEEN 1998 AND 2000
+    AND wsite.web_country = 'United States'
+  GROUP BY d.d_year
+),
+combined AS (
+  SELECT * FROM catalog_year_sales
+  UNION ALL
+  SELECT * FROM web_year_sales
 )
 SELECT
-    fs.cc_name,
-    fs.w_warehouse_name,
-    fs.i_item_id,
-    fs.i_class,
-    fs.cd_education_status,
-    fs.cs_order_number,
-    fs.cs_net_profit,
-    CASE
-        WHEN (fs.cs_net_profit / NULLIF(fs.cs_sales_price, 0)) > 0.20 THEN 'High'
-        ELSE 'Low'
-    END AS profit_category,
-    RANK() OVER (PARTITION BY fs.cc_name ORDER BY fs.cs_net_profit DESC) AS profit_rank
-FROM filtered_sales fs
-ORDER BY profit_rank ASC, fs.cc_name
+  c.year,
+  c.channel,
+  c.total_sales,
+  (
+    SELECT DISTINCT cc.cc_name
+    FROM tpcds.call_center cc
+    WHERE cc.cc_state = 'CA'
+      AND cc.cc_gmt_offset = (
+        SELECT MAX(cc2.cc_gmt_offset)
+        FROM tpcds.call_center cc2
+        WHERE cc2.cc_state = 'CA'
+      )
+    LIMIT 1
+  ) AS representative_cc_name
+FROM combined c
+WHERE c.total_sales > (
+  SELECT AVG(total_sales) FROM combined
+)
+ORDER BY c.year, c.channel

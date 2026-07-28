@@ -1,62 +1,39 @@
-WITH filtered_items AS (
-    SELECT i_item_sk,
-           i_product_name,
-           i_current_price
-    FROM   item
-    WHERE  i_current_price > 100
+/* goal: Identify stores with returns due to damage or defect, summarizing return amounts and flagging stores with above‑average returns and any fraud‑related returns. */
+WITH filtered_returns AS (
+    SELECT
+        sr.sr_store_sk,
+        sr.sr_return_amt,
+        sr.sr_net_loss,
+        r.r_reason_desc,
+        s.s_store_name,
+        s.s_city,
+        td.t_hour
+    FROM store_returns sr
+    JOIN store s ON sr.sr_store_sk = s.s_store_sk
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    JOIN time_dim td ON sr.sr_return_time_sk = td.t_time_sk
+    WHERE regexp_like(r.r_reason_desc, '(?i)damage|defect')
+      AND s.s_store_name LIKE '%Store%'
 )
-SELECT  fi.i_item_sk,
-        fi.i_product_name,
-        'store' AS sales_channel,
-        ss_agg.total_quantity,
-        ss_agg.total_net_profit,
-        (
-            SELECT AVG(ss2.ss_net_profit)
-            FROM   store_sales ss2
-            WHERE  ss2.ss_item_sk = fi.i_item_sk
-        ) AS avg_store_net_profit
-FROM    filtered_items fi
-JOIN (
-        SELECT ss_item_sk,
-               SUM(ss_quantity)      AS total_quantity,
-               SUM(ss_net_profit)    AS total_net_profit
-        FROM   store_sales
-        WHERE  ss_ext_wholesale_cost > 5000
-        GROUP BY ss_item_sk
-     ) ss_agg
-     ON ss_agg.ss_item_sk = fi.i_item_sk
-WHERE EXISTS (
+SELECT
+    CONCAT(fr.s_store_name, ' - ', fr.s_city) AS store_location,
+    COUNT(*) AS num_returns,
+    SUM(fr.sr_return_amt) AS total_return_amount,
+    SUM(fr.sr_net_loss) AS total_net_loss,
+    AVG(fr.sr_return_amt) AS avg_return_amount,
+    CASE
+        WHEN SUM(fr.sr_return_amt) > (SELECT AVG(sr_return_amt) FROM filtered_returns) THEN 'Above Avg'
+        ELSE 'Below Avg'
+    END AS return_amount_category,
+    MAX(fr.t_hour) AS latest_return_hour,
+    CASE WHEN EXISTS (
         SELECT 1
-        FROM   catalog_sales cs
-        WHERE  cs.cs_item_sk = fi.i_item_sk
-          AND  cs.cs_net_profit > 500
-    )
-UNION ALL
-SELECT  fi.i_item_sk,
-        fi.i_product_name,
-        'web' AS sales_channel,
-        ws_agg.total_quantity,
-        ws_agg.total_net_profit,
-        (
-            SELECT AVG(ws2.ws_net_profit)
-            FROM   web_sales ws2
-            WHERE  ws2.ws_item_sk = fi.i_item_sk
-        ) AS avg_web_net_profit
-FROM    filtered_items fi
-JOIN (
-        SELECT ws_item_sk,
-               SUM(ws_quantity)      AS total_quantity,
-               SUM(ws_net_profit)    AS total_net_profit
-        FROM   web_sales
-        WHERE  ws_ext_wholesale_cost > 5000
-          AND  ws_web_page_sk IN (
-                 SELECT wp_web_page_sk
-                 FROM   web_page
-                 WHERE  wp_type = 'home'
-                   AND  wp_creation_date_sk = 2450800
-               )
-        GROUP BY ws_item_sk
-     ) ws_agg
-     ON ws_agg.ws_item_sk = fi.i_item_sk
-ORDER BY total_net_profit DESC
+        FROM store_returns sr2
+        JOIN reason r2 ON sr2.sr_reason_sk = r2.r_reason_sk
+        WHERE sr2.sr_store_sk = fr.sr_store_sk
+          AND regexp_like(r2.r_reason_desc, '(?i)fraud')
+    ) THEN 1 ELSE 0 END AS has_fraud_return
+FROM filtered_returns fr
+GROUP BY fr.sr_store_sk, fr.s_store_name, fr.s_city
+ORDER BY total_return_amount DESC
 LIMIT 100

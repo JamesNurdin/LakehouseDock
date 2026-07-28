@@ -1,32 +1,46 @@
-WITH warehouse_filtered AS (
+WITH holiday_returns AS (
     SELECT
-        w_warehouse_sk,
-        w_warehouse_id,
-        w_warehouse_name,
-        w_zip,
-        w_city,
-        w_warehouse_sq_ft,
-        regexp_extract(w_zip, '(\\d{3})') AS zip_prefix
-    FROM tpcds.warehouse
-    WHERE regexp_like(w_warehouse_id, '^AAAAAAA[AB]')
-      AND w_city LIKE '%York%'
+        d.d_year,
+        'Y' AS holiday_flag,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_inc_tax,
+        AVG(sr.sr_return_quantity) AS avg_quantity,
+        COUNT(*) AS return_cnt
+    FROM store_returns sr
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    WHERE d.d_holiday = 'Y'
+      AND d.d_week_seq IN (5, 17)
+      AND sr.sr_return_quantity > 30
+      AND d.d_date BETWEEN DATE '2001-01-01' AND DATE '2001-12-31'
+    GROUP BY d.d_year
+),
+nonholiday_returns AS (
+    SELECT
+        d.d_year,
+        'N' AS holiday_flag,
+        SUM(sr.sr_return_amt_inc_tax) AS total_return_inc_tax,
+        AVG(sr.sr_return_quantity) AS avg_quantity,
+        COUNT(*) AS return_cnt
+    FROM store_returns sr
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    WHERE d.d_holiday = 'N'
+      AND d.d_week_seq NOT IN (5, 17)
+      AND sr.sr_return_quantity <= 30
+      AND d.d_date BETWEEN DATE '2001-01-01' AND DATE '2001-12-31'
+    GROUP BY d.d_year
 )
 SELECT
-    wf.w_warehouse_id,
-    wf.w_warehouse_name,
-    wf.zip_prefix,
-    COUNT(DISTINCT i.inv_item_sk) AS distinct_items,
-    SUM(i.inv_quantity_on_hand) AS total_qty,
-    AVG(i.inv_quantity_on_hand) AS avg_qty_per_item
-FROM warehouse_filtered wf
-JOIN tpcds.inventory i
-    ON i.inv_warehouse_sk = wf.w_warehouse_sk
-WHERE i.inv_quantity_on_hand > (
-        SELECT AVG(inv_quantity_on_hand) * 0.5
-        FROM tpcds.inventory
-        WHERE inv_warehouse_sk = wf.w_warehouse_sk
-    )
-GROUP BY wf.w_warehouse_id, wf.w_warehouse_name, wf.zip_prefix
-HAVING SUM(i.inv_quantity_on_hand) > 2000
-ORDER BY total_qty DESC
-LIMIT 10
+    holiday_returns.d_year,
+    holiday_returns.holiday_flag,
+    holiday_returns.total_return_inc_tax,
+    holiday_returns.avg_quantity,
+    holiday_returns.return_cnt
+FROM holiday_returns
+UNION ALL
+SELECT
+    nonholiday_returns.d_year,
+    nonholiday_returns.holiday_flag,
+    nonholiday_returns.total_return_inc_tax,
+    nonholiday_returns.avg_quantity,
+    nonholiday_returns.return_cnt
+FROM nonholiday_returns
+ORDER BY d_year, holiday_flag, total_return_inc_tax DESC

@@ -1,29 +1,44 @@
-WITH store_returns_agg AS (
+WITH sales_agg AS (
     SELECT
-        d.d_year AS year,
-        'store_return' AS metric_type,
-        SUM(sr.sr_net_loss) AS amount
-    FROM store_returns sr
-    JOIN date_dim d
-        ON sr.sr_returned_date_sk = d.d_date_sk
-    WHERE sr.sr_net_loss > 100
-      AND d.d_year BETWEEN 2000 AND 2002
-    GROUP BY d.d_year
+        ws_web_page_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_quantity) AS total_quantity,
+        AVG(ws_ext_discount_amt) AS avg_discount,
+        COUNT(DISTINCT ws_order_number) AS distinct_orders
+    FROM tpcds.web_sales
+    WHERE ws_wholesale_cost > 30
+      AND ws_quantity > 1
+      AND ws_ext_sales_price IS NOT NULL
+    GROUP BY ws_web_page_sk
 ),
-web_sales_agg AS (
+page_filtered AS (
     SELECT
-        d.d_year AS year,
-        'web_sales' AS metric_type,
-        SUM(ws.ws_net_profit) AS amount
-    FROM web_sales ws
-    JOIN date_dim d
-        ON ws.ws_sold_date_sk = d.d_date_sk
-    WHERE ws.ws_list_price > 100
-      AND d.d_year BETWEEN 2000 AND 2002
-    GROUP BY d.d_year
+        wp_web_page_sk,
+        wp_web_page_id,
+        wp_type,
+        wp_rec_end_date,
+        wp_max_ad_count
+    FROM tpcds.web_page
+    WHERE wp_rec_end_date >= DATE '2000-01-01'
+      AND wp_max_ad_count <= 3
+      AND wp_type IN ('Home', 'Product')
 )
-SELECT year, metric_type, amount FROM store_returns_agg
-UNION ALL
-SELECT year, metric_type, amount FROM web_sales_agg
-ORDER BY year, metric_type
+SELECT
+    DISTINCT p.wp_web_page_id,
+    p.wp_type,
+    s.total_sales,
+    s.total_quantity,
+    s.avg_discount,
+    CASE
+        WHEN s.total_sales > 10000 THEN 'BIG'
+        WHEN s.total_sales > 5000 THEN 'MEDIUM'
+        ELSE 'SMALL'
+    END AS sales_size,
+    RANK() OVER (PARTITION BY p.wp_type ORDER BY s.total_sales DESC) AS sales_rank_by_type
+FROM page_filtered p
+JOIN sales_agg s
+    ON s.ws_web_page_sk = p.wp_web_page_sk
+WHERE s.avg_discount < 5
+  AND p.wp_max_ad_count >= 0
+ORDER BY s.total_sales DESC
 LIMIT 100

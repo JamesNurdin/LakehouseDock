@@ -1,12 +1,13 @@
-SELECT
-  cc.cc_name,
-  cc.cc_city,
-  SUM(cr.cr_return_amount) AS total_return_amount,
-  COUNT(*) AS return_cnt
-FROM tpcds.catalog_returns cr
-JOIN tpcds.call_center cc
-  ON cr.cr_call_center_sk = cc.cc_call_center_sk
-WHERE cc.cc_company = 5
-  AND cr.cr_store_credit > 500
-GROUP BY cc.cc_name, cc.cc_city
-ORDER BY total_return_amount DESC
+SELECT i.i_item_id,
+       i.i_product_name,
+       i.i_current_price,
+       COUNT(p.p_promo_sk) AS promo_count,
+       SUM(p.p_cost) AS total_promo_cost
+FROM tpcds.item i
+JOIN tpcds.promotion p
+  ON p.p_item_sk = i.i_item_sk
+WHERE i.i_class_id = 12
+  AND p.p_purpose = 'Unknown'
+GROUP BY i.i_item_id, i.i_product_name, i.i_current_price
+ORDER BY total_promo_cost DESC
+LIMIT 100

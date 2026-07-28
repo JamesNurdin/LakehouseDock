@@ -1,64 +1,60 @@
-WITH recent_inventory AS (
-    SELECT inv_item_sk,
-           SUM(inv_quantity_on_hand) AS total_qty
-    FROM inventory
-    WHERE inv_date_sk BETWEEN 2450900 AND 2451000
-    GROUP BY inv_item_sk
+/* goal: Identify warehouses and call centers with the highest return amounts in 2001, enriched with inventory levels and promotion channel info, and rank them */
+WITH returns_agg AS (
+    SELECT
+        cr.cr_warehouse_sk,
+        cr.cr_returned_date_sk,
+        cc.cc_name,
+        cp.cp_catalog_number,
+        w.w_warehouse_name,
+        SUM(cr.cr_return_amount)               AS total_return_amount,
+        AVG(cr.cr_return_quantity)              AS avg_return_qty,
+        COUNT(DISTINCT cr.cr_refunded_customer_sk) AS unique_refunded_customers,
+        d.d_year,
+        d.d_day_name,
+        cc.cc_gmt_offset,
+        cp.cp_catalog_number AS catalog_num_filter,
+        p.p_channel_event
+    FROM catalog_returns cr
+    JOIN call_center cc        ON cr.cr_call_center_sk   = cc.cc_call_center_sk
+    JOIN catalog_page cp        ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN warehouse w            ON cr.cr_warehouse_sk    = w.w_warehouse_sk
+    JOIN date_dim d             ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN promotion p            ON p.p_start_date_sk = d.d_date_sk
+    GROUP BY
+        cr.cr_warehouse_sk,
+        cr.cr_returned_date_sk,
+        cc.cc_name,
+        cp.cp_catalog_number,
+        w.w_warehouse_name,
+        d.d_year,
+        d.d_day_name,
+        cc.cc_gmt_offset,
+        cp.cp_catalog_number,
+        p.p_channel_event
 )
-
-SELECT *
-FROM (
-    SELECT
-        s.s_store_name,
-        i.i_category,
-        i.i_brand,
-        SUM(sr.sr_net_loss) AS net_loss,
-        CASE WHEN SUM(sr.sr_net_loss) > 1000 THEN 'High' ELSE 'Low' END AS loss_level,
-        (SELECT MAX(i2.i_current_price)
-         FROM item i2
-         WHERE i2.i_category_id = i.i_category_id) AS max_category_price,
-        ri.total_qty
-    FROM store_returns sr
-    JOIN store s ON sr.sr_store_sk = s.s_store_sk
-    JOIN item i ON sr.sr_item_sk = i.i_item_sk
-    LEFT JOIN recent_inventory ri ON i.i_item_sk = ri.inv_item_sk
-    WHERE i.i_category_id IN (5, 8)
-      AND EXISTS (
-          SELECT 1
-          FROM inventory inv
-          WHERE inv.inv_item_sk = i.i_item_sk
-            AND inv.inv_quantity_on_hand > 0
-      )
-    GROUP BY s.s_store_name,
-             i.i_category,
-             i.i_brand,
-             i.i_category_id,
-             ri.total_qty
-    UNION ALL
-    SELECT
-        CAST(NULL AS varchar) AS s_store_name,
-        i.i_category,
-        i.i_brand,
-        SUM(wr.wr_net_loss) AS net_loss,
-        CASE WHEN SUM(wr.wr_net_loss) > 1000 THEN 'High' ELSE 'Low' END AS loss_level,
-        (SELECT MAX(i2.i_current_price)
-         FROM item i2
-         WHERE i2.i_category_id = i.i_category_id) AS max_category_price,
-        ri.total_qty
-    FROM web_returns wr
-    JOIN item i ON wr.wr_item_sk = i.i_item_sk
-    LEFT JOIN recent_inventory ri ON i.i_item_sk = ri.inv_item_sk
-    WHERE i.i_category_id IN (5, 8)
-      AND EXISTS (
-          SELECT 1
-          FROM inventory inv
-          WHERE inv.inv_item_sk = i.i_item_sk
-            AND inv.inv_quantity_on_hand > 0
-      )
-    GROUP BY i.i_category,
-             i.i_brand,
-             i.i_category_id,
-             ri.total_qty
-) AS combined
-ORDER BY net_loss DESC
+SELECT
+    ra.w_warehouse_name,
+    ra.cc_name,
+    ra.cp_catalog_number,
+    ra.total_return_amount,
+    ra.avg_return_qty,
+    ra.unique_refunded_customers,
+    /* scalar sub‑query: total inventory on hand for the same warehouse (all dates) */
+    (SELECT SUM(i.inv_quantity_on_hand)
+       FROM inventory i
+       WHERE i.inv_warehouse_sk = ra.cr_warehouse_sk) AS total_inventory_qty,
+    CASE WHEN ra.total_return_amount > 1000 THEN 'High' ELSE 'Low' END AS return_category,
+    RANK() OVER (ORDER BY ra.total_return_amount DESC) AS return_rank
+FROM returns_agg ra
+/* join inventory to bring in the date dimension for the inventory row that matches the return date */
+JOIN inventory inv
+    ON inv.inv_warehouse_sk = ra.cr_warehouse_sk
+   AND inv.inv_date_sk      = ra.cr_returned_date_sk
+WHERE
+    ra.d_year = 2001
+    AND ra.d_day_name = 'Saturday'
+    AND ra.cc_gmt_offset = -5.00
+    AND ra.cp_catalog_number IN (19, 16)
+    AND ra.p_channel_event = 'N'
+ORDER BY return_rank
 LIMIT 100

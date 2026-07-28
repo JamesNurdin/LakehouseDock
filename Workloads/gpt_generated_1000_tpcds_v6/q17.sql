@@ -1,49 +1,31 @@
-WITH base1 AS (
-   SELECT
-       wp.wp_web_page_sk,
-       wp.wp_type,
-       wp.wp_url,
-       SUM(wr.wr_return_amt) AS total_return_amt,
-       COUNT(*) AS returns_cnt,
-       (SELECT MAX(wr2.wr_return_amt)
-        FROM web_returns wr2
-        WHERE wr2.wr_web_page_sk = wp.wp_web_page_sk) AS max_return_amt
-   FROM web_returns wr
-   JOIN web_page wp
-     ON wr.wr_web_page_sk = wp.wp_web_page_sk
-   WHERE wp.wp_autogen_flag = 'Y'
-     AND wr.wr_return_quantity > 30
-     AND EXISTS (
-         SELECT 1 FROM web_returns wr3
-         WHERE wr3.wr_web_page_sk = wp.wp_web_page_sk
-           AND wr3.wr_refunded_cash > 200
-     )
-   GROUP BY wp.wp_web_page_sk, wp.wp_type, wp.wp_url
-   HAVING SUM(wr.wr_return_amt) > 1000
-),
-base2 AS (
-   SELECT
-       wp.wp_web_page_sk,
-       wp.wp_type,
-       wp.wp_url,
-       SUM(wr.wr_return_amt) AS total_return_amt,
-       COUNT(*) AS returns_cnt,
-       (SELECT MAX(wr2.wr_return_amt)
-        FROM web_returns wr2
-        WHERE wr2.wr_web_page_sk = wp.wp_web_page_sk) AS max_return_amt
-   FROM web_returns wr
-   JOIN web_page wp
-     ON wr.wr_web_page_sk = wp.wp_web_page_sk
-   WHERE wp.wp_autogen_flag = 'N'
-     AND wp.wp_max_ad_count >= 2
-     AND wr.wr_return_quantity BETWEEN 10 AND 20
-   GROUP BY wp.wp_web_page_sk, wp.wp_type, wp.wp_url
-   HAVING COUNT(*) >= 5
-)
-SELECT wp_type, wp_url, total_return_amt, returns_cnt, max_return_amt
-FROM base1
-UNION ALL
-SELECT wp_type, wp_url, total_return_amt, returns_cnt, max_return_amt
-FROM base2
-ORDER BY total_return_amt DESC
+SELECT
+  d.d_year,
+  d.d_month_seq,
+  sm.sm_type AS ship_mode,
+  hd.hd_income_band_sk,
+  SUM(cs.cs_net_paid_inc_ship_tax) AS total_net_paid,
+  COUNT(DISTINCT cs.cs_bill_customer_sk) AS distinct_customers,
+  REGEXP_EXTRACT(i.i_product_name, '(\\d{4})', 1) AS product_code_4digits,
+  CONCAT(i.i_brand, ' ', i.i_color) AS brand_color
+FROM catalog_sales cs
+JOIN item i
+  ON cs.cs_item_sk = i.i_item_sk
+JOIN date_dim d
+  ON cs.cs_sold_date_sk = d.d_date_sk
+JOIN ship_mode sm
+  ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN household_demographics hd
+  ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+WHERE REGEXP_LIKE(i.i_product_name, '\\d{4}')
+  AND i.i_formulation LIKE '90%'
+  AND d.d_year = 2001
+GROUP BY
+  d.d_year,
+  d.d_month_seq,
+  sm.sm_type,
+  hd.hd_income_band_sk,
+  REGEXP_EXTRACT(i.i_product_name, '(\\d{4})', 1),
+  CONCAT(i.i_brand, ' ', i.i_color)
+HAVING SUM(cs.cs_net_paid_inc_ship_tax) > 10000
+ORDER BY total_net_paid DESC
 LIMIT 100

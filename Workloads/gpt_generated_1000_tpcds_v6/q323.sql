@@ -1,26 +1,39 @@
-SELECT year,
-       sales_type,
-       total_sales
-FROM (
-    SELECT d.d_year AS year,
-           'sold' AS sales_type,
-           SUM(ws.ws_ext_sales_price) AS total_sales
-    FROM web_sales ws
-    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
-    JOIN item i ON ws.ws_item_sk = i.i_item_sk
-    WHERE i.i_units = 'Case'
-      AND ws.ws_list_price > 50
-    GROUP BY d.d_year
-    UNION ALL
-    SELECT d.d_year AS year,
-           'shipped' AS sales_type,
-           SUM(ws.ws_ext_sales_price) AS total_sales
-    FROM web_sales ws
-    JOIN date_dim d ON ws.ws_ship_date_sk = d.d_date_sk
-    JOIN item i ON ws.ws_item_sk = i.i_item_sk
-    WHERE i.i_units = 'Pound'
-      AND ws.ws_list_price > 50
-    GROUP BY d.d_year
-) AS combined
-ORDER BY year, sales_type
+WITH sales_agg AS (
+    SELECT
+        s.s_store_id AS store_id,
+        d.d_year AS year,
+        SUM(ss.ss_net_paid) AS total_sales
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE d.d_year = 2001
+    GROUP BY s.s_store_id, d.d_year
+),
+returns_agg AS (
+    SELECT
+        s.s_store_id AS store_id,
+        d.d_year AS year,
+        SUM(sr.sr_return_amt_inc_tax) AS total_returns
+    FROM store_returns sr
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    JOIN store s ON sr.sr_store_sk = s.s_store_sk
+    WHERE d.d_year = 2001
+    GROUP BY s.s_store_id, d.d_year
+)
+SELECT
+    store_id,
+    year,
+    total_sales,
+    CAST(NULL AS decimal(7,2)) AS total_returns,
+    'sales' AS source
+FROM sales_agg
+UNION ALL
+SELECT
+    store_id,
+    year,
+    CAST(NULL AS decimal(7,2)) AS total_sales,
+    total_returns,
+    'returns' AS source
+FROM returns_agg
+ORDER BY store_id, year, source
 LIMIT 100

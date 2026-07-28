@@ -1,32 +1,61 @@
-WITH sales_promo_agg AS (
+WITH base AS (
     SELECT
-        d.d_year AS year,
-        p.p_channel_email AS channel_email,
-        SUM(cs.cs_ext_sales_price) AS total_sales,
-        SUM(cs.cs_ext_discount_amt) AS total_discount,
-        COUNT(*) AS order_cnt
+        cs.cs_sold_date_sk,
+        sm.sm_type,
+        cs.cs_ext_sales_price,
+        cs.cs_net_profit
     FROM catalog_sales cs
-    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
-    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
-    WHERE d.d_year = 2001
-      AND d.d_month_seq BETWEEN 1200 AND 1220
-      AND p.p_discount_active = 'Y'
-      AND p.p_channel_tv = 'Y'
-    GROUP BY d.d_year, p.p_channel_email
+    JOIN ship_mode sm
+      ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE cs.cs_list_price > 100
+      AND cs.cs_quantity BETWEEN 1 AND 5
+      AND cs.cs_wholesale_cost < 150
+      AND cs.cs_coupon_amt > 50
+      AND cs.cs_ship_mode_sk IS NOT NULL
+      AND sm.sm_code = 'AIR'
+      AND EXISTS (
+          SELECT 1 FROM ship_mode sm2
+          WHERE sm2.sm_ship_mode_sk = cs.cs_ship_mode_sk
+            AND sm2.sm_contract = 'Xjy3ZPuiDjzHlRx14Z3'
+      )
+), agg1 AS (
+    SELECT
+        sm_type,
+        cs_sold_date_sk,
+        SUM(cs_ext_sales_price) AS total_sales,
+        SUM(cs_net_profit) AS total_profit,
+        COUNT(*) AS order_cnt
+    FROM base
+    GROUP BY ROLLUP(sm_type, cs_sold_date_sk)
+), ranked AS (
+    SELECT
+        sm_type,
+        cs_sold_date_sk,
+        total_sales,
+        total_profit,
+        order_cnt,
+        ROW_NUMBER() OVER (PARTITION BY sm_type ORDER BY total_sales DESC) AS sales_rank
+    FROM agg1
+    WHERE sm_type IS NOT NULL AND cs_sold_date_sk IS NOT NULL
+), final AS (
+    SELECT
+        sm_type,
+        AVG(total_sales) AS avg_sales,
+        SUM(total_profit) AS sum_profit,
+        COUNT(*) AS date_cnt,
+        MAX(sales_rank) AS max_rank
+    FROM ranked
+    GROUP BY sm_type
+    HAVING AVG(total_sales) > (
+        SELECT AVG(total_sales) FROM agg1 WHERE sm_type IS NOT NULL
+    )
 )
 SELECT
-    a.year,
-    a.channel_email,
-    AVG(a.total_sales) AS avg_sales_per_channel,
-    (SELECT MAX(cs2.cs_ext_discount_amt) FROM catalog_sales cs2) AS max_discount_overall
-FROM sales_promo_agg a
-WHERE EXISTS (
-        SELECT 1
-        FROM promotion p_sub
-        WHERE p_sub.p_channel_email = a.channel_email
-          AND p_sub.p_response_target > 0
-    )
-GROUP BY a.year, a.channel_email
-HAVING AVG(a.total_sales) > 5000
-ORDER BY avg_sales_per_channel DESC
+    sm_type,
+    avg_sales,
+    sum_profit,
+    date_cnt,
+    max_rank
+FROM final
+ORDER BY avg_sales DESC
 LIMIT 100

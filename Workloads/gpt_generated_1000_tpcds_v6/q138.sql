@@ -1,50 +1,68 @@
-WITH ws_agg AS (
+WITH inv_agg AS (
     SELECT
-        ws_warehouse_sk,
-        ws_sold_date_sk,
-        ws_ship_date_sk,
-        SUM(ws_ext_sales_price) AS total_sales,
-        SUM(ws_net_profit) AS total_profit,
-        COUNT(*) AS order_cnt,
-        AVG(ws_wholesale_cost) AS avg_wholesale_cost
-    FROM web_sales
-    WHERE ws_wholesale_cost > 20.00
-      AND ws_coupon_amt < 2000.00
-      AND ws_promo_sk IN (600, 318, 1193)
-      AND ws_ext_sales_price > 100.00
-      AND ws_ext_tax BETWEEN 5.00 AND 50.00
-    GROUP BY ws_warehouse_sk, ws_sold_date_sk, ws_ship_date_sk
+        inv_item_sk,
+        inv_warehouse_sk,
+        SUM(inv_quantity_on_hand) AS total_qty
+    FROM inventory
+    GROUP BY inv_item_sk, inv_warehouse_sk
+),
+combined_reasons AS (
+    SELECT r_reason_desc FROM reason WHERE r_reason_desc LIKE 'Customer%'
+    UNION
+    SELECT r_reason_desc FROM reason WHERE r_reason_desc LIKE 'Vendor%'
+),
+sales_detail AS (
+    SELECT
+        cp.cp_catalog_number AS catalog_number,
+        CASE
+            WHEN cs.cs_net_profit > 1000 THEN 'HIGH'
+            WHEN cs.cs_net_profit > 0    THEN 'MEDIUM'
+            ELSE 'LOW'
+        END AS profit_category,
+        SUM(cs.cs_ext_sales_price) AS sales_sum,
+        SUM(cs.cs_quantity)        AS total_quantity,
+        SUM(cs.cs_net_profit)      AS profit_sum,
+        i.total_qty                AS inv_qty
+    FROM catalog_sales cs
+    JOIN date_dim d_sold
+        ON cs.cs_sold_date_sk = d_sold.d_date_sk
+    JOIN catalog_page cp
+        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN promotion p
+        ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN inv_agg i
+        ON cs.cs_item_sk = i.inv_item_sk
+    JOIN store_returns sr
+        ON sr.sr_returned_date_sk = d_sold.d_date_sk
+    JOIN reason r
+        ON r.r_reason_sk = sr.sr_reason_sk
+    JOIN web_returns wr
+        ON wr.wr_returned_date_sk = d_sold.d_date_sk
+    WHERE cp.cp_catalog_number IN (6, 9, 12)
+      AND p.p_discount_active = 'Y'
+      AND d_sold.d_month_seq BETWEEN 1000 AND 1200
+      AND i.total_qty > 1000
+      AND cs.cs_quantity > 10
+      AND d_sold.d_year <= (
+          SELECT MAX(d_year) FROM date_dim WHERE d_year < 1995
+      )
+      AND r.r_reason_desc IN (SELECT r_reason_desc FROM combined_reasons)
+    GROUP BY
+        cp.cp_catalog_number,
+        CASE
+            WHEN cs.cs_net_profit > 1000 THEN 'HIGH'
+            WHEN cs.cs_net_profit > 0    THEN 'MEDIUM'
+            ELSE 'LOW'
+        END,
+        i.total_qty
 )
 SELECT
-    d_sold.d_year AS sold_year,
-    d_ship.d_year AS ship_year,
-    w.w_warehouse_name,
-    w.w_city,
-    s.s_state,
-    ws_agg.total_sales,
-    ws_agg.total_profit,
-    ws_agg.order_cnt,
-    CASE WHEN ws_agg.total_profit > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_flag,
-    ROW_NUMBER() OVER (PARTITION BY w.w_warehouse_name ORDER BY ws_agg.total_sales DESC) AS sales_rank
-FROM ws_agg
-JOIN date_dim d_sold ON ws_agg.ws_sold_date_sk = d_sold.d_date_sk
-JOIN date_dim d_ship ON ws_agg.ws_ship_date_sk = d_ship.d_date_sk
-JOIN warehouse w ON ws_agg.ws_warehouse_sk = w.w_warehouse_sk
-JOIN store s ON s.s_closed_date_sk = d_sold.d_date_sk
-WHERE w.w_gmt_offset = -6.00
-  AND w.w_street_type = 'Avenue'
-  AND s.s_state = 'CA'
-  AND d_sold.d_month_seq BETWEEN 1200 AND 1220
-  AND d_ship.d_month_seq BETWEEN 1200 AND 1220
-GROUP BY
-    d_sold.d_year,
-    d_ship.d_year,
-    w.w_warehouse_name,
-    w.w_city,
-    s.s_state,
-    ws_agg.total_sales,
-    ws_agg.total_profit,
-    ws_agg.order_cnt
-HAVING ws_agg.total_sales > 50000
-ORDER BY ws_agg.total_sales DESC, profit_flag
-LIMIT 100
+    catalog_number,
+    profit_category,
+    SUM(sales_sum)      AS total_sales,
+    AVG(profit_sum)     AS avg_profit,
+    SUM(total_quantity) AS total_units_sold
+FROM sales_detail
+GROUP BY catalog_number, profit_category
+HAVING SUM(sales_sum) > 10000
+ORDER BY total_sales DESC

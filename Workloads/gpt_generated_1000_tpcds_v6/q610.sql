@@ -1,42 +1,52 @@
-WITH sales_by_demo AS (
+WITH catalog_agg AS (
     SELECT
-        cs_bill_cdemo_sk AS demo_sk,
-        SUM(cs_net_paid)          AS total_net_paid,
-        SUM(cs_ext_sales_price)   AS total_ext_sales,
-        COUNT(*)                  AS sales_cnt,
-        MAX(cs_coupon_amt)        AS max_coupon_amt
-    FROM catalog_sales
-    WHERE cs_coupon_amt > 0
-    GROUP BY cs_bill_cdemo_sk
+        td.t_hour AS hour_of_day,
+        'catalog' AS source,
+        SUM(cs.cs_net_profit) AS total_net_profit,
+        (SELECT AVG(cs2.cs_net_profit) FROM catalog_sales cs2) AS avg_net_profit_all
+    FROM catalog_sales cs
+    JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
+    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    WHERE p.p_discount_active = 'Y'
+      AND td.t_am_pm = 'PM'
+      AND EXISTS (
+          SELECT 1 FROM promotion p2
+          WHERE p2.p_promo_sk = cs.cs_promo_sk
+            AND p2.p_cost > 1000
+      )
+    GROUP BY td.t_hour
+),
+web_agg AS (
+    SELECT
+        td.t_hour AS hour_of_day,
+        'web' AS source,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        (SELECT AVG(ws2.ws_net_profit) FROM web_sales ws2) AS avg_net_profit_all
+    FROM web_sales ws
+    JOIN time_dim td ON ws.ws_sold_time_sk = td.t_time_sk
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    WHERE p.p_discount_active = 'Y'
+      AND wp.wp_max_ad_count > 0
+      AND td.t_am_pm = 'PM'
+      AND EXISTS (
+          SELECT 1 FROM promotion p2
+          WHERE p2.p_promo_sk = ws.ws_promo_sk
+            AND p2.p_cost > 1000
+      )
+    GROUP BY td.t_hour
 )
-SELECT
-    cd.cd_demo_sk,
-    cd.cd_gender,
-    cd.cd_credit_rating,
-    sb.total_net_paid,
-    sb.total_ext_sales,
-    sb.sales_cnt,
-    -- extract the word before "Risk" if present (e.g., "High" from "High Risk")
-    regexp_extract(cd.cd_credit_rating, '(\\w+) Risk', 1) AS risk_level,
-    -- first four characters of the credit rating string
-    substr(cd.cd_credit_rating, 1, 4)                     AS rating_prefix,
-    -- build a readable demo identifier
-    concat('Demo_', cast(cd.cd_demo_sk as varchar))      AS demo_id,
-    -- scalar subquery: average net paid for this demographic across all sales
-    (SELECT AVG(cs_net_paid)
-     FROM catalog_sales
-     WHERE cs_bill_cdemo_sk = cd.cd_demo_sk)           AS avg_net_paid,
-    -- rank customers of the same gender by total net paid
-    rank() OVER (PARTITION BY cd.cd_gender ORDER BY sb.total_net_paid DESC) AS gender_rank
-FROM sales_by_demo sb
-JOIN customer_demographics cd
-    ON sb.demo_sk = cd.cd_demo_sk
-WHERE
-    -- keep only rows where the credit rating mentions Risk or Good
-    regexp_like(cd.cd_credit_rating, 'Risk|Good')
-    AND cd.cd_credit_rating LIKE '%Risk%'
-    AND cd.cd_gender LIKE 'F%'
-ORDER BY
-    sb.total_net_paid DESC,
-    gender_rank ASC
-LIMIT 100
+SELECT hour_of_day,
+       source,
+       total_net_profit,
+       avg_net_profit_all
+FROM catalog_agg
+WHERE total_net_profit > avg_net_profit_all
+UNION ALL
+SELECT hour_of_day,
+       source,
+       total_net_profit,
+       avg_net_profit_all
+FROM web_agg
+WHERE total_net_profit > avg_net_profit_all
+ORDER BY hour_of_day, source

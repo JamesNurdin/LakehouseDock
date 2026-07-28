@@ -1,42 +1,36 @@
-WITH avg_return_by_gender AS (
-    SELECT cd.cd_gender,
-           avg(cr.cr_return_amount) AS avg_return_amount
-    FROM catalog_returns cr
-    JOIN customer_demographics cd
-        ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-    GROUP BY cd.cd_gender
+WITH store_sales_agg AS (
+  SELECT
+    d.d_year AS year,
+    i.i_category AS category,
+    SUM(ss.ss_ext_sales_price) AS sales,
+    CAST('Store' AS varchar) AS channel
+  FROM store_sales ss
+  JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+  JOIN item i ON ss.ss_item_sk = i.i_item_sk
+  WHERE d.d_holiday = 'N'
+  GROUP BY d.d_year, i.i_category
+),
+web_sales_agg AS (
+  SELECT
+    d.d_year AS year,
+    i.i_category AS category,
+    SUM(ws.ws_ext_sales_price) AS sales,
+    CAST('Web' AS varchar) AS channel
+  FROM web_sales ws
+  JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+  JOIN item i ON ws.ws_item_sk = i.i_item_sk
+  WHERE d.d_holiday = 'N'
+  GROUP BY d.d_year, i.i_category
 )
 SELECT
-    cd.cd_gender,
-    cd.cd_marital_status,
-    SUM(cr.cr_return_amount) AS total_return_amount,
-    COUNT(*) AS return_cnt,
-    avg_r.avg_return_amount
-FROM catalog_returns cr
-JOIN customer_demographics cd
-    ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-JOIN avg_return_by_gender avg_r
-    ON cd.cd_gender = avg_r.cd_gender
-WHERE cr.cr_return_amount > 150
-  AND cd.cd_marital_status = 'M'
-GROUP BY cd.cd_gender, cd.cd_marital_status, avg_r.avg_return_amount
-
-UNION ALL
-
-SELECT
-    cd.cd_gender,
-    cd.cd_marital_status,
-    SUM(cr.cr_return_amount) AS total_return_amount,
-    COUNT(*) AS return_cnt,
-    avg_r.avg_return_amount
-FROM catalog_returns cr
-JOIN customer_demographics cd
-    ON cr.cr_returning_cdemo_sk = cd.cd_demo_sk
-JOIN avg_return_by_gender avg_r
-    ON cd.cd_gender = avg_r.cd_gender
-WHERE cr.cr_return_amount <= 150
-  AND cd.cd_marital_status = 'S'
-GROUP BY cd.cd_gender, cd.cd_marital_status, avg_r.avg_return_amount
-
-ORDER BY total_return_amount DESC
+  year,
+  category,
+  sales,
+  channel
+FROM (
+  SELECT year, category, sales, channel FROM store_sales_agg
+  UNION ALL
+  SELECT year, category, sales, channel FROM web_sales_agg
+) combined
+ORDER BY year DESC, sales DESC
 LIMIT 100

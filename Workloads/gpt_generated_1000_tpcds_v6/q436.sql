@@ -1,50 +1,63 @@
-/* Goal: Identify high‑value income bands for customers whose email address belongs to the 'example.com' domain and whose first name starts with 'A'. The query extracts the email domain, builds a full name, filters on household dependence, uses string pattern matching, includes a scalar subquery for average net paid, an EXISTS subquery for costly shipments, counts distinct customers, and returns the top 100 groups by total net paid. */
-WITH filtered_sales AS (
+WITH base_data AS (
     SELECT
-        ws.ws_bill_customer_sk,
-        ws.ws_net_paid,
-        ws.ws_wholesale_cost,
-        ws.ws_sold_date_sk
-    FROM web_sales ws
-    WHERE ws.ws_wholesale_cost > 20
+        cs.cs_order_number,
+        cs.cs_net_paid,
+        cs.cs_quantity,
+        cr.cr_return_amount,
+        cp.cp_department,
+        cp.cp_type,
+        cd.cd_gender,
+        hd.hd_buy_potential,
+        s.s_store_id,
+        s.s_state,
+        ws.ws_net_paid AS ws_net_paid,
+        wp.wp_type,
+        (cs.cs_net_paid - cr.cr_return_amount + ws.ws_net_paid) AS total_net,
+        CASE
+            WHEN hd.hd_vehicle_count > 2 THEN 'HighVehicle'
+            WHEN hd.hd_vehicle_count = 1 THEN 'SingleVehicle'
+            ELSE 'LowVehicle'
+        END AS vehicle_category
+    FROM catalog_sales cs
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN catalog_returns cr ON cr.cr_order_number = cs.cs_order_number
+    JOIN customer_demographics cd ON cd.cd_demo_sk = cs.cs_bill_cdemo_sk
+    JOIN household_demographics hd ON hd.hd_demo_sk = cs.cs_bill_hdemo_sk
+    JOIN store_sales ss ON ss.ss_cdemo_sk = cd.cd_demo_sk AND ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN store s ON s.s_store_sk = ss.ss_store_sk
+    JOIN web_sales ws ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk AND ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+    JOIN web_page wp ON wp.wp_web_page_sk = ws.ws_web_page_sk
+    WHERE cp.cp_type = 'Online'
+      AND cs.cs_quantity > 1
+      AND cr.cr_return_amount > 0
+      AND s.s_state = 'CA'
+      AND wp.wp_type = 'Content'
+      AND hd.hd_buy_potential = '1001-5000'
+      AND EXISTS (
+          SELECT 1
+          FROM web_returns wr
+          WHERE wr.wr_order_number = ws.ws_order_number
+            AND wr.wr_return_amt > 0
+      )
+),
+agg_data AS (
+    SELECT
+        s_store_id,
+        cp_department,
+        vehicle_category,
+        SUM(total_net) AS sum_total_net,
+        COUNT(*) AS txn_count
+    FROM base_data
+    GROUP BY s_store_id, cp_department, vehicle_category
 )
 SELECT
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    COUNT(DISTINCT c.c_customer_id) AS unique_customers,
-    SUM(fs.ws_net_paid) AS total_net_paid,
-    AVG(fs.ws_net_paid) AS avg_net_paid,
-    REGEXP_EXTRACT(c.c_email_address, '@(.+)$') AS email_domain,
-    CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
-    SUBSTRING(c.c_login, 1, 3) AS login_prefix
-FROM filtered_sales fs
-JOIN customer c
-    ON fs.ws_bill_customer_sk = c.c_customer_sk
-JOIN household_demographics hd
-    ON c.c_current_hdemo_sk = hd.hd_demo_sk
-JOIN income_band ib
-    ON hd.hd_income_band_sk = ib.ib_income_band_sk
-WHERE
-    REGEXP_LIKE(c.c_email_address, '^[A-Za-z0-9._%+-]+@example\\.com$')
-    AND c.c_first_name LIKE 'A%'
-    AND hd.hd_dep_count >= 1
-    AND EXISTS (
-        SELECT 1
-        FROM web_sales ws2
-        WHERE ws2.ws_ship_customer_sk = c.c_customer_sk
-          AND ws2.ws_wholesale_cost > 50
-          AND ws2.ws_sold_date_sk = fs.ws_sold_date_sk
-    )
-GROUP BY
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    REGEXP_EXTRACT(c.c_email_address, '@(.+)$'),
-    CONCAT(c.c_first_name, ' ', c.c_last_name),
-    SUBSTRING(c.c_login, 1, 3)
-HAVING
-    SUM(fs.ws_net_paid) > (
-        SELECT AVG(ws3.ws_net_paid)
-        FROM web_sales ws3
-    )
-ORDER BY total_net_paid DESC
+    s_store_id,
+    cp_department,
+    vehicle_category,
+    sum_total_net,
+    txn_count,
+    ROW_NUMBER() OVER (PARTITION BY s_store_id ORDER BY sum_total_net DESC) AS rn_store,
+    RANK() OVER (ORDER BY sum_total_net DESC) AS rank_overall
+FROM agg_data
+ORDER BY sum_total_net DESC
 LIMIT 100

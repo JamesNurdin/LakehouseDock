@@ -1,42 +1,47 @@
 WITH sales_agg AS (
     SELECT
-        i.i_category AS category,
-        td.t_hour AS hour,
-        SUM(cs.cs_ext_sales_price) AS total_sales,
-        SUM(cs.cs_ext_discount_amt) AS total_discount,
-        COUNT(*) AS order_cnt
-    FROM catalog_sales cs
-    JOIN item i
-        ON cs.cs_item_sk = i.i_item_sk
-    JOIN time_dim td
-        ON cs.cs_sold_time_sk = td.t_time_sk
-    JOIN customer_address ca_bill
-        ON cs.cs_bill_addr_sk = ca_bill.ca_address_sk
-    JOIN customer_address ca_ship
-        ON cs.cs_ship_addr_sk = ca_ship.ca_address_sk
+        s.s_store_id,
+        s.s_store_name,
+        SUM(ss.ss_net_profit) AS total_profit,
+        COUNT(DISTINCT ss.ss_ticket_number) AS distinct_tickets,
+        CASE WHEN SUM(ss.ss_net_profit) > 10000 THEN 'HIGH' ELSE 'NORMAL' END AS profit_category
+    FROM store_sales ss
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN time_dim t_ss ON ss.ss_sold_time_sk = t_ss.t_time_sk
+    JOIN customer_demographics cd_ss ON ss.ss_cdemo_sk = cd_ss.cd_demo_sk
+    JOIN customer_address ca_ss ON ss.ss_addr_sk = ca_ss.ca_address_sk
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN store_returns sr ON sr.sr_ticket_number = ss.ss_ticket_number
+    JOIN time_dim t_sr ON sr.sr_return_time_sk = t_sr.t_time_sk
+    JOIN customer_demographics cd_sr ON sr.sr_cdemo_sk = cd_sr.cd_demo_sk
+    JOIN customer_address ca_sr ON sr.sr_addr_sk = ca_sr.ca_address_sk
+    JOIN reason r_sr ON sr.sr_reason_sk = r_sr.r_reason_sk
     WHERE
-        td.t_time_id IN ('AAAAAAAAABAAAAAA', 'AAAAAAAACAAAAAAA', 'AAAAAAAAPAAAAAAA')
-        AND td.t_second BETWEEN 0 AND 15
-        AND ca_bill.ca_gmt_offset = -5.00
-        AND ca_ship.ca_street_type = 'ST             '
-        AND cs.cs_ext_wholesale_cost > 1000.00
-    GROUP BY i.i_category, td.t_hour
+        t_ss.t_hour BETWEEN 9 AND 17
+        AND s.s_state = 'CA'
+        AND p.p_discount_active = 'Y'
+        AND EXISTS (
+            SELECT 1
+            FROM catalog_returns cr
+            JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
+            JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+            JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
+            WHERE cr.cr_item_sk = ss.ss_item_sk
+              AND cr.cr_returned_time_sk = t_ss.t_time_sk
+              AND cr.cr_reason_sk = r_sr.r_reason_sk
+              AND sm.sm_carrier = 'UPS'
+              AND cc.cc_company_name = 'Company A'
+              AND cr.cr_return_amount > 100
+        )
+    GROUP BY s.s_store_id, s.s_store_name
 )
 SELECT
-    sa.category,
-    sa.hour,
-    sa.total_sales,
-    sa.total_discount,
-    sa.order_cnt,
-    sa.total_sales / NULLIF(sa.order_cnt, 0) AS avg_sales_per_order,
-    (
-        SELECT COUNT(*)
-        FROM sales_agg sa2
-        WHERE sa2.total_sales > sa.total_sales
-    ) AS higher_sales_category_count
-FROM sales_agg sa
-WHERE sa.total_sales > (
-    SELECT AVG(total_sales) FROM sales_agg
-)
-ORDER BY sa.total_sales DESC
+    s_store_id,
+    s_store_name,
+    total_profit,
+    profit_category,
+    distinct_tickets,
+    RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+FROM sales_agg
+ORDER BY profit_rank
 LIMIT 100

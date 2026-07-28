@@ -1,35 +1,46 @@
-WITH filtered_customers AS (
-    SELECT
-        c.c_customer_sk,
-        c.c_customer_id,
-        c.c_email_address,
-        regexp_extract(c.c_email_address, '([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\\.[A-Za-z]{2,})', 2) AS email_domain,
-        c.c_first_name,
-        c.c_last_name
-    FROM tpcds.customer AS c
-    WHERE regexp_like(c.c_email_address, '^([A-Za-z0-9._%+-]+)@example\\.com$')
-      AND c.c_first_name LIKE 'A%'
-      AND substring(c.c_last_name, 1, 1) = 'S'
-),
-joined_data AS (
-    SELECT
-        fc.email_domain,
-        hd.hd_buy_potential,
-        cr.cr_net_loss,
-        cr.cr_return_amount
-    FROM filtered_customers AS fc
-    JOIN tpcds.catalog_returns AS cr
-        ON cr.cr_refunded_customer_sk = fc.c_customer_sk
-    JOIN tpcds.household_demographics AS hd
-        ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
+WITH high_value_customers AS (
+    SELECT DISTINCT cr_returning_customer_sk
+    FROM catalog_returns
+    WHERE cr_return_amount > 1000
+    UNION
+    SELECT DISTINCT cr_returning_customer_sk
+    FROM catalog_returns
+    WHERE cr_return_quantity = 1
 )
 SELECT
-    email_domain,
-    hd_buy_potential,
-    COUNT(*) AS returns_cnt,
-    SUM(cr_net_loss) AS total_net_loss,
-    AVG(cr_return_amount) AS avg_return_amount
-FROM joined_data
-GROUP BY email_domain, hd_buy_potential
-ORDER BY total_net_loss DESC
+    cc.cc_name,
+    cc.cc_state,
+    r.r_reason_desc,
+    COUNT(DISTINCT cr.cr_returning_customer_sk) AS distinct_customers,
+    SUM(cr.cr_return_amount) AS total_return_amount,
+    AVG(cr.cr_return_amount) AS avg_return_amount,
+    MIN(cr.cr_return_amount) AS min_return_amount,
+    MAX(cr.cr_return_amount) AS max_return_amount,
+    (SELECT COUNT(*) FROM reason r2 WHERE r2.r_reason_desc LIKE 'Did not%') AS total_reason_like_cnt
+FROM catalog_returns cr
+JOIN call_center cc
+    ON cr.cr_call_center_sk = cc.cc_call_center_sk
+JOIN catalog_page cp
+    ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+JOIN reason r
+    ON cr.cr_reason_sk = r.r_reason_sk
+WHERE
+    cc.cc_zip = '25709'
+    AND cc.cc_country = 'United States'
+    AND cp.cp_department = 'Electronics'
+    AND cp.cp_catalog_number = 5
+    AND r.r_reason_id = 'AAAAAAAAFAAAAAAA'
+    AND cr.cr_return_amount BETWEEN 100 AND 5000
+    AND EXISTS (
+        SELECT 1
+        FROM catalog_page cp2
+        WHERE cp2.cp_catalog_page_sk = cr.cr_catalog_page_sk
+          AND cp2.cp_type = 'Online'
+    )
+    AND cr.cr_returning_customer_sk IN (SELECT cr_returning_customer_sk FROM high_value_customers)
+GROUP BY
+    cc.cc_name,
+    cc.cc_state,
+    r.r_reason_desc
+ORDER BY total_return_amount DESC
 LIMIT 100

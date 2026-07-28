@@ -1,66 +1,58 @@
-/*
-Goal: Produce a sales‑return performance summary that joins store returns, the date dimension, customer address, and call center tables. The query applies multiple filters, classifies total return amount into levels, ranks divisions by their return totals, and uses GROUPING SETS to show subtotals per year, per division, and overall.
-*/
-WITH base AS (
-    SELECT
-        sr.sr_returned_date_sk,
-        d.d_year,
-        d.d_month_seq,
-        sr.sr_return_amt,
-        sr.sr_return_tax,
-        sr.sr_return_quantity,
-        sr.sr_net_loss,
-        ca.ca_state,
-        ca.ca_city,
-        cc.cc_division,
-        cc.cc_division_name,
-        cc.cc_class,
-        cc.cc_market_manager,
-        cc.cc_gmt_offset,
-        cc.cc_tax_percentage
-    FROM store_returns sr
-    JOIN date_dim d
-        ON sr.sr_returned_date_sk = d.d_date_sk
-    JOIN customer_address ca
-        ON sr.sr_addr_sk = ca.ca_address_sk
-    JOIN call_center cc
-        ON cc.cc_closed_date_sk = d.d_date_sk
-    WHERE d.d_year = 2001                                 -- predicate 1
-      AND sr.sr_return_amt > 10                           -- predicate 2
-      AND sr.sr_return_tax >= 1.00                        -- predicate 3
-      AND sr.sr_return_quantity BETWEEN 1 AND 5           -- predicate 4
-      AND ca.ca_state IN ('CA', 'TX', 'NY')               -- predicate 5
-      AND cc.cc_class = 'large'                           -- predicate 6
-      AND cc.cc_gmt_offset BETWEEN -5 AND 0               -- predicate 7
+WITH store_agg AS (
+   SELECT
+       s.s_store_sk AS store_sk,
+       s.s_store_name AS store_name,
+       d_ss.d_year AS year,
+       cd_ss.cd_gender AS gender,
+       hd_ss.hd_income_band_sk AS income_band,
+       SUM(ss.ss_ext_sales_price) AS sales_total,
+       SUM(ss.ss_net_profit) AS profit_total
+   FROM store_sales ss
+   JOIN date_dim d_ss ON ss.ss_sold_date_sk = d_ss.d_date_sk
+   JOIN store s ON ss.ss_store_sk = s.s_store_sk
+   JOIN customer_demographics cd_ss ON ss.ss_cdemo_sk = cd_ss.cd_demo_sk
+   JOIN household_demographics hd_ss ON ss.ss_hdemo_sk = hd_ss.hd_demo_sk
+   WHERE d_ss.d_year = 2001
+     AND s.s_state = 'TX'
+     AND cd_ss.cd_gender = 'M'
+     AND hd_ss.hd_income_band_sk BETWEEN 5 AND 10
+   GROUP BY s.s_store_sk, s.s_store_name, d_ss.d_year, cd_ss.cd_gender, hd_ss.hd_income_band_sk
 ),
-agg AS (
-    SELECT
-        d_year,
-        cc_division,
-        SUM(sr_return_amt)      AS total_return_amt,
-        SUM(sr_return_tax)      AS total_return_tax,
-        COUNT(*)                AS cnt_returns,
-        CASE
-            WHEN SUM(sr_return_amt) > 100000 THEN 'High'
-            WHEN SUM(sr_return_amt) >  50000 THEN 'Medium'
-            ELSE 'Low'
-        END                     AS return_level
-    FROM base
-    GROUP BY GROUPING SETS (
-        (d_year, cc_division),   -- detailed rows
-        (d_year),                -- yearly subtotals
-        (cc_division),           -- division subtotals
-        ()                       -- grand total
-    )
+web_agg AS (
+   SELECT
+       s.s_store_sk AS store_sk,
+       s.s_store_name AS store_name,
+       d_ws.d_year AS year,
+       cd_ws.cd_gender AS gender,
+       hd_ws.hd_income_band_sk AS income_band,
+       SUM(ws.ws_ext_sales_price) AS sales_total,
+       SUM(ws.ws_net_profit) AS profit_total
+   FROM web_sales ws
+   JOIN date_dim d_ws ON ws.ws_sold_date_sk = d_ws.d_date_sk
+   JOIN store s ON s.s_closed_date_sk = d_ws.d_date_sk
+   JOIN customer_demographics cd_ws ON ws.ws_bill_cdemo_sk = cd_ws.cd_demo_sk
+   JOIN household_demographics hd_ws ON ws.ws_bill_hdemo_sk = hd_ws.hd_demo_sk
+   WHERE d_ws.d_year = 2001
+     AND s.s_state = 'TX'
+     AND cd_ws.cd_gender = 'M'
+     AND hd_ws.hd_income_band_sk BETWEEN 5 AND 10
+     AND ws.ws_ext_list_price > 1000
+   GROUP BY s.s_store_sk, s.s_store_name, d_ws.d_year, cd_ws.cd_gender, hd_ws.hd_income_band_sk
 )
-SELECT
-    COALESCE(CAST(d_year AS VARCHAR), 'All Years')       AS year,
-    COALESCE(CAST(cc_division AS VARCHAR), 'All Divisions') AS division,
-    total_return_amt,
-    total_return_tax,
-    cnt_returns,
-    return_level,
-    ROW_NUMBER() OVER (PARTITION BY cc_division ORDER BY total_return_amt DESC) AS rn_division
-FROM agg
-ORDER BY total_return_amt DESC
+SELECT DISTINCT
+    store_sk,
+    store_name,
+    year,
+    gender,
+    income_band,
+    sales_total,
+    profit_total,
+    CASE WHEN profit_total > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_flag,
+    ROW_NUMBER() OVER (PARTITION BY store_sk ORDER BY profit_total DESC) AS profit_rank
+FROM (
+    SELECT * FROM store_agg
+    UNION ALL
+    SELECT * FROM web_agg
+) AS combined
+ORDER BY profit_total DESC
 LIMIT 100

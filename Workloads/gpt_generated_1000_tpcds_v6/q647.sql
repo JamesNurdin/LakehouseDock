@@ -1,76 +1,54 @@
 WITH base AS (
-  SELECT
-    w.w_warehouse_name,
-    w.w_state,
-    i.i_brand,
-    i.i_brand_id,
-    i.i_current_price,
-    cs.cs_net_paid,
-    ss.ss_net_paid,
-    cs.cs_order_number,
-    wr.wr_return_amt,
-    wr.wr_return_quantity,
-    r.r_reason_desc
-  FROM catalog_sales cs
-  JOIN household_demographics hd_bill
-    ON cs.cs_bill_hdemo_sk = hd_bill.hd_demo_sk
-  JOIN item i
-    ON cs.cs_item_sk = i.i_item_sk
-  JOIN promotion p
-    ON cs.cs_promo_sk = p.p_promo_sk
-  JOIN warehouse w
-    ON cs.cs_warehouse_sk = w.w_warehouse_sk
-  JOIN store_sales ss
-    ON ss.ss_item_sk = i.i_item_sk
-  JOIN household_demographics hd_store
-    ON ss.ss_hdemo_sk = hd_store.hd_demo_sk
-  JOIN promotion p2
-    ON ss.ss_promo_sk = p2.p_promo_sk
-  JOIN web_returns wr
-    ON wr.wr_item_sk = i.i_item_sk
-  JOIN reason r
-    ON wr.wr_reason_sk = r.r_reason_sk
-  JOIN household_demographics hd_refund
-    ON wr.wr_refunded_hdemo_sk = hd_refund.hd_demo_sk
-  WHERE
-    i.i_brand_id IN (1001001, 2004002)
-    AND i.i_current_price < 5.00
-    AND p.p_channel_demo = 'N'
-    AND w.w_state = 'CA'
-    AND cs.cs_sold_date_sk BETWEEN 2450000 AND 2450100
-    AND wr.wr_return_quantity > 0
-),
-agg AS (
-  SELECT
-    w_warehouse_name,
-    w_state,
-    i_brand,
-    i_brand_id,
-    SUM(cs_net_paid) AS total_catalog_sales,
-    SUM(ss_net_paid) AS total_store_sales,
-    COUNT(DISTINCT cs_order_number) AS catalog_order_cnt,
-    AVG(wr_return_amt) AS avg_return_amount,
-    SUM(CASE WHEN r_reason_desc = 'Customer not satisfied' THEN wr_return_amt ELSE 0 END) AS unsat_return_amount,
-    (SELECT MAX(i2.i_current_price) FROM item i2 WHERE i2.i_brand_id = i_brand_id) AS max_price_for_brand
-  FROM base
-  GROUP BY
-    w_warehouse_name,
-    w_state,
-    i_brand,
-    i_brand_id
+    SELECT
+        w.w_warehouse_name,
+        r.r_reason_desc,
+        c_refund.c_customer_id,
+        cr.cr_net_loss AS cr_net_loss,
+        sr.sr_net_loss AS sr_net_loss,
+        wr.wr_net_loss AS wr_net_loss,
+        ss.ss_net_profit AS ss_net_profit,
+        ws.ws_net_profit AS ws_net_profit,
+        td.t_hour
+    FROM catalog_returns cr
+    JOIN time_dim td ON cr.cr_returned_time_sk = td.t_time_sk
+    JOIN customer c_refund ON cr.cr_refunded_customer_sk = c_refund.c_customer_sk
+    JOIN customer_demographics cd ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
+    JOIN customer_address ca ON cr.cr_refunded_addr_sk = ca.ca_address_sk
+    JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+    -- link to store sales via the same customer
+    JOIN store_sales ss ON ss.ss_customer_sk = c_refund.c_customer_sk
+    -- link to store returns via ticket number
+    JOIN store_returns sr ON sr.sr_ticket_number = ss.ss_ticket_number
+    -- link to web sales via the same customer (billing side)
+    JOIN web_sales ws ON ws.ws_bill_customer_sk = c_refund.c_customer_sk
+    -- web page for the web sale
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    -- web returns linked to the web sale
+    JOIN web_returns wr ON wr.wr_order_number = ws.ws_order_number
+    WHERE r.r_reason_desc = 'Package was damaged'
+      AND w.w_gmt_offset = -5.00
+      AND td.t_hour BETWEEN 9 AND 17
+      AND NOT EXISTS (
+            SELECT 1 FROM store_returns sr2
+            WHERE sr2.sr_reason_sk = r.r_reason_sk
+              AND sr2.sr_net_loss > 1000
+        )
 )
 SELECT
-  w_warehouse_name,
-  w_state,
-  i_brand,
-  i_brand_id,
-  total_catalog_sales,
-  total_store_sales,
-  catalog_order_cnt,
-  avg_return_amount,
-  unsat_return_amount,
-  max_price_for_brand,
-  SUM(total_catalog_sales) OVER (PARTITION BY w_state ORDER BY total_catalog_sales DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total_catalog_sales_by_state
-FROM agg
-ORDER BY total_catalog_sales DESC
+    w_warehouse_name,
+    r_reason_desc,
+    COUNT(DISTINCT c_customer_id) AS unique_customers,
+    SUM(cr_net_loss) AS total_catalog_net_loss,
+    SUM(sr_net_loss) AS total_store_net_loss,
+    SUM(wr_net_loss) AS total_web_net_loss,
+    AVG(ss_net_profit) AS avg_store_sales_profit,
+    MAX(ws_net_profit) AS max_web_profit,
+    MIN(t_hour) AS earliest_return_hour,
+    (SELECT COUNT(*) FROM catalog_returns) AS total_catalog_returns
+FROM base
+GROUP BY w_warehouse_name, r_reason_desc
+ORDER BY total_catalog_net_loss DESC
 LIMIT 100

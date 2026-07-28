@@ -1,66 +1,54 @@
-WITH filtered AS (
-  SELECT
-    i.i_item_id,
-    i.i_brand,
-    i.i_category,
-    d.d_year,
-    ca.ca_state,
-    ss.ss_quantity AS ss_quantity,
-    ws.ws_quantity AS ws_quantity,
-    ss.ss_net_profit AS ss_net_profit,
-    ws.ws_net_profit AS ws_net_profit
-  FROM store_sales ss
-  JOIN item i
-    ON ss.ss_item_sk = i.i_item_sk
-  JOIN household_demographics hd
-    ON ss.ss_hdemo_sk = hd.hd_demo_sk
-  JOIN customer_address ca
-    ON ss.ss_addr_sk = ca.ca_address_sk
-  JOIN date_dim d
-    ON ss.ss_sold_date_sk = d.d_date_sk
-  JOIN web_sales ws
-    ON ws.ws_item_sk = i.i_item_sk
-   AND ws.ws_sold_date_sk = d.d_date_sk
-  JOIN web_page wp
-    ON ws.ws_web_page_sk = wp.wp_web_page_sk
-  JOIN date_dim d_wp
-    ON wp.wp_creation_date_sk = d_wp.d_date_sk
-  WHERE d.d_year = 2001
-    AND i.i_brand = 'Brand#23'
-    AND ca.ca_state = 'TX'
-    AND ws.ws_net_profit > 0
-    AND hd.hd_income_band_sk BETWEEN 3 AND 5
-    AND EXISTS (
-      SELECT 1
-      FROM catalog_returns cr
-      WHERE cr.cr_item_sk = i.i_item_sk
-        AND cr.cr_returned_date_sk = ss.ss_sold_date_sk
-        AND cr.cr_refunded_addr_sk = ss.ss_addr_sk
-    )
-),
-agg AS (
-  SELECT
-    i_item_id,
-    i_brand,
-    i_category,
-    d_year,
-    ca_state,
-    SUM(ss_quantity) AS total_store_qty,
-    SUM(ws_quantity) AS total_web_qty,
-    SUM(ss_net_profit + ws_net_profit) AS total_net_profit
-  FROM filtered
-  GROUP BY i_item_id, i_brand, i_category, d_year, ca_state
-)
 SELECT
-  i_item_id,
-  i_brand,
-  i_category,
-  d_year,
-  ca_state,
-  total_store_qty,
-  total_web_qty,
-  total_net_profit,
-  RANK() OVER (PARTITION BY i_brand ORDER BY total_net_profit DESC) AS brand_profit_rank
-FROM agg
-ORDER BY total_net_profit DESC, i_item_id
+    d_sold.d_year,
+    i.i_category,
+    i.i_brand,
+    cc.cc_state,
+    SUM(cs.cs_ext_sales_price) AS total_catalog_sales,
+    SUM(ss.ss_ext_sales_price) AS total_store_sales,
+    SUM(wr.wr_return_amt) AS total_return_amount,
+    COUNT(DISTINCT cs.cs_order_number) AS distinct_orders,
+    AVG(i.i_current_price) AS avg_item_price,
+    MIN(ib.ib_lower_bound) AS min_income_lower,
+    MAX(ib.ib_upper_bound) AS max_income_upper
+FROM catalog_sales cs
+JOIN call_center cc
+  ON cs.cs_call_center_sk = cc.cc_call_center_sk
+JOIN catalog_page cp
+  ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+JOIN date_dim d_sold
+  ON cs.cs_sold_date_sk = d_sold.d_date_sk
+JOIN date_dim d_ship
+  ON cs.cs_ship_date_sk = d_ship.d_date_sk
+JOIN item i
+  ON cs.cs_item_sk = i.i_item_sk
+JOIN promotion p
+  ON cs.cs_promo_sk = p.p_promo_sk
+JOIN warehouse w
+  ON cs.cs_warehouse_sk = w.w_warehouse_sk
+JOIN customer_address ca
+  ON cs.cs_bill_addr_sk = ca.ca_address_sk
+JOIN customer_demographics cd
+  ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+JOIN household_demographics hd
+  ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+JOIN income_band ib
+  ON hd.hd_income_band_sk = ib.ib_income_band_sk
+JOIN inventory inv
+  ON i.i_item_sk = inv.inv_item_sk
+  AND w.w_warehouse_sk = inv.inv_warehouse_sk
+JOIN date_dim d_inv
+  ON inv.inv_date_sk = d_inv.d_date_sk
+JOIN web_returns wr
+  ON i.i_item_sk = wr.wr_item_sk
+JOIN date_dim d_wr
+  ON wr.wr_returned_date_sk = d_wr.d_date_sk
+JOIN store_sales ss
+  ON ss.ss_item_sk = i.i_item_sk
+  AND ss.ss_sold_date_sk = d_sold.d_date_sk
+WHERE d_sold.d_year = 2001
+  AND i.i_brand = 'Brand#21'
+  AND p.p_channel_email = 'Y'
+  AND cc.cc_state = 'CA'
+GROUP BY d_sold.d_year, i.i_category, i.i_brand, cc.cc_state
+ORDER BY total_catalog_sales DESC
 LIMIT 100

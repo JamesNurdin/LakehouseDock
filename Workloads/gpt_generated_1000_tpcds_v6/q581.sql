@@ -1,61 +1,70 @@
-WITH
-  returns_agg AS (
-    SELECT
-      cr.cr_refunded_customer_sk AS customer_sk,
-      SUM(cr.cr_return_amount) AS total_return_amount,
-      SUM(cr.cr_return_quantity) AS total_return_qty,
-      COUNT(*) AS return_cnt
-    FROM catalog_returns cr
-    WHERE cr.cr_return_amount > 0
-      AND cr.cr_return_quantity >= 1
-    GROUP BY cr.cr_refunded_customer_sk
-  ),
-  sales_agg AS (
-    SELECT
-      ws.ws_bill_customer_sk AS customer_sk,
-      SUM(ws.ws_ext_sales_price) AS total_sales_amount,
-      SUM(ws.ws_quantity) AS total_qty,
-      COUNT(*) AS sales_cnt,
-      MAX(ws.ws_ship_date_sk) AS max_ship_date_sk
-    FROM web_sales ws
-    WHERE ws.ws_wholesale_cost > 20
-      AND ws.ws_ship_date_sk BETWEEN 2451390 AND 2452700
-    GROUP BY ws.ws_bill_customer_sk
-  ),
-  web_page_info AS (
-    SELECT
-      wp.wp_web_page_sk,
-      wp.wp_web_page_id,
-      wp.wp_rec_start_date,
-      wp.wp_customer_sk
-    FROM web_page wp
-    WHERE wp.wp_rec_start_date >= DATE '2000-01-01'
-  )
+WITH base AS (
+   SELECT
+       s.s_store_sk,
+       s.s_store_name,
+       d.d_year,
+       cs.cs_net_profit AS cs_net_profit,
+       cr.cr_net_loss AS cr_net_loss,
+       ss.ss_net_profit AS ss_net_profit,
+       sr.sr_net_loss AS sr_net_loss,
+       p.p_promo_id,
+       cp.cp_department,
+       sm.sm_type,
+       hd.hd_buy_potential,
+       r.r_reason_desc
+   FROM catalog_sales cs
+   JOIN date_dim d               ON cs.cs_sold_date_sk = d.d_date_sk
+   JOIN time_dim t               ON cs.cs_sold_time_sk = t.t_time_sk
+   JOIN customer c               ON cs.cs_bill_customer_sk = c.c_customer_sk
+   JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+   JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+   JOIN catalog_page cp          ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+   JOIN ship_mode sm             ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+   JOIN warehouse w              ON cs.cs_warehouse_sk = w.w_warehouse_sk
+   JOIN promotion p              ON cs.cs_promo_sk = p.p_promo_sk
+   JOIN catalog_returns cr       ON cr.cr_order_number = cs.cs_order_number
+                                 AND cr.cr_item_sk = cs.cs_item_sk
+   JOIN reason r                 ON cr.cr_reason_sk = r.r_reason_sk
+   JOIN store_sales ss           ON ss.ss_sold_date_sk = d.d_date_sk
+                                 AND ss.ss_sold_time_sk = t.t_time_sk
+   JOIN store s                  ON ss.ss_store_sk = s.s_store_sk
+   JOIN store_returns sr         ON sr.sr_ticket_number = ss.ss_ticket_number
+                                 AND sr.sr_item_sk = ss.ss_item_sk
+   JOIN reason r2                ON sr.sr_reason_sk = r2.r_reason_sk
+   JOIN date_dim dr              ON sr.sr_returned_date_sk = dr.d_date_sk
+   WHERE d.d_year = 2001
+     AND s.s_country = 'United States'
+     AND c.c_salutation = 'Mr.'
+     AND hd.hd_buy_potential = 'High'
+     AND EXISTS (
+         SELECT 1 FROM promotion p2
+         WHERE p2.p_promo_sk = cs.cs_promo_sk
+           AND p2.p_start_date_sk BETWEEN 2450000 AND 2452000
+     )
+),
+store_year_agg AS (
+   SELECT
+       s_store_sk,
+       s_store_name,
+       d_year,
+       SUM(cs_net_profit) AS sum_cs_profit,
+       SUM(cr_net_loss) AS sum_cr_loss,
+       SUM(ss_net_profit) AS sum_ss_profit,
+       SUM(sr_net_loss) AS sum_sr_loss,
+       (SUM(cs_net_profit) + SUM(ss_net_profit) - SUM(cr_net_loss) - SUM(sr_net_loss)) AS total_profit
+   FROM base
+   GROUP BY s_store_sk, s_store_name, d_year
+)
 SELECT
-  c.c_customer_id,
-  c.c_salutation,
-  c.c_birth_day,
-  r.total_return_amount,
-  s.total_sales_amount,
-  CASE
-    WHEN r.total_return_amount > 100 THEN 'High'
-    ELSE 'Low'
-  END AS return_category,
-  ROW_NUMBER() OVER (
-    PARTITION BY c.c_customer_sk
-    ORDER BY r.total_return_amount DESC NULLS LAST
-  ) AS rn_return_rank,
-  wp.wp_web_page_id,
-  COALESCE(wp.wp_customer_sk, -1) AS wp_customer_sk_coalesced
-FROM customer c
-LEFT JOIN returns_agg r
-  ON r.customer_sk = c.c_customer_sk
-LEFT JOIN sales_agg s
-  ON s.customer_sk = c.c_customer_sk
-LEFT JOIN web_page_info wp
-  ON wp.wp_customer_sk = c.c_customer_sk
-WHERE c.c_salutation = 'Ms.'
-  AND c.c_birth_day BETWEEN 1 AND 15
-  AND (r.total_return_amount IS NOT NULL OR s.total_sales_amount IS NOT NULL)
-ORDER BY r.total_return_amount DESC NULLS LAST
+    s_store_sk,
+    s_store_name,
+    d_year,
+    total_profit,
+    RANK() OVER (ORDER BY total_profit DESC) AS profit_rank,
+    (SELECT COUNT(*) FROM catalog_returns WHERE cr_return_quantity > 0) AS total_return_rows
+FROM store_year_agg
+WHERE total_profit > (
+    SELECT AVG(total_profit) FROM store_year_agg
+)
+ORDER BY total_profit DESC
 LIMIT 100

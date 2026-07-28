@@ -1,39 +1,42 @@
-WITH filtered_sales AS (
-    SELECT
-        cs.cs_ship_mode_sk,
-        cs.cs_sold_time_sk,
-        cs.cs_net_paid_inc_ship,
-        cs.cs_ext_ship_cost,
-        cs.cs_quantity,
-        cs.cs_net_profit,
-        sm.sm_code,
-        sm.sm_contract,
-        t.t_meal_time,
-        t.t_hour,
-        c.c_customer_sk
-    FROM catalog_sales cs
-    JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN time_dim t ON cs.cs_sold_time_sk = t.t_time_sk
-    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
-    WHERE cs.cs_net_paid_inc_ship >= 500
-      AND cs.cs_ext_ship_cost BETWEEN 100 AND 2000
-      AND cs.cs_quantity >= 2
-      AND sm.sm_code = 'AIR'
-      AND sm.sm_contract = 'A5BYO1qH8HGTTN'
-      AND t.t_meal_time = 'lunch'
+WITH wp_agg AS (
+    SELECT wp_customer_sk,
+           COUNT(*) AS page_cnt,
+           SUM(wp_image_count) AS total_images,
+           AVG(wp_char_count) AS avg_char_cnt
+    FROM web_page
+    WHERE wp_autogen_flag = 'N'
+      AND wp_image_count >= 3
+    GROUP BY wp_customer_sk
+),
+addr_filter AS (
+    SELECT ca_address_sk,
+           ca_state,
+           ca_city,
+           ca_suite_number
+    FROM customer_address
+    WHERE ca_state IN ('CA', 'TX')
+      AND ca_suite_number LIKE 'Suite %'
 )
-SELECT
-    sm_code,
-    t_meal_time,
-    COUNT(DISTINCT c_customer_sk) AS distinct_customers,
-    SUM(cs_quantity) AS total_quantity,
-    SUM(cs_net_paid_inc_ship) AS total_paid_inc_ship,
-    AVG(cs_net_profit) AS avg_profit,
-    CASE
-        WHEN SUM(cs_net_profit) > 0 THEN 'profitable'
-        ELSE 'loss'
-    END AS profit_status
-FROM filtered_sales
-GROUP BY sm_code, t_meal_time
-ORDER BY total_paid_inc_ship DESC
+SELECT c.c_customer_id,
+       c.c_first_name,
+       c.c_last_name,
+       a.ca_state,
+       a.ca_city,
+       a.ca_suite_number,
+       w.page_cnt,
+       w.total_images,
+       w.avg_char_cnt,
+       w.total_images / NULLIF(w.page_cnt, 0) AS images_per_page,
+       (SELECT MAX(wp_image_count) FROM web_page) AS max_image_count_overall
+FROM wp_agg w
+JOIN customer c ON w.wp_customer_sk = c.c_customer_sk
+JOIN addr_filter a ON c.c_current_addr_sk = a.ca_address_sk
+WHERE c.c_birth_year BETWEEN 1960 AND 1980
+  AND EXISTS (
+        SELECT 1
+        FROM web_page wp2
+        WHERE wp2.wp_customer_sk = c.c_customer_sk
+          AND wp2.wp_link_count > 5
+    )
+ORDER BY w.total_images DESC
 LIMIT 100

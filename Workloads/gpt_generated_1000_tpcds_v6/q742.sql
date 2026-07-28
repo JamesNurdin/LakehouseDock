@@ -1,36 +1,42 @@
+WITH base_returns AS (
+    SELECT
+        sr.sr_customer_sk,
+        sr.sr_returned_date_sk,
+        sr.sr_net_loss,
+        cd.cd_gender,
+        ca.ca_gmt_offset
+    FROM store_returns sr
+    JOIN customer c ON sr.sr_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
+    WHERE ca.ca_gmt_offset BETWEEN -10.00 AND -5.00
+)
 SELECT
-    date_sk,
-    net_loss,
-    reason_desc,
     gender,
-    return_source,
+    period,
+    total_loss,
+    returns_cnt,
     loss_category
 FROM (
     SELECT
-        sr.sr_returned_date_sk AS date_sk,
-        sr.sr_net_loss AS net_loss,
-        r.r_reason_desc AS reason_desc,
-        cd.cd_gender AS gender,
-        'store' AS return_source,
-        CASE WHEN sr.sr_net_loss > 100 THEN 'high' ELSE 'low' END AS loss_category
-    FROM store_returns sr
-    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
-    JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
-    WHERE sr.sr_return_ship_cost > 20
-
+        cd_gender AS gender,
+        'Period1' AS period,
+        SUM(sr_net_loss) AS total_loss,
+        COUNT(*) AS returns_cnt,
+        CASE WHEN SUM(sr_net_loss) > 1000 THEN 'High' ELSE 'Low' END AS loss_category
+    FROM base_returns
+    WHERE sr_returned_date_sk BETWEEN 2450900 AND 2451200
+    GROUP BY cd_gender
     UNION ALL
-
     SELECT
-        cr.cr_returned_date_sk AS date_sk,
-        cr.cr_net_loss AS net_loss,
-        r.r_reason_desc AS reason_desc,
-        cd.cd_gender AS gender,
-        'catalog' AS return_source,
-        CASE WHEN cr.cr_net_loss > 100 THEN 'high' ELSE 'low' END AS loss_category
-    FROM catalog_returns cr
-    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-    JOIN customer_demographics cd ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-    WHERE cr.cr_return_quantity > 1
+        cd_gender AS gender,
+        'Period2' AS period,
+        SUM(sr_net_loss) AS total_loss,
+        COUNT(*) AS returns_cnt,
+        CASE WHEN SUM(sr_net_loss) > 1000 THEN 'High' ELSE 'Low' END AS loss_category
+    FROM base_returns
+    WHERE sr_returned_date_sk BETWEEN 2451300 AND 2451600
+    GROUP BY cd_gender
 ) AS combined
-ORDER BY date_sk DESC, loss_category
+ORDER BY total_loss DESC
 LIMIT 100

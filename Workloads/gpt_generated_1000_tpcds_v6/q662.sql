@@ -1,48 +1,54 @@
-WITH filtered_returns AS (
+WITH ws_returns_agg AS (
     SELECT
-        cr.cr_returned_date_sk,
-        cr.cr_call_center_sk,
-        cr.cr_return_amount,
-        cr.cr_return_tax,
-        cr.cr_return_amt_inc_tax,
-        cr.cr_reversed_charge,
-        cr.cr_net_loss,
-        cr.cr_refunded_addr_sk,
-        cr.cr_refunded_cdemo_sk
-    FROM catalog_returns cr
-    WHERE cr.cr_reversed_charge > 100.00
+        ws.ws_order_number,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amt_inc_tax
+    FROM web_returns wr
+    JOIN web_sales ws
+        ON wr.wr_item_sk = ws.ws_item_sk
+       AND wr.wr_order_number = ws.ws_order_number
+    GROUP BY ws.ws_order_number
 )
 SELECT
-    cc.cc_name,
-    d_ret.d_year AS return_year,
-    ca_ref.ca_state AS refunded_state,
-    cd_ref.cd_gender AS refunded_gender,
-    COUNT(*) AS num_returns,
-    SUM(fr.cr_return_amount) AS total_return_amount,
-    AVG(fr.cr_reversed_charge) AS avg_reversed_charge,
-    MIN(fr.cr_net_loss) AS min_net_loss,
-    MAX(fr.cr_net_loss) AS max_net_loss,
-    (SELECT AVG(cr2.cr_reversed_charge) FROM catalog_returns cr2) AS overall_avg_reversed_charge
-FROM filtered_returns fr
-JOIN call_center cc
-    ON fr.cr_call_center_sk = cc.cc_call_center_sk
-JOIN date_dim d_ret
-    ON fr.cr_returned_date_sk = d_ret.d_date_sk
-JOIN customer_address ca_ref
-    ON fr.cr_refunded_addr_sk = ca_ref.ca_address_sk
-JOIN customer_demographics cd_ref
-    ON fr.cr_refunded_cdemo_sk = cd_ref.cd_demo_sk
-WHERE
-    cc.cc_street_type = 'Avenue'
-    AND cc.cc_mkt_desc LIKE '%Common%'
-    AND cc.cc_rec_end_date >= DATE '2000-01-01'
-    AND ca_ref.ca_gmt_offset = -6.00
-    AND d_ret.d_year = 2000
-GROUP BY
-    cc.cc_name,
-    d_ret.d_year,
-    ca_ref.ca_state,
-    cd_ref.cd_gender
-HAVING COUNT(*) > 10
-ORDER BY total_return_amount DESC
+    promo_id,
+    channel,
+    total_profit,
+    sales_cnt,
+    profit_rank
+FROM (
+    SELECT
+        p.p_promo_id AS promo_id,
+        'store' AS channel,
+        SUM(ss.ss_net_profit) AS total_profit,
+        COUNT(*) AS sales_cnt,
+        RANK() OVER (ORDER BY SUM(ss.ss_net_profit) DESC) AS profit_rank
+    FROM store_sales ss
+    JOIN promotion p
+        ON ss.ss_promo_sk = p.p_promo_sk
+    WHERE p.p_channel_event = 'Y'
+    GROUP BY p.p_promo_id
+
+    UNION ALL
+
+    SELECT
+        p.p_promo_id AS promo_id,
+        'web' AS channel,
+        SUM(ws.ws_net_profit - COALESCE(r.total_return_amt_inc_tax, 0)) AS total_profit,
+        COUNT(*) AS sales_cnt,
+        RANK() OVER (ORDER BY SUM(ws.ws_net_profit - COALESCE(r.total_return_amt_inc_tax, 0)) DESC) AS profit_rank
+    FROM web_sales ws
+    JOIN promotion p
+        ON ws.ws_promo_sk = p.p_promo_sk
+    LEFT JOIN ws_returns_agg r
+        ON ws.ws_order_number = r.ws_order_number
+    WHERE p.p_channel_event = 'Y'
+      AND EXISTS (
+          SELECT 1
+          FROM web_sales ws2
+          WHERE ws2.ws_bill_cdemo_sk = ws.ws_bill_cdemo_sk
+            AND ws2.ws_net_paid_inc_tax > 5000
+          LIMIT 1
+      )
+    GROUP BY p.p_promo_id
+) AS combined
+ORDER BY total_profit DESC, channel
 LIMIT 100

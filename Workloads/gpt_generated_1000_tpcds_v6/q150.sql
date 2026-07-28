@@ -1,50 +1,86 @@
-WITH cr_agg AS (
-    SELECT
-        cr_call_center_sk,
-        cr_ship_mode_sk,
-        cr_returned_date_sk,
-        cr_refunded_customer_sk,
-        SUM(cr_return_amount) AS total_return_amount,
-        SUM(cr_return_quantity) AS total_return_qty,
-        COUNT(*) AS cnt_returns
-    FROM catalog_returns
-    WHERE cr_return_amount > 0
-      AND cr_return_quantity > 0
-      AND cr_returned_date_sk IS NOT NULL
-    GROUP BY cr_call_center_sk, cr_ship_mode_sk, cr_returned_date_sk, cr_refunded_customer_sk
+WITH joined_all AS (
+  SELECT
+    ss.ss_sold_date_sk,
+    ss.ss_sold_time_sk,
+    ss.ss_item_sk,
+    ss.ss_customer_sk,
+    ss.ss_cdemo_sk,
+    ss.ss_hdemo_sk,
+    ss.ss_store_sk,
+    ss.ss_quantity,
+    ss.ss_ext_sales_price,
+    ss.ss_net_profit,
+    i.i_item_id,
+    i.i_brand,
+    i.i_category,
+    c.c_customer_id,
+    cd.cd_gender,
+    cd.cd_education_status,
+    hd.hd_buy_potential,
+    s.s_store_id,
+    s.s_state,
+    ts.t_hour,
+    ts.t_am_pm,
+    wp.wp_autogen_flag,
+    wp.wp_link_count,
+    inv.inv_quantity_on_hand,
+    wr.wr_return_quantity,
+    wr.wr_net_loss
+  FROM store_sales ss
+  JOIN item i ON ss.ss_item_sk = i.i_item_sk
+  JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+  JOIN customer_demographics cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
+  JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+  JOIN store s ON ss.ss_store_sk = s.s_store_sk
+  JOIN time_dim ts ON ss.ss_sold_time_sk = ts.t_time_sk
+  JOIN web_returns wr ON i.i_item_sk = wr.wr_item_sk
+  JOIN time_dim tw ON wr.wr_returned_time_sk = tw.t_time_sk
+  JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+  JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
+  WHERE i.i_brand = 'Brand#45'                         -- predicate 1
+    AND s.s_state = 'CA'                               -- predicate 2
+    AND cd.cd_gender = 'M'                             -- predicate 3
+    AND hd.hd_buy_potential = '5000-10000'             -- predicate 4
+    AND wp.wp_autogen_flag = 'N'                       -- predicate 5
+    AND inv.inv_quantity_on_hand > 10                 -- predicate 6
+    AND ts.t_hour BETWEEN 9 AND 17                     -- predicate 7
+),
+
+agg_sales AS (
+  SELECT
+    s_store_id,
+    t_hour,
+    i_item_id,
+    SUM(ss_ext_sales_price) AS total_sales,
+    SUM(ss_net_profit) AS total_profit,
+    COUNT(*) AS txn_count,
+    CASE WHEN SUM(ss_net_profit) > 0 THEN 'Profit' ELSE 'Loss' END AS profit_flag
+  FROM joined_all
+  GROUP BY s_store_id, t_hour, i_item_id
+),
+
+avg_store_sales AS (
+  SELECT
+    s_store_id,
+    AVG(total_sales) AS avg_sales
+  FROM agg_sales
+  GROUP BY s_store_id
 )
+
 SELECT
-    cc.cc_name,
-    sm.sm_code,
-    d.d_year,
-    CASE
-        WHEN cc.cc_class = 'large' THEN 'LARGE'
-        WHEN cc.cc_class = 'medium' THEN 'MEDIUM'
-        ELSE 'SMALL'
-    END AS center_type,
-    COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
-    SUM(cr_agg.total_return_amount) AS sum_return_amount,
-    SUM(cr_agg.total_return_qty) AS sum_return_qty,
-    AVG(cr_agg.total_return_amount) AS avg_return_amount_per_center_ship,
-    MAX(c.c_birth_month) AS max_birth_month
-FROM cr_agg
-JOIN call_center cc ON cr_agg.cr_call_center_sk = cc.cc_call_center_sk
-JOIN ship_mode sm ON cr_agg.cr_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN date_dim d ON cr_agg.cr_returned_date_sk = d.d_date_sk
-JOIN customer c ON cr_agg.cr_refunded_customer_sk = c.c_customer_sk
-WHERE cc.cc_class IN ('large', 'medium')
-  AND cc.cc_mkt_class LIKE '%National%'
-  AND sm.sm_code IN ('AIR', 'SEA')
-  AND sm.sm_contract NOT LIKE 'Ek%'
-  AND d.d_year BETWEEN 2000 AND 2005
-  AND c.c_birth_month IN (2, 9, 12)
-  AND EXISTS (
-        SELECT 1 FROM catalog_returns cr2
-        WHERE cr2.cr_call_center_sk = cc.cc_call_center_sk
-          AND cr2.cr_return_amount > 5000
-        LIMIT 1
-      )
-GROUP BY cc.cc_name, sm.sm_code, d.d_year, cc.cc_class
-HAVING SUM(cr_agg.total_return_amount) > 10000
-ORDER BY sum_return_amount DESC
+  a.s_store_id,
+  a.t_hour,
+  a.i_item_id,
+  a.total_sales,
+  a.total_profit,
+  a.txn_count,
+  a.profit_flag,
+  AVG(a.total_sales) OVER (PARTITION BY a.s_store_id) AS avg_sales_by_store,
+  ROW_NUMBER() OVER (PARTITION BY a.s_store_id ORDER BY a.total_sales DESC) AS sales_rank,
+  CASE
+    WHEN a.total_sales > (SELECT avg_sales FROM avg_store_sales WHERE s_store_id = a.s_store_id) THEN 'Above Avg'
+    ELSE 'Below Avg'
+  END AS sales_relative_to_avg
+FROM agg_sales a
+ORDER BY a.total_sales DESC
 LIMIT 100

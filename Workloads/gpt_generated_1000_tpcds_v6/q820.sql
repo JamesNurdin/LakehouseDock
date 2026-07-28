@@ -1,39 +1,48 @@
-WITH sub1 AS (
-   SELECT cc.cc_name AS call_center_name,
-          w.w_city AS warehouse_city,
-          SUM(cs.cs_net_paid) AS total_net_paid,
-          SUM(cs.cs_net_profit) AS total_profit
-   FROM tpcds.catalog_sales cs
-   JOIN tpcds.call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
-   JOIN tpcds.ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-   JOIN tpcds.warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
-   WHERE cc.cc_mkt_desc LIKE '%Reduced%'
-     AND sm.sm_type = 'AIR'
-   GROUP BY cc.cc_name, w.w_city
+WITH store_returns_monthly AS (
+    SELECT
+        d.d_year AS year,
+        d.d_month_seq AS month,
+        SUM(sr.sr_net_loss) AS total_net_loss,
+        COUNT(*) AS return_count
+    FROM store_returns sr
+    JOIN date_dim d
+        ON sr.sr_returned_date_sk = d.d_date_sk
+    WHERE d.d_year = 2002
+    GROUP BY d.d_year, d.d_month_seq
+    HAVING SUM(sr.sr_net_loss) > 0
 ),
-sub2 AS (
-   SELECT cc.cc_name AS call_center_name,
-          w.w_city AS warehouse_city,
-          SUM(cs.cs_net_paid) AS total_net_paid,
-          SUM(cs.cs_net_profit) AS total_profit
-   FROM tpcds.catalog_sales cs
-   JOIN tpcds.call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
-   JOIN tpcds.catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-   JOIN tpcds.warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
-   WHERE cp.cp_department = 'DEPARTMENT'
-     AND w.w_warehouse_sq_ft > 500000
-   GROUP BY cc.cc_name, w.w_city
+catalog_returns_monthly AS (
+    SELECT
+        d.d_year AS year,
+        d.d_month_seq AS month,
+        SUM(cr.cr_net_loss) AS total_net_loss,
+        COUNT(*) AS return_count
+    FROM catalog_returns cr
+    JOIN date_dim d
+        ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN ship_mode sm
+        ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE d.d_year = 2002
+      AND sm.sm_type = 'AIR'
+    GROUP BY d.d_year, d.d_month_seq
+    HAVING SUM(cr.cr_net_loss) > 0
 )
-SELECT call_center_name,
-       warehouse_city,
-       total_net_paid,
-       CASE WHEN total_profit > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_status
-FROM sub1
+SELECT
+    year,
+    month,
+    total_net_loss,
+    return_count,
+    'store' AS source
+FROM store_returns_monthly
+
 UNION ALL
-SELECT call_center_name,
-       warehouse_city,
-       total_net_paid,
-       CASE WHEN total_profit > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_status
-FROM sub2
-ORDER BY total_net_paid DESC, profit_status
+
+SELECT
+    year,
+    month,
+    total_net_loss,
+    return_count,
+    'catalog' AS source
+FROM catalog_returns_monthly
+ORDER BY year, month, source
 LIMIT 100

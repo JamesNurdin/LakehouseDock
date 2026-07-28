@@ -1,83 +1,69 @@
-WITH store_ret AS (
+WITH store_agg AS (
     SELECT
-        d.d_year,
-        d.d_date_sk,
-        i.i_brand,
-        r.r_reason_desc,
-        sr.sr_return_quantity AS quantity,
-        sr.sr_return_amt AS return_amt,
-        sr.sr_net_loss AS net_loss,
-        CASE WHEN sr.sr_net_loss > 500 THEN 'High' ELSE 'Low' END AS loss_category
-    FROM store_returns sr
-    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
-    JOIN item i ON sr.sr_item_sk = i.i_item_sk
-    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
-    WHERE d.d_year = 2001
-      AND i.i_brand = 'BrandX'
-      AND r.r_reason_desc LIKE '%price%'
+        c.c_customer_sk,
+        c.c_customer_id,
+        ca.ca_city,
+        ca.ca_state,
+        hd.hd_income_band_sk,
+        SUM(ss.ss_net_paid) AS store_net_paid,
+        SUM(ss.ss_net_profit) AS store_net_profit,
+        COUNT(*) AS store_txn_cnt
+    FROM store_sales ss
+    JOIN time_dim td_store ON ss.ss_sold_time_sk = td_store.t_time_sk
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+    WHERE td_store.t_hour >= 12
+      AND ss.ss_quantity >= 2
+      AND ca.ca_location_type = 'condo'
+      AND hd.hd_income_band_sk >= 10
+    GROUP BY
+        c.c_customer_sk,
+        c.c_customer_id,
+        ca.ca_city,
+        ca.ca_state,
+        hd.hd_income_band_sk
 ),
-catalog_ret AS (
+web_agg AS (
     SELECT
-        d.d_year,
-        d.d_date_sk,
-        i.i_brand,
-        r.r_reason_desc,
-        cr.cr_return_quantity AS quantity,
-        cr.cr_return_amount AS return_amt,
-        cr.cr_net_loss AS net_loss,
-        CASE WHEN cr.cr_net_loss > 500 THEN 'High' ELSE 'Low' END AS loss_category
-    FROM catalog_returns cr
-    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN item i ON cr.cr_item_sk = i.i_item_sk
-    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    WHERE d.d_year = 2001
-      AND i.i_brand = 'BrandX'
-      AND r.r_reason_desc LIKE '%price%'
-      AND cc.cc_state = 'CA'
-),
-web_ret AS (
-    SELECT
-        d.d_year,
-        d.d_date_sk,
-        i.i_brand,
-        r.r_reason_desc,
-        wr.wr_return_quantity AS quantity,
-        wr.wr_return_amt AS return_amt,
-        wr.wr_net_loss AS net_loss,
-        CASE WHEN wr.wr_net_loss > 500 THEN 'High' ELSE 'Low' END AS loss_category
-    FROM web_returns wr
-    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
-    JOIN item i ON wr.wr_item_sk = i.i_item_sk
-    JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
-    WHERE d.d_year = 2001
-      AND i.i_brand = 'BrandX'
-      AND r.r_reason_desc LIKE '%price%'
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS web_net_paid,
+        SUM(ws.ws_net_profit) AS web_net_profit,
+        COUNT(*) AS web_txn_cnt
+    FROM web_sales ws
+    JOIN time_dim td_web ON ws.ws_sold_time_sk = td_web.t_time_sk
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN household_demographics hd ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+    JOIN customer_address ca ON ws.ws_bill_addr_sk = ca.ca_address_sk
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE td_web.t_hour >= 12
+      AND ws.ws_ext_tax > 30
+      AND ca.ca_location_type = 'condo'
+      AND hd.hd_income_band_sk >= 10
+    GROUP BY c.c_customer_sk
 )
 SELECT
-    u.d_year,
-    u.i_brand,
-    u.r_reason_desc,
-    COUNT(*) AS return_cnt,
-    SUM(u.quantity) AS total_quantity,
-    SUM(u.return_amt) AS total_return_amount,
-    SUM(u.net_loss) AS total_net_loss,
-    AVG(u.net_loss) AS avg_net_loss,
-    SUM(CASE WHEN u.net_loss > 1000 THEN 1 ELSE 0 END) AS high_loss_cnt
-FROM (
-    SELECT * FROM store_ret
-    UNION ALL
-    SELECT * FROM catalog_ret
-    UNION ALL
-    SELECT * FROM web_ret
-) AS u
-WHERE EXISTS (
-    SELECT 1
-    FROM web_site ws
-    WHERE ws.web_open_date_sk = u.d_date_sk
-      AND ws.web_city = 'San Francisco'
-      AND ws.web_street_type = 'Pkwy'
-)
-GROUP BY u.d_year, u.i_brand, u.r_reason_desc
-ORDER BY total_net_loss DESC
+    s.c_customer_id,
+    s.ca_city,
+    s.ca_state,
+    s.hd_income_band_sk,
+    s.store_net_paid,
+    w.web_net_paid,
+    (s.store_net_paid + w.web_net_paid) AS total_net_paid,
+    (s.store_net_profit + w.web_net_profit) / (s.store_txn_cnt + w.web_txn_cnt) AS avg_net_profit,
+    RANK() OVER (PARTITION BY s.ca_state ORDER BY (s.store_net_paid + w.web_net_paid) DESC) AS state_rank,
+    CASE
+        WHEN (s.store_net_profit + w.web_net_profit) / (s.store_txn_cnt + w.web_txn_cnt) > (
+            SELECT AVG(profit)
+            FROM (
+                SELECT ss.ss_net_profit AS profit FROM store_sales ss
+                UNION ALL
+                SELECT ws.ws_net_profit FROM web_sales ws
+            ) p
+        ) THEN 'Above Avg Profit'
+        ELSE 'Below Avg Profit'
+    END AS profit_comp
+FROM store_agg s
+JOIN web_agg w ON s.c_customer_sk = w.c_customer_sk
+ORDER BY total_net_paid DESC
 LIMIT 100

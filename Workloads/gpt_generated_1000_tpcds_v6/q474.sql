@@ -1,50 +1,51 @@
-WITH agg1 AS (
+WITH sales_agg AS (
     SELECT
-        ib.ib_income_band_sk,
-        ib.ib_lower_bound,
-        ib.ib_upper_bound,
-        SUM(cr.cr_net_loss) AS total_cr_loss,
-        SUM(sr.sr_net_loss) AS total_sr_loss,
-        SUM(ws.ws_net_profit) AS total_ws_profit,
-        COUNT(DISTINCT cr.cr_order_number) AS distinct_orders
-    FROM household_demographics hd
-    JOIN income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    JOIN catalog_returns cr
-        ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN store_returns sr
-        ON sr.sr_hdemo_sk = hd.hd_demo_sk
-    JOIN store s
-        ON s.s_store_sk = sr.sr_store_sk
-    JOIN web_sales ws
-        ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-    WHERE ib.ib_lower_bound >= 10000
-      AND ib.ib_upper_bound <= 200000
-      AND cr.cr_return_amount > 500
-      AND sr.sr_return_quantity BETWEEN 10 AND 50
-      AND s.s_state = 'CA'
+        s.s_store_id,
+        s.s_state,
+        d.d_year,
+        SUM(ss.ss_net_profit)                         AS store_sales_profit,
+        SUM(ws.ws_net_profit)                         AS web_sales_profit,
+        SUM(COALESCE(wr.wr_net_loss, 0))              AS returns_loss
+    FROM
+        date_dim d
+        JOIN store_sales ss ON ss.ss_sold_date_sk = d.d_date_sk
+        JOIN store s ON ss.ss_store_sk = s.s_store_sk
+        JOIN time_dim t ON ss.ss_sold_time_sk = t.t_time_sk
+        JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+        JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+        JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+        JOIN customer c_ss ON ss.ss_customer_sk = c_ss.c_customer_sk
+        JOIN web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+        JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+        JOIN promotion p_ws ON ws.ws_promo_sk = p_ws.p_promo_sk
+        JOIN customer c_ws_bill ON ws.ws_bill_customer_sk = c_ws_bill.c_customer_sk
+        LEFT JOIN web_returns wr ON wr.wr_order_number = ws.ws_order_number
+            AND wr.wr_returned_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2001
+        AND t.t_hour BETWEEN 9 AND 17
+        AND c_ss.c_preferred_cust_flag = 'Y'
+        AND p.p_channel_dmail = 'Y'
+        AND ib.ib_lower_bound >= 30000
+        AND sm.sm_type = 'AIR'
+        AND s.s_state = 'CA'
     GROUP BY
-        ib.ib_income_band_sk,
-        ib.ib_lower_bound,
-        ib.ib_upper_bound
+        s.s_store_id,
+        s.s_state,
+        d.d_year
 )
 SELECT
-    agg1.ib_income_band_sk,
-    agg1.ib_lower_bound,
-    agg1.ib_upper_bound,
-    agg1.total_cr_loss,
-    agg1.total_sr_loss,
-    agg1.total_ws_profit,
-    agg1.distinct_orders,
-    CASE WHEN agg1.total_ws_profit > 5000 THEN 'High' ELSE 'Low' END AS profit_category,
-    (
-        SELECT AVG(cr2.cr_return_amount)
-        FROM catalog_returns cr2
-        JOIN household_demographics hd2
-          ON cr2.cr_refunded_hdemo_sk = hd2.hd_demo_sk
-        WHERE hd2.hd_income_band_sk = agg1.ib_income_band_sk
-    ) AS avg_return_amount_by_income_band
-FROM agg1
-WHERE agg1.total_cr_loss > 1000
-ORDER BY agg1.total_ws_profit DESC
+    s_store_id,
+    s_state,
+    d_year,
+    store_sales_profit,
+    web_sales_profit,
+    returns_loss,
+    (store_sales_profit + web_sales_profit - returns_loss) AS total_profit,
+    RANK() OVER (PARTITION BY d_year ORDER BY (store_sales_profit + web_sales_profit - returns_loss) DESC) AS profit_rank
+FROM
+    sales_agg
+ORDER BY
+    profit_rank,
+    s_store_id
 LIMIT 100

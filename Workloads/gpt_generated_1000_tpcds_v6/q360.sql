@@ -1,48 +1,65 @@
-WITH store_ret_agg AS (
+WITH joined AS (
     SELECT
-        sr.sr_store_sk,
-        sr.sr_reason_sk,
-        COUNT(*) AS cnt_returns,
-        SUM(sr.sr_return_amt) AS total_return_amt
-    FROM store_returns sr
-    WHERE sr.sr_returned_date_sk BETWEEN 2450900 AND 2451000
-    GROUP BY sr.sr_store_sk, sr.sr_reason_sk
+        cc.cc_name,
+        cc.cc_tax_percentage,
+        w.w_warehouse_name,
+        w.w_state AS warehouse_state,
+        site.web_state AS site_state,
+        ws.ws_net_paid,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_coupon_amt,
+        d_sold.d_year,
+        d_sold.d_month_seq,
+        d_sold.d_date,
+        d_sold.d_weekend,
+        wp.wp_type
+    FROM web_sales ws
+    JOIN date_dim d_sold ON ws.ws_sold_date_sk = d_sold.d_date_sk
+    JOIN date_dim d_ship ON ws.ws_ship_date_sk = d_ship.d_date_sk
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN web_site site ON ws.ws_web_site_sk = site.web_site_sk
+    JOIN call_center cc ON cc.cc_open_date_sk = d_sold.d_date_sk
+    WHERE
+        d_sold.d_year = 2001
+        AND d_sold.d_month_seq BETWEEN 1200 AND 1211
+        AND d_sold.d_date = DATE '2001-06-15'
+        AND d_sold.d_weekend = 'N'
+        AND ws.ws_quantity > 5
+        AND ws.ws_sales_price > 100
+        AND w.w_state = 'CA'
+        AND site.web_state = 'CA'
+        AND cc.cc_tax_percentage > 0.05
+        AND wp.wp_type = 'home'
+),
+aggregated AS (
+    SELECT
+        cc_name,
+        w_warehouse_name,
+        d_year,
+        wp_type,
+        SUM(ws_net_paid) AS total_net_paid,
+        AVG(ws_sales_price) AS avg_sales_price,
+        COUNT(*) AS order_cnt,
+        MIN(ws_coupon_amt) AS min_coupon,
+        MAX(ws_coupon_amt) AS max_coupon
+    FROM joined
+    GROUP BY cc_name, w_warehouse_name, d_year, wp_type
 )
 SELECT
-    st.s_store_name,
-    st.s_city,
-    rs.r_reason_desc,
-    sr.cnt_returns,
-    sr.total_return_amt,
-    SUM(cr.cr_return_amount) AS sum_return_amount,
-    AVG(cr.cr_return_amount) AS avg_return_amount,
-    COUNT(cr.cr_order_number) AS cnt_catalog_returns,
-    (
-        SELECT MAX(cp2.cp_catalog_page_id)
-        FROM catalog_page cp2
-        WHERE cp2.cp_catalog_page_sk = cr.cr_catalog_page_sk
-    ) AS latest_page_id
-FROM store_ret_agg sr
-JOIN store st ON sr.sr_store_sk = st.s_store_sk
-JOIN reason rs ON sr.sr_reason_sk = rs.r_reason_sk
-JOIN catalog_returns cr ON cr.cr_reason_sk = rs.r_reason_sk
-JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN warehouse wh ON cr.cr_warehouse_sk = wh.w_warehouse_sk
-WHERE rs.r_reason_desc IN (
-        SELECT DISTINCT r_reason_desc
-        FROM reason
-        WHERE r_reason_desc LIKE 'Did not%'
-    )
-  AND sm.sm_type = 'EXPRESS'
-  AND cp.cp_end_date_sk = 2451178
-  AND st.s_state = 'CA'
-GROUP BY
-    st.s_store_name,
-    st.s_city,
-    rs.r_reason_desc,
-    sr.cnt_returns,
-    sr.total_return_amt,
-    cr.cr_catalog_page_sk
-ORDER BY sr.total_return_amt DESC
+    cc_name,
+    w_warehouse_name,
+    d_year,
+    wp_type,
+    total_net_paid,
+    avg_sales_price,
+    order_cnt,
+    min_coupon,
+    max_coupon,
+    RANK() OVER (ORDER BY total_net_paid DESC) AS revenue_rank,
+    SUM(total_net_paid) OVER (PARTITION BY d_year ORDER BY total_net_paid DESC
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_year_net
+FROM aggregated
+ORDER BY total_net_paid DESC
 LIMIT 100

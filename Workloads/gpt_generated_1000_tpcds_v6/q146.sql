@@ -1,48 +1,83 @@
-WITH agg_returns AS (
+WITH joined AS (
     SELECT
-        sr.sr_customer_sk,
-        sr.sr_hdemo_sk,
-        COUNT(*) AS return_cnt,
-        SUM(sr.sr_net_loss) AS total_net_loss,
-        AVG(sr.sr_return_amt) AS avg_return_amt,
-        MIN(sr.sr_return_amt) AS min_return_amt,
-        MAX(sr.sr_return_amt) AS max_return_amt
-    FROM store_returns AS sr
-    WHERE sr.sr_return_ship_cost > 20.00
-      AND sr.sr_reversed_charge < 10.00
-      AND sr.sr_return_tax BETWEEN 1.00 AND 5.00
-    GROUP BY sr.sr_customer_sk, sr.sr_hdemo_sk
+        d.d_date,
+        d.d_year,
+        s.s_store_name,
+        s.s_state AS store_state,
+        w.w_warehouse_name,
+        w.w_state AS warehouse_state,
+        cc.cc_division_name,
+        ca.ca_state AS address_state,
+        sr.sr_return_amt,
+        sr.sr_fee,
+        sr.sr_reversed_charge,
+        sr.sr_return_quantity,
+        inv.inv_quantity_on_hand
+    FROM store_returns sr
+    JOIN date_dim d
+        ON sr.sr_returned_date_sk = d.d_date_sk
+    JOIN customer_address ca
+        ON sr.sr_addr_sk = ca.ca_address_sk
+    JOIN store s
+        ON sr.sr_store_sk = s.s_store_sk
+    JOIN inventory inv
+        ON inv.inv_date_sk = d.d_date_sk
+    JOIN warehouse w
+        ON inv.inv_warehouse_sk = w.w_warehouse_sk
+    JOIN call_center cc
+        ON cc.cc_closed_date_sk = d.d_date_sk
+    WHERE d.d_year = 2001
+      AND s.s_state = 'CA'
+      AND w.w_state = 'TX'
+      AND cc.cc_country = 'United States'
+      AND inv.inv_quantity_on_hand > 500
+      AND sr.sr_fee > 20
+),
+agg AS (
+    SELECT
+        s_store_name,
+        w_warehouse_name,
+        cc_division_name,
+        SUM(sr_return_amt) AS total_return_amt,
+        SUM(sr_fee) AS total_fee,
+        SUM(sr_reversed_charge) AS total_rev_charge,
+        SUM(inv_quantity_on_hand) AS total_inventory,
+        COUNT(*) AS cnt_returns
+    FROM joined
+    GROUP BY ROLLUP (s_store_name, w_warehouse_name, cc_division_name)
 )
-SELECT
-    c.c_customer_id,
-    c.c_first_name,
-    c.c_last_name,
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    hd.hd_buy_potential,
-    SUM(ar.return_cnt) AS total_returns,
-    SUM(ar.total_net_loss) AS total_net_loss,
-    AVG(ar.avg_return_amt) AS overall_avg_return_amt,
-    MIN(ar.min_return_amt) AS overall_min_return_amt,
-    MAX(ar.max_return_amt) AS overall_max_return_amt
-FROM agg_returns AS ar
-JOIN customer AS c
-  ON ar.sr_customer_sk = c.c_customer_sk
-JOIN household_demographics AS hd
-  ON ar.sr_hdemo_sk = hd.hd_demo_sk
-JOIN income_band AS ib
-  ON hd.hd_income_band_sk = ib.ib_income_band_sk
-WHERE c.c_birth_year BETWEEN 1970 AND 1990
-  AND c.c_preferred_cust_flag = 'Y'
-  AND hd.hd_dep_count <= 2
-  AND hd.hd_buy_potential = '>10000'
-  AND ib.ib_upper_bound <= 100000
-GROUP BY
-    c.c_customer_id,
-    c.c_first_name,
-    c.c_last_name,
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    hd.hd_buy_potential
-ORDER BY total_net_loss DESC
+SELECT *
+FROM (
+    SELECT
+        s_store_name,
+        w_warehouse_name,
+        cc_division_name,
+        total_return_amt,
+        total_fee,
+        total_rev_charge,
+        total_inventory,
+        cnt_returns,
+        SUM(total_return_amt) OVER (PARTITION BY s_store_name ORDER BY w_warehouse_name
+                                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_store_return
+    FROM agg
+    WHERE total_return_amt > (SELECT AVG(sr_return_amt) FROM store_returns)
+) 
+UNION ALL
+SELECT *
+FROM (
+    SELECT
+        s_store_name,
+        w_warehouse_name,
+        cc_division_name,
+        total_return_amt,
+        total_fee,
+        total_rev_charge,
+        total_inventory,
+        cnt_returns,
+        SUM(total_return_amt) OVER (PARTITION BY s_store_name ORDER BY w_warehouse_name
+                                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_store_return
+    FROM agg
+    WHERE total_return_amt <= (SELECT AVG(sr_return_amt) FROM store_returns)
+) 
+ORDER BY s_store_name, w_warehouse_name
 LIMIT 100

@@ -1,48 +1,58 @@
-WITH item_sales AS (
-    SELECT
-        i.i_item_sk,
-        i.i_brand_id,
-        i.i_brand,
-        SUM(cs.cs_ext_sales_price) AS catalog_sales_amount,
-        SUM(ws.ws_ext_sales_price) AS web_sales_amount,
-        COUNT(DISTINCT cs.cs_order_number) AS catalog_orders,
-        COUNT(DISTINCT ws.ws_order_number) AS web_orders
-    FROM
-        catalog_sales cs
-        JOIN item i ON cs.cs_item_sk = i.i_item_sk
-        JOIN web_sales ws ON ws.ws_item_sk = i.i_item_sk
-        JOIN customer c_bill ON cs.cs_bill_customer_sk = c_bill.c_customer_sk
-        JOIN customer c_ws_bill ON ws.ws_bill_customer_sk = c_ws_bill.c_customer_sk
-        JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
-        JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-        JOIN ship_mode sm_ws ON ws.ws_ship_mode_sk = sm_ws.sm_ship_mode_sk
-    WHERE
-        cc.cc_division_name IN ('able', 'anti')
-        AND i.i_brand_id IN (6008007, 1002001)
-        AND sm.sm_type = 'AIR'
-        AND c_bill.c_salutation = 'Mr.'
-        AND cs.cs_quantity > 5
-    GROUP BY
-        i.i_item_sk,
-        i.i_brand_id,
-        i.i_brand
+/*
+goal: Compare yearly sales and profit from store and web channels for 1998‑1999, broken down by promotion email channel, and show subtotals using grouping sets.
+*/
+WITH store_sales_data AS (
+    SELECT DISTINCT
+        d.d_year AS year,
+        p.p_channel_email AS channel,
+        ss.ss_ext_sales_price AS sales,
+        ss.ss_net_profit AS profit,
+        (
+            SELECT avg(p2.p_cost)
+            FROM promotion p2
+            WHERE p2.p_channel_email = p.p_channel_email
+        ) AS avg_promo_cost
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE d.d_year IN (1998, 1999)
+      AND EXISTS (
+          SELECT 1
+          FROM store_returns sr
+          WHERE sr.sr_ticket_number = ss.ss_ticket_number
+            AND sr.sr_store_sk = s.s_store_sk
+      )
+),
+web_sales_data AS (
+    SELECT DISTINCT
+        d.d_year AS year,
+        p.p_channel_email AS channel,
+        ws.ws_ext_sales_price AS sales,
+        ws.ws_net_profit AS profit,
+        (
+            SELECT avg(p2.p_cost)
+            FROM promotion p2
+            WHERE p2.p_channel_email = p.p_channel_email
+        ) AS avg_promo_cost
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    WHERE d.d_year IN (1998, 1999)
+      AND w.web_city = 'Seattle'
 )
 SELECT
-    isub.i_item_sk,
-    isub.i_brand_id,
-    isub.i_brand,
-    isub.catalog_sales_amount,
-    isub.web_sales_amount,
-    (isub.catalog_sales_amount + isub.web_sales_amount) AS total_sales,
-    RANK() OVER (PARTITION BY isub.i_brand_id ORDER BY (isub.catalog_sales_amount + isub.web_sales_amount) DESC) AS sales_rank_by_brand,
-    CASE
-        WHEN (isub.catalog_sales_amount + isub.web_sales_amount) > (
-            SELECT AVG(catalog_sales_amount + web_sales_amount) FROM item_sales
-        ) THEN 'Above Avg'
-        ELSE 'Below Avg'
-    END AS sales_category
-FROM
-    item_sales isub
-ORDER BY
-    total_sales DESC
+    year,
+    channel,
+    sum(sales)        AS total_sales,
+    sum(profit)       AS total_profit,
+    avg(avg_promo_cost) AS avg_promo_cost
+FROM (
+    SELECT year, channel, sales, profit, avg_promo_cost FROM store_sales_data
+    UNION ALL
+    SELECT year, channel, sales, profit, avg_promo_cost FROM web_sales_data
+) combined
+GROUP BY GROUPING SETS ( (year, channel), (year), () )
+ORDER BY year NULLS LAST, channel
 LIMIT 100

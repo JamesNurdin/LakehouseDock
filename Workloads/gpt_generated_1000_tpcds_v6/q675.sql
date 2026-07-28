@@ -1,41 +1,40 @@
-WITH reason_agg AS (
+WITH sales_agg AS (
     SELECT
-        r.r_reason_id,
-        r.r_reason_desc,
-        COUNT(*) AS total_returns,
-        SUM(wr.wr_return_amt) AS total_return_amt,
-        AVG(wr.wr_return_amt) AS avg_return_amt
-    FROM tpcds.web_returns wr
-    JOIN tpcds.reason r
-        ON wr.wr_reason_sk = r.r_reason_sk
-    WHERE wr.wr_refunded_hdemo_sk IN (2641, 4276, 3197)
-    GROUP BY r.r_reason_id, r.r_reason_desc
+        c.c_customer_id AS customer_id,
+        i.i_item_id AS item_id,
+        SUM(ss.ss_net_profit) AS store_profit,
+        SUM(ss.ss_quantity) AS store_qty,
+        SUM(ws.ws_net_profit) AS web_profit,
+        SUM(ws.ws_quantity) AS web_qty
+    FROM store_sales ss
+    JOIN customer c
+        ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN item i
+        ON ss.ss_item_sk = i.i_item_sk
+    JOIN web_sales ws
+        ON ws.ws_bill_customer_sk = c.c_customer_sk
+        AND ws.ws_item_sk = i.i_item_sk
+    JOIN ship_mode sm
+        ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN warehouse w
+        ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN web_page wp
+        ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN web_site we
+        ON ws.ws_web_site_sk = we.web_site_sk
+    WHERE i.i_category = 'Sports'
+      AND i.i_rec_end_date >= DATE '2000-01-01'
+      AND sm.sm_code = 'AIR'
+      AND w.w_state = 'CA'
+      AND ws.ws_net_profit > 0
+    GROUP BY c.c_customer_id, i.i_item_id
 )
 SELECT
-    ragg.r_reason_id,
-    ragg.r_reason_desc,
-    'AvgReturnAmt' AS metric_name,
-    ragg.avg_return_amt AS metric_value
-FROM reason_agg ragg
-WHERE ragg.avg_return_amt > 15
-
-UNION ALL
-
-SELECT
-    r.r_reason_id,
-    r.r_reason_desc,
-    'HighAcctCreditCnt' AS metric_name,
-    CAST(COUNT(*) AS double) AS metric_value
-FROM tpcds.web_returns wr
-JOIN tpcds.reason r
-    ON wr.wr_reason_sk = r.r_reason_sk
-WHERE wr.wr_account_credit > 30
-  AND EXISTS (
-        SELECT 1
-        FROM tpcds.web_returns wr2
-        WHERE wr2.wr_order_number = wr.wr_order_number
-          AND wr2.wr_return_amt > wr.wr_return_amt
-      )
-GROUP BY r.r_reason_id, r.r_reason_desc
-ORDER BY metric_value DESC, r_reason_id
+    customer_id,
+    SUM(store_profit + web_profit) AS total_profit,
+    SUM(store_qty + web_qty) AS total_qty
+FROM sales_agg
+GROUP BY customer_id
+HAVING SUM(store_profit + web_profit) > 1000
+ORDER BY total_profit DESC
 LIMIT 100

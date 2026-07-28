@@ -1,60 +1,72 @@
-WITH sales_agg AS (
+WITH base AS (
     SELECT
-        ws.ws_order_number,
-        c.c_customer_id,
-        ib.ib_lower_bound,
-        ib.ib_upper_bound,
-        SUM(ws.ws_ext_sales_price) AS total_sales,
-        SUM(ws.ws_net_profit) AS total_profit,
-        COUNT(*) AS line_item_cnt,
-        AVG(ws.ws_quantity) AS avg_qty,
-        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
-    FROM web_sales ws
-    JOIN customer c
-        ON ws.ws_bill_customer_sk = c.c_customer_sk
-    JOIN household_demographics hd
-        ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-    JOIN income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    JOIN web_page wp
-        ON ws.ws_web_page_sk = wp.wp_web_page_sk
-    WHERE
-        c.c_preferred_cust_flag = 'Y'
-        AND hd.hd_dep_count >= 4
-        AND ib.ib_lower_bound >= 20000
-        AND wp.wp_autogen_flag = 'N'
-    GROUP BY
-        ws.ws_order_number,
-        c.c_customer_id,
-        ib.ib_lower_bound,
-        ib.ib_upper_bound
-),
-final_agg AS (
-    SELECT
-        c_customer_id,
-        SUM(total_sales) AS cust_total_sales,
-        SUM(total_profit) AS cust_total_profit,
-        COUNT(*) AS orders_cnt,
-        MAX(sales_rank) AS max_sales_rank
-    FROM sales_agg
-    WHERE total_sales > 1000
-      AND total_profit > 0
-    GROUP BY c_customer_id
-    HAVING SUM(total_sales) > 5000
+        d_cs_sold.d_year,
+        i.i_category,
+        cd_cs_bill.cd_gender,
+        cd_cs_bill.cd_credit_rating,
+        COUNT(DISTINCT cs.cs_order_number) AS orders,
+        SUM(cs.cs_ext_sales_price) AS catalog_sales,
+        SUM(ws.ws_ext_sales_price) AS web_sales,
+        SUM(cr.cr_return_amount) AS returns_amount,
+        SUM(cs.cs_net_profit) AS catalog_profit,
+        SUM(ws.ws_net_profit) AS web_profit,
+        SUM(CASE WHEN cd_cs_bill.cd_credit_rating = 'Good' THEN cs.cs_net_profit + ws.ws_net_profit ELSE 0 END) AS good_credit_total_profit
+    FROM catalog_sales cs
+    JOIN date_dim d_cs_sold
+      ON cs.cs_sold_date_sk = d_cs_sold.d_date_sk
+    JOIN time_dim t_cs_sold
+      ON cs.cs_sold_time_sk = t_cs_sold.t_time_sk
+    JOIN date_dim d_cs_ship
+      ON cs.cs_ship_date_sk = d_cs_ship.d_date_sk
+    JOIN customer_demographics cd_cs_bill
+      ON cs.cs_bill_cdemo_sk = cd_cs_bill.cd_demo_sk
+    JOIN customer_demographics cd_cs_ship
+      ON cs.cs_ship_cdemo_sk = cd_cs_ship.cd_demo_sk
+    JOIN item i
+      ON cs.cs_item_sk = i.i_item_sk
+    LEFT JOIN catalog_returns cr
+      ON cs.cs_order_number = cr.cr_order_number
+         AND cs.cs_item_sk = cr.cr_item_sk
+    LEFT JOIN date_dim d_cr_returned
+      ON cr.cr_returned_date_sk = d_cr_returned.d_date_sk
+    LEFT JOIN time_dim t_cr_returned
+      ON cr.cr_returned_time_sk = t_cr_returned.t_time_sk
+    LEFT JOIN customer_demographics cd_cr_refunded
+      ON cr.cr_refunded_cdemo_sk = cd_cr_refunded.cd_demo_sk
+    LEFT JOIN customer_demographics cd_cr_returning
+      ON cr.cr_returning_cdemo_sk = cd_cr_returning.cd_demo_sk
+    JOIN web_sales ws
+      ON ws.ws_item_sk = i.i_item_sk
+    JOIN date_dim d_ws_sold
+      ON ws.ws_sold_date_sk = d_ws_sold.d_date_sk
+    JOIN time_dim t_ws_sold
+      ON ws.ws_sold_time_sk = t_ws_sold.t_time_sk
+    JOIN date_dim d_ws_ship
+      ON ws.ws_ship_date_sk = d_ws_ship.d_date_sk
+    JOIN customer_demographics cd_ws_bill
+      ON ws.ws_bill_cdemo_sk = cd_ws_bill.cd_demo_sk
+    JOIN customer_demographics cd_ws_ship
+      ON ws.ws_ship_cdemo_sk = cd_ws_ship.cd_demo_sk
+    WHERE d_cs_sold.d_year = 2001
+      AND i.i_category = 'Electronics'
+      AND cd_cs_bill.cd_credit_rating = 'Good'
+      AND t_cs_sold.t_hour BETWEEN 9 AND 17
+      AND cr.cr_return_quantity > 0
+      AND d_ws_sold.d_date BETWEEN DATE '2001-01-01' AND DATE '2001-12-31'
+    GROUP BY d_cs_sold.d_year, i.i_category, cd_cs_bill.cd_gender, cd_cs_bill.cd_credit_rating
 )
 SELECT
-    fa.c_customer_id,
-    fa.cust_total_sales,
-    fa.cust_total_profit,
-    fa.orders_cnt,
-    RANK() OVER (ORDER BY fa.cust_total_profit DESC) AS profit_rank,
-    EXISTS (
-        SELECT 1
-        FROM web_returns wr
-        JOIN customer c2 ON wr.wr_refunded_customer_sk = c2.c_customer_sk
-        WHERE c2.c_customer_id = fa.c_customer_id
-          AND wr.wr_return_amt > 0
-    ) AS any_return_flag
-FROM final_agg fa
-ORDER BY profit_rank
-LIMIT 100
+    b.d_year,
+    b.i_category,
+    b.cd_gender,
+    b.cd_credit_rating,
+    b.orders,
+    b.catalog_sales,
+    b.web_sales,
+    b.returns_amount,
+    b.catalog_profit,
+    b.web_profit,
+    b.good_credit_total_profit,
+    SUM(b.catalog_sales + b.web_sales) OVER (PARTITION BY b.i_category ORDER BY b.d_year) AS cumulative_sales_by_category
+FROM base b
+ORDER BY b.d_year, b.i_category, b.cd_gender

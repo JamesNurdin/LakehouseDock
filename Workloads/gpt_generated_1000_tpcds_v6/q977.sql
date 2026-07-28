@@ -1,41 +1,53 @@
-WITH sold_sales AS (
+WITH
+  store_data AS (
     SELECT
-        ws.ws_sold_date_sk,
-        ws.ws_web_page_sk,
-        ws.ws_quantity,
-        ws.ws_net_paid_inc_tax,
-        ws.ws_net_profit,
-        ws.ws_ship_hdemo_sk
-    FROM web_sales ws
-    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
-    WHERE d.d_year = 2001
-      AND d.d_month_seq BETWEEN 1200 AND 1210
-      AND ws.ws_quantity > 1
-      AND ws.ws_net_paid_inc_tax > 1000
-      AND ws.ws_ship_hdemo_sk IN (25, 5834)
-)
-SELECT
-    d.d_year,
-    wp.wp_type,
-    COUNT(DISTINCT wp.wp_url) AS unique_pages,
-    SUM(s.ws_net_paid_inc_tax) AS total_net_paid_inc_tax,
-    AVG(s.ws_quantity) AS avg_quantity,
-    MIN(s.ws_net_profit) AS min_profit,
-    MAX(s.ws_net_profit) AS max_profit
-FROM sold_sales s
-JOIN web_page wp ON s.ws_web_page_sk = wp.wp_web_page_sk
-JOIN date_dim d ON s.ws_sold_date_sk = d.d_date_sk
-WHERE wp.wp_autogen_flag = 'N'
-  AND wp.wp_char_count > 1000
-  AND wp.wp_rec_start_date > DATE '2000-01-01'
-  AND wp.wp_rec_end_date < DATE '2002-01-01'
-  AND EXISTS (
-        SELECT 1
-        FROM date_dim d2
-        WHERE wp.wp_creation_date_sk = d2.d_date_sk
-          AND d2.d_weekend = 'Y'
-          AND d2.d_year = 2000
+      i.i_item_id,
+      i.i_category,
+      sr.sr_return_amt_inc_tax AS return_amount,
+      CASE WHEN sr.sr_net_loss > 1000 THEN 'High' ELSE 'Low' END AS loss_category,
+      cd.cd_purchase_estimate
+    FROM store_returns sr
+    JOIN item i ON sr.sr_item_sk = i.i_item_sk
+    JOIN customer c ON sr.sr_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate > 5000
+      AND i.i_category_id IN (4,5,6)
+  ),
+  web_data AS (
+    SELECT
+      i.i_item_id,
+      i.i_category,
+      wr.wr_return_amt_inc_tax AS return_amount,
+      CASE WHEN wr.wr_net_loss > 1000 THEN 'High' ELSE 'Low' END AS loss_category,
+      cd.cd_purchase_estimate
+    FROM web_returns wr
+    JOIN item i ON wr.wr_item_sk = i.i_item_sk
+    JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON wr.wr_refunded_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate > 5000
+      AND i.i_category_id IN (4,5,6)
+  ),
+  overall_avg AS (
+    SELECT avg(return_amount) AS overall_avg_return
+    FROM (
+      SELECT sr_return_amt_inc_tax AS return_amount FROM store_returns
+      UNION ALL
+      SELECT wr_return_amt_inc_tax FROM web_returns
     )
-GROUP BY d.d_year, wp.wp_type
-ORDER BY total_net_paid_inc_tax DESC
+  )
+SELECT DISTINCT
+  src.i_item_id AS item_id,
+  src.i_category AS category,
+  src.loss_category,
+  src.return_amount,
+  CASE
+    WHEN src.return_amount > (SELECT overall_avg_return FROM overall_avg) THEN 'Above Avg'
+    ELSE 'Below Avg'
+  END AS compare_to_avg
+FROM (
+  SELECT i_item_id, i_category, return_amount, loss_category, cd_purchase_estimate FROM store_data
+  UNION ALL
+  SELECT i_item_id, i_category, return_amount, loss_category, cd_purchase_estimate FROM web_data
+) src
+ORDER BY src.return_amount DESC
 LIMIT 100

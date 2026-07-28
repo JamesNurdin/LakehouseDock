@@ -1,48 +1,54 @@
-WITH item_sales AS (
+WITH store_ret AS (
     SELECT
-        cs.cs_item_sk,
-        i.i_item_id AS item_id,
-        i.i_brand AS i_brand,
-        i.i_category AS i_category,
-        ca.ca_state AS ca_state,
-        hd.hd_income_band_sk AS hd_income_band_sk,
-        SUM(cs.cs_net_paid) AS total_net_paid,
-        AVG(cs.cs_ext_wholesale_cost) AS avg_wholesale_cost,
-        COUNT(DISTINCT cs.cs_order_number) AS order_cnt,
-        SUM(sr.sr_return_amt) AS total_return_amt,
-        SUM(sr.sr_fee) AS total_fee
-    FROM catalog_sales cs
-    JOIN item i
-        ON cs.cs_item_sk = i.i_item_sk
-    JOIN customer_address ca
-        ON cs.cs_bill_addr_sk = ca.ca_address_sk
-    JOIN household_demographics hd
-        ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-    LEFT JOIN store_returns sr
-        ON sr.sr_item_sk = i.i_item_sk
-        AND sr.sr_addr_sk = ca.ca_address_sk
-        AND sr.sr_hdemo_sk = hd.hd_demo_sk
-    WHERE cs.cs_ext_wholesale_cost > 500.00
-      AND cs.cs_ext_ship_cost BETWEEN 100.00 AND 3000.00
-      AND hd.hd_income_band_sk IN (1, 9, 11)
-      AND ca.ca_state = 'CA'
-      AND i.i_brand = 'BrandA'
-    GROUP BY cs.cs_item_sk, i.i_item_id, i.i_brand, i.i_category, ca.ca_state, hd.hd_income_band_sk
+        d.d_year AS year,
+        'store' AS channel,
+        SUM(sr.sr_net_loss) AS total_loss,
+        COUNT(*) AS return_cnt,
+        CASE WHEN SUM(sr.sr_return_quantity) > 100 THEN 'HighVolume' ELSE 'LowVolume' END AS volume_category
+    FROM store_returns sr
+    JOIN date_dim d
+        ON sr.sr_returned_date_sk = d.d_date_sk
+    JOIN store s
+        ON sr.sr_store_sk = s.s_store_sk
+    JOIN customer_demographics cd
+        ON sr.sr_cdemo_sk = cd.cd_demo_sk
+    WHERE s.s_state = 'CA'
+      AND d.d_year BETWEEN 2000 AND 2002
+      AND EXISTS (
+          SELECT 1
+          FROM warehouse w
+          WHERE w.w_city = 'Liberty' AND w.w_state = s.s_state
+      )
+    GROUP BY d.d_year
+),
+catalog_ret AS (
+    SELECT
+        d.d_year AS year,
+        'catalog' AS channel,
+        SUM(cr.cr_net_loss) AS total_loss,
+        COUNT(*) AS return_cnt,
+        CASE WHEN AVG(cr.cr_return_quantity) > 5 THEN 'HighAvgQty' ELSE 'LowAvgQty' END AS volume_category
+    FROM catalog_returns cr
+    JOIN date_dim d
+        ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN warehouse w
+        ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    JOIN customer_demographics cd
+        ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
+    WHERE w.w_country = 'United States'
+      AND d.d_year BETWEEN 2000 AND 2002
+      AND cd.cd_purchase_estimate > (
+          SELECT AVG(cd2.cd_purchase_estimate)
+          FROM customer_demographics cd2
+          WHERE cd2.cd_gender = 'M'
+      )
+    GROUP BY d.d_year
 )
-SELECT
-    item_id,
-    i_brand,
-    i_category,
-    ca_state,
-    hd_income_band_sk,
-    total_net_paid,
-    total_return_amt,
-    order_cnt,
-    avg_wholesale_cost
-FROM item_sales
-WHERE total_net_paid > (
-    SELECT AVG(total_net_paid) * 1.2
-    FROM item_sales
-)
-ORDER BY total_net_paid DESC
+SELECT *
+FROM (
+    SELECT * FROM store_ret
+    UNION ALL
+    SELECT * FROM catalog_ret
+) AS combined
+ORDER BY year, channel
 LIMIT 100

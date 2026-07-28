@@ -1,46 +1,48 @@
-WITH filtered_sales AS (
+WITH catalog_agg AS (
     SELECT
-        cs.cs_sold_date_sk,
-        cs.cs_item_sk,
-        cs.cs_promo_sk,
-        cs.cs_quantity,
-        cs.cs_net_profit,
-        cs.cs_ext_sales_price,
-        cs.cs_ext_discount_amt
-    FROM catalog_sales cs
-    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
-    WHERE d.d_year = 2022
-      AND regexp_like(d.d_day_name, '^S')
+        i.i_item_id AS item_id,
+        d.d_year AS year,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        COUNT(*) AS return_cnt
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
+    WHERE d.d_date BETWEEN DATE '2000-01-01' AND DATE '2000-12-31'
+      AND i.i_current_price > (SELECT AVG(i2.i_current_price) FROM item i2)
+      AND EXISTS (
+          SELECT 1
+          FROM warehouse w
+          WHERE w.w_warehouse_sk = cr.cr_warehouse_sk
+            AND w.w_gmt_offset = -5.00
+      )
+    GROUP BY i.i_item_id, d.d_year
+),
+store_agg AS (
+    SELECT
+        i.i_item_id AS item_id,
+        d.d_year AS year,
+        SUM(sr.sr_return_amt) AS total_return_amount,
+        COUNT(*) AS return_cnt
+    FROM store_returns sr
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    JOIN item i ON sr.sr_item_sk = i.i_item_sk
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    WHERE d.d_year = 2000
+      AND r.r_reason_desc = 'Customer Not Satisfied'
+    GROUP BY i.i_item_id, d.d_year
+),
+combined AS (
+    SELECT * FROM catalog_agg
+    UNION ALL
+    SELECT * FROM store_agg
 )
 SELECT
-    i.i_category,
-    i.i_category_id,
-    p.p_promo_name,
-    COUNT(*) AS sales_cnt,
-    SUM(fs.cs_quantity) AS total_qty,
-    SUM(fs.cs_net_profit) AS total_profit,
-    AVG(fs.cs_net_profit) AS avg_profit,
-    SUM(fs.cs_ext_sales_price) AS total_sales,
-    MAX(fs.cs_ext_sales_price) AS max_sales_price,
-    CONCAT('Promo_', SUBSTRING(p.p_promo_name FROM 1 FOR 10)) AS promo_tag
-FROM filtered_sales fs
-JOIN item i ON fs.cs_item_sk = i.i_item_sk
-JOIN promotion p ON fs.cs_promo_sk = p.p_promo_sk
-WHERE i.i_product_name LIKE '%Organic%'
-  AND regexp_like(p.p_promo_name, 'Discount[0-9]+')
-  AND EXISTS (
-        SELECT 1
-        FROM catalog_sales cs2
-        WHERE cs2.cs_item_sk = i.i_item_sk
-          AND cs2.cs_net_profit > 1000
-    )
-GROUP BY
-    i.i_category,
-    i.i_category_id,
-    p.p_promo_name
-HAVING SUM(fs.cs_net_profit) > (
-        SELECT AVG(cs3.cs_net_profit)
-        FROM catalog_sales cs3
-    )
-ORDER BY total_profit DESC
+    item_id,
+    year,
+    total_return_amount,
+    return_cnt,
+    ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY total_return_amount DESC) AS rn
+FROM combined
+ORDER BY rn
 LIMIT 100

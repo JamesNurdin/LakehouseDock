@@ -1,41 +1,53 @@
-WITH sales_filtered AS (
-  SELECT
-    cs.cs_item_sk,
-    cs.cs_ext_sales_price,
-    cs.cs_net_profit,
-    cs.cs_ext_discount_amt,
-    i.i_category,
-    i.i_brand,
-    i.i_item_desc,
-    i.i_product_name,
-    sm.sm_ship_mode_id,
-    td.t_hour
-  FROM catalog_sales cs
-  JOIN item i ON cs.cs_item_sk = i.i_item_sk
-  JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-  JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
-  WHERE td.t_hour BETWEEN 9 AND 17
-    AND regexp_like(i.i_item_desc, '(?i)elect')
-    AND sm.sm_ship_mode_id LIKE '%AIR%'
+WITH catalog_sales_agg AS (
+   SELECT
+       cs_bill_customer_sk AS customer_sk,
+       SUM(cs_ext_sales_price) AS sales_amount,
+       'Catalog' AS sales_source
+   FROM catalog_sales
+   JOIN customer ON cs_bill_customer_sk = customer.c_customer_sk
+   JOIN customer_demographics cd ON cs_bill_cdemo_sk = cd.cd_demo_sk
+   WHERE cd.cd_gender = 'M'
+   GROUP BY cs_bill_customer_sk
+),
+store_sales_agg AS (
+   SELECT
+       ss_customer_sk AS customer_sk,
+       SUM(ss_ext_sales_price) AS sales_amount,
+       'Store' AS sales_source
+   FROM store_sales
+   JOIN customer ON ss_customer_sk = customer.c_customer_sk
+   JOIN customer_demographics cd ON ss_cdemo_sk = cd.cd_demo_sk
+   WHERE cd.cd_gender = 'M'
+   GROUP BY ss_customer_sk
+),
+combined AS (
+   SELECT
+       ca.customer_sk,
+       c.c_first_name,
+       c.c_last_name,
+       ca.sales_amount,
+       ca.sales_source
+   FROM catalog_sales_agg ca
+   JOIN customer c ON ca.customer_sk = c.c_customer_sk
+
+   UNION ALL
+
+   SELECT
+       sa.customer_sk,
+       c.c_first_name,
+       c.c_last_name,
+       sa.sales_amount,
+       sa.sales_source
+   FROM store_sales_agg sa
+   JOIN customer c ON sa.customer_sk = c.c_customer_sk
 )
 SELECT
-  CONCAT(s.i_brand, ' - ', s.i_category) AS brand_category,
-  COUNT(*) AS sales_count,
-  SUM(s.cs_net_profit) AS total_net_profit,
-  AVG(s.cs_ext_discount_amt) AS avg_discount,
-  MAX(s.cs_ext_sales_price) AS max_sales_price,
-  REGEXP_EXTRACT(s.i_product_name, '([A-Z]{3}[0-9]{2})') AS extracted_code
-FROM sales_filtered s
-WHERE EXISTS (
-  SELECT 1
-  FROM store_returns sr
-  JOIN time_dim tr ON sr.sr_return_time_sk = tr.t_time_sk
-  WHERE sr.sr_item_sk = s.cs_item_sk
-    AND sr.sr_reversed_charge > 10
-    AND tr.t_hour BETWEEN 0 AND 23
-)
-GROUP BY
-  CONCAT(s.i_brand, ' - ', s.i_category),
-  REGEXP_EXTRACT(s.i_product_name, '([A-Z]{3}[0-9]{2})')
-ORDER BY total_net_profit DESC
-LIMIT 10
+   customer_sk,
+   c_first_name,
+   c_last_name,
+   sales_source,
+   sales_amount,
+   ROW_NUMBER() OVER (PARTITION BY sales_source ORDER BY sales_amount DESC) AS sales_rank
+FROM combined
+ORDER BY sales_amount DESC
+LIMIT 100

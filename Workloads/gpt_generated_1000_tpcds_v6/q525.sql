@@ -1,46 +1,58 @@
 /*
-Goal: Analyze return and web sales performance for female married customers with at least two employed dependents, focusing on medium‑size returns and higher‑value web sales. The query joins store_returns, customer_demographics, and web_sales, applies several selective filters, aggregates key metrics, categorizes customers by credit rating, adds a running total window function, orders the results by total return amount, and limits output to 100 rows.
+Goal: Identify, for each store and hour of day, the total profit and sales from in‑store transactions that meet several business criteria, and only keep those store‑hour combos with substantial profit. The query joins all seven TPC‑DS tables, uses a CTE for the base sales filter, an EXISTS semi‑join to web_sales, and a second CTE to aggregate per store‑hour.
 */
-WITH agg AS (
+WITH base_sales AS (
     SELECT
-        cd.cd_demo_sk,
-        cd.cd_gender,
-        cd.cd_marital_status,
-        CASE WHEN cd.cd_credit_rating = 'A' THEN 'High' ELSE 'Other' END AS credit_group,
-        COUNT(DISTINCT ws.ws_order_number) AS orders_cnt,
-        SUM(sr.sr_return_amt) AS total_return_amt,
-        AVG(ws.ws_net_paid) AS avg_net_paid,
-        MIN(sr.sr_return_ship_cost) AS min_ship_cost,
-        MAX(ws.ws_net_profit) AS max_net_profit
-    FROM store_returns sr
-    JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
-    JOIN web_sales ws ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-    WHERE cd.cd_gender = 'F'
-      AND cd.cd_marital_status = 'M'
-      AND cd.cd_dep_employed_count >= 2
-      AND sr.sr_return_amt BETWEEN 50 AND 500
-      AND ws.ws_net_paid > 200
-    GROUP BY
-        cd.cd_demo_sk,
-        cd.cd_gender,
-        cd.cd_marital_status,
-        CASE WHEN cd.cd_credit_rating = 'A' THEN 'High' ELSE 'Other' END
+        ss.ss_store_sk,
+        s.s_store_id,
+        td.t_hour,
+        ss.ss_net_profit,
+        ss.ss_ext_sales_price,
+        ca.ca_gmt_offset,
+        i.i_current_price,
+        p.p_discount_active,
+        ss.ss_addr_sk,
+        ss.ss_item_sk,
+        ss.ss_promo_sk
+    FROM store_sales ss
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN time_dim td ON ss.ss_sold_time_sk = td.t_time_sk
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+    WHERE ca.ca_gmt_offset = -5.00                                -- predicate 1
+      AND i.i_current_price > 20                                  -- predicate 2
+      AND p.p_discount_active = 'Y'                               -- predicate 3
+      AND td.t_hour BETWEEN 8 AND 20                              -- predicate 4
+      AND EXISTS (
+          SELECT 1
+          FROM web_sales ws
+          JOIN time_dim td_ws ON ws.ws_sold_time_sk = td_ws.t_time_sk
+          WHERE ws.ws_item_sk = ss.ss_item_sk
+            AND ws.ws_promo_sk = ss.ss_promo_sk
+            AND ws.ws_bill_addr_sk = ss.ss_addr_sk
+            AND ws.ws_net_paid_inc_tax > 500                     -- predicate 5 (inside subquery)
+            AND td_ws.t_meal_time = 'Dinner'                     -- predicate 6 (inside subquery)
+      )
+),
+store_hour_agg AS (
+    SELECT
+        s_store_id,
+        t_hour,
+        SUM(ss_net_profit) AS profit_sum,
+        SUM(ss_ext_sales_price) AS sales_sum,
+        COUNT(*) AS txn_cnt
+    FROM base_sales
+    GROUP BY s_store_id, t_hour
 )
 SELECT
-    agg.cd_demo_sk,
-    agg.cd_gender,
-    agg.cd_marital_status,
-    agg.credit_group,
-    agg.orders_cnt,
-    agg.total_return_amt,
-    agg.avg_net_paid,
-    agg.min_ship_cost,
-    agg.max_net_profit,
-    SUM(agg.total_return_amt) OVER (
-        PARTITION BY agg.credit_group
-        ORDER BY agg.total_return_amt DESC
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS running_total_return
-FROM agg
-ORDER BY agg.total_return_amt DESC
+    s_store_id,
+    t_hour,
+    profit_sum,
+    sales_sum,
+    txn_cnt,
+    profit_sum / NULLIF(txn_cnt, 0) AS avg_profit_per_txn
+FROM store_hour_agg
+WHERE profit_sum > 1000
+ORDER BY profit_sum DESC
 LIMIT 100

@@ -1,47 +1,84 @@
-WITH sales_returns AS (
+WITH store_agg AS (
     SELECT
-        cc.cc_call_center_id AS cc_call_center_id,
-        cc.cc_mkt_class AS cc_mkt_class,
-        cc.cc_hours AS cc_hours,
-        wp.wp_web_page_id AS wp_web_page_id,
-        wp.wp_type AS wp_type,
-        cs.cs_order_number AS cs_order_number,
-        cs.cs_net_paid AS cs_net_paid,
-        cs.cs_net_profit AS cs_net_profit,
-        cs.cs_sales_price AS cs_sales_price,
-        cr.cr_return_amount AS cr_return_amount,
-        wr.wr_return_amt AS wr_return_amt,
-        ca_bill.ca_gmt_offset AS ca_gmt_offset
-    FROM catalog_sales cs
-    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
-    JOIN customer c_bill ON cs.cs_bill_customer_sk = c_bill.c_customer_sk
-    JOIN customer_address ca_bill ON cs.cs_bill_addr_sk = ca_bill.ca_address_sk
-    LEFT JOIN catalog_returns cr ON cr.cr_order_number = cs.cs_order_number
-        AND cr.cr_item_sk = cs.cs_item_sk
-    LEFT JOIN web_returns wr ON wr.wr_order_number = cs.cs_order_number
-    LEFT JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    WHERE cc.cc_mkt_class = 'Psychiatric'
-      AND cc.cc_hours = '8AM-4PM'
-      AND ca_bill.ca_gmt_offset = -6.00
-      AND cs.cs_net_paid > 0
-      AND cc.cc_rec_start_date >= DATE '2000-01-01'
+        sr_reason_sk AS reason_sk,
+        SUM(sr_net_loss) AS net_loss,
+        COUNT(*) AS cnt
+    FROM tpcds.store_returns
+    WHERE sr_store_credit > 100
+      AND sr_return_quantity >= 1
+    GROUP BY sr_reason_sk
+),
+web_agg AS (
+    SELECT
+        wr_reason_sk AS reason_sk,
+        SUM(wr_net_loss) AS net_loss,
+        COUNT(*) AS cnt
+    FROM tpcds.web_returns
+    WHERE wr_return_quantity >= 2
+      AND wr_return_amt > 20
+    GROUP BY wr_reason_sk
+),
+reason_agg AS (
+    SELECT
+        reason_sk,
+        SUM(net_loss) AS total_net_loss,
+        SUM(cnt) AS total_cnt
+    FROM (
+        SELECT reason_sk, net_loss, cnt FROM store_agg
+        UNION ALL
+        SELECT reason_sk, net_loss, cnt FROM web_agg
+    ) u
+    GROUP BY reason_sk
 )
 SELECT
-    cc_call_center_id,
-    wp_web_page_id,
-    COUNT(DISTINCT cs_order_number) AS order_cnt,
-    SUM(cs_net_paid) AS total_sales,
-    SUM(cs_net_profit) AS total_profit,
-    SUM(cr_return_amount) AS total_catalog_return,
-    SUM(wr_return_amt) AS total_web_return,
-    CASE
-        WHEN SUM(cs_net_profit) > 0 THEN 'Profit'
-        ELSE 'Loss'
-    END AS profit_flag,
-    RANK() OVER (ORDER BY SUM(cs_net_paid) DESC) AS sales_rank,
-    (SELECT AVG(cs_net_profit) FROM catalog_sales) AS overall_avg_profit
-FROM sales_returns
-GROUP BY cc_call_center_id, wp_web_page_id
-HAVING COUNT(DISTINCT cs_order_number) >= 10
-ORDER BY total_sales DESC
+    r.r_reason_desc,
+    cc.cc_name,
+    cp.cp_catalog_page_number,
+    cd.cd_gender,
+    agg.total_net_loss,
+    agg.total_cnt,
+    CASE WHEN agg.total_net_loss > 10000 THEN 'Y' ELSE 'N' END AS high_loss_flag,
+    (SELECT AVG(sub.total_net_loss)
+     FROM (
+         SELECT reason_sk, SUM(net_loss) AS total_net_loss
+         FROM (
+             SELECT sr_reason_sk AS reason_sk, SUM(sr_net_loss) AS net_loss
+             FROM tpcds.store_returns
+             WHERE sr_store_credit > 100
+               AND sr_return_quantity >= 1
+             GROUP BY sr_reason_sk
+             UNION ALL
+             SELECT wr_reason_sk AS reason_sk, SUM(wr_net_loss) AS net_loss
+             FROM tpcds.web_returns
+             WHERE wr_return_quantity >= 2
+               AND wr_return_amt > 20
+             GROUP BY wr_reason_sk
+         ) u
+         GROUP BY reason_sk
+     ) sub) AS avg_net_loss_across_reasons
+FROM tpcds.catalog_returns cr
+JOIN tpcds.call_center cc
+  ON cr.cr_call_center_sk = cc.cc_call_center_sk
+JOIN tpcds.catalog_page cp
+  ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+JOIN tpcds.reason r
+  ON cr.cr_reason_sk = r.r_reason_sk
+JOIN tpcds.customer_demographics cd
+  ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
+JOIN reason_agg agg
+  ON r.r_reason_sk = agg.reason_sk
+WHERE cc.cc_name = 'Midwest Call Center'
+  AND cp.cp_type = 'monthly'
+  AND cp.cp_catalog_number IN (2, 7, 15)
+  AND cd.cd_education_status = '4 yr Degree'
+  AND cd.cd_purchase_estimate BETWEEN 4000 AND 8000
+  AND cr.cr_return_quantity > 1
+  AND cr.cr_return_amount > 50
+  AND EXISTS (
+        SELECT 1
+        FROM tpcds.store_returns sr2
+        WHERE sr2.sr_reason_sk = cr.cr_reason_sk
+          AND sr2.sr_return_quantity > 0
+      )
+ORDER BY agg.total_net_loss DESC
 LIMIT 100

@@ -1,44 +1,38 @@
-WITH sales_agg AS (
-    SELECT
-        i.i_category AS category,
-        i.i_brand AS brand,
-        hd.hd_buy_potential AS buy_potential,
-        ib.ib_lower_bound AS income_lower_bound,
-        COUNT(*) AS sales_cnt,
-        SUM(ss.ss_net_paid_inc_tax) AS total_net_paid,
-        AVG(ss.ss_net_paid_inc_tax) AS avg_net_paid,
-        MIN(ss.ss_net_paid_inc_tax) AS min_net_paid,
-        MAX(ss.ss_net_paid_inc_tax) AS max_net_paid
-    FROM store_sales ss
-    JOIN item i
-        ON ss.ss_item_sk = i.i_item_sk
-    JOIN household_demographics hd
-        ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    JOIN income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    WHERE i.i_category_id = 4
-      AND ib.ib_lower_bound >= 30000
-      AND ss.ss_net_paid_inc_tax > 1000
-      AND EXISTS (
-          SELECT 1
-          FROM store_sales ss2
-          WHERE ss2.ss_item_sk = i.i_item_sk
-            AND ss2.ss_quantity > 5
-      )
-    GROUP BY i.i_category, i.i_brand, hd.hd_buy_potential, ib.ib_lower_bound
-)
-SELECT
-    category,
-    brand,
-    buy_potential,
-    income_lower_bound,
-    sales_cnt,
-    total_net_paid,
-    avg_net_paid,
-    min_net_paid,
-    max_net_paid,
-    SUM(total_net_paid) OVER (PARTITION BY category ORDER BY brand) AS category_running_total,
-    RANK() OVER (ORDER BY total_net_paid DESC) AS revenue_rank
-FROM sales_agg
-ORDER BY total_net_paid DESC
+WITH catalog_sales_cte AS (
+        SELECT
+            cs.cs_bill_customer_sk AS customer_sk,
+            'catalog' AS channel,
+            SUM(cs.cs_net_profit) AS profit,
+            d.d_year
+        FROM catalog_sales cs
+        JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+        GROUP BY cs.cs_bill_customer_sk, d.d_year
+        HAVING SUM(cs.cs_net_profit) > 0
+    ),
+    web_sales_cte AS (
+        SELECT
+            ws.ws_bill_customer_sk AS customer_sk,
+            'web' AS channel,
+            SUM(ws.ws_net_profit) AS profit,
+            d.d_year
+        FROM web_sales ws
+        JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+        GROUP BY ws.ws_bill_customer_sk, d.d_year
+        HAVING SUM(ws.ws_net_profit) > 0
+    ),
+    combined AS (
+        SELECT customer_sk, channel, profit, d_year FROM catalog_sales_cte
+        UNION ALL
+        SELECT customer_sk, channel, profit, d_year FROM web_sales_cte
+    )
+SELECT DISTINCT
+    c.c_customer_id AS customer_id,
+    comb.channel,
+    comb.profit,
+    comb.d_year,
+    RANK() OVER (PARTITION BY comb.d_year ORDER BY comb.profit DESC) AS profit_rank
+FROM combined comb
+JOIN customer c ON comb.customer_sk = c.c_customer_sk
+WHERE comb.d_year BETWEEN 2001 AND 2002
+ORDER BY comb.d_year, profit_rank
 LIMIT 100

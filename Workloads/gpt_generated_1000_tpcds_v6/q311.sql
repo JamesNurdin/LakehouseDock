@@ -1,33 +1,28 @@
-WITH male_sales AS (
-    SELECT d.d_year AS sales_year,
-           cd.cd_gender AS gender,
-           SUM(ws.ws_net_profit) AS total_net_profit
-    FROM web_sales ws
-    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
-    JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-    WHERE d.d_year = 1999
-      AND cd.cd_gender = 'M'
-    GROUP BY d.d_year, cd.cd_gender
-),
-female_sales AS (
-    SELECT d.d_year AS sales_year,
-           cd.cd_gender AS gender,
-           SUM(ws.ws_net_profit) AS total_net_profit
-    FROM web_sales ws
-    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
-    JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-    WHERE d.d_year = 1999
-      AND cd.cd_gender = 'F'
-    GROUP BY d.d_year, cd.cd_gender
+WITH sales_data AS (
+    SELECT
+        cc.cc_name,
+        concat(cc.cc_city, ', ', cc.cc_state) AS location,
+        cp.cp_department,
+        cs.cs_net_paid,
+        cs.cs_net_profit,
+        td.t_hour
+    FROM catalog_sales cs
+    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
+    WHERE regexp_like(cc.cc_name, '^A.*')
+      AND cc.cc_suite_number LIKE 'Suite %'
+      AND regexp_like(cp.cp_description, '(?i)fresh')
+      AND td.t_hour BETWEEN 9 AND 17
 )
-SELECT sales_year,
-       gender,
-       total_net_profit
-FROM male_sales
-UNION ALL
-SELECT sales_year,
-       gender,
-       total_net_profit
-FROM female_sales
-ORDER BY sales_year DESC, gender
+SELECT
+    cc_name,
+    location,
+    cp_department,
+    sum(cs_net_paid) AS total_net_paid,
+    sum(cs_net_profit) AS total_net_profit,
+    count(*) AS sales_count
+FROM sales_data
+GROUP BY cc_name, location, cp_department
+ORDER BY total_net_paid DESC
 LIMIT 100

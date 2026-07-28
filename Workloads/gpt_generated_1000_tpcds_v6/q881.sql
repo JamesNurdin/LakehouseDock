@@ -1,45 +1,89 @@
-WITH combined AS (
+WITH subquery_a AS (
     SELECT
-        s1.s_manager AS store_manager,
-        p1.p_promo_name AS promo_name,
-        sm.sm_carrier AS carrier,
-        r.r_reason_desc AS return_reason,
-        SUM(ss.ss_net_paid_inc_tax) AS total_sales_inc_tax,
-        SUM(ss.ss_net_profit) AS total_sales_profit,
-        SUM(cr.cr_net_loss) AS total_return_net_loss,
-        COUNT(DISTINCT ss.ss_customer_sk) AS distinct_sales_customers,
-        COUNT(DISTINCT cr.cr_order_number) AS distinct_return_orders
+        d.d_year AS year,
+        w.w_warehouse_name AS warehouse,
+        SUM(ss.ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS orders,
+        AVG(i.i_current_price) AS avg_item_price,
+        SUM(cr.cr_return_amount) AS total_catalog_returns,
+        SUM(wr.wr_return_amt) AS total_web_returns,
+        COUNT(DISTINCT p.p_promo_id) AS promo_count,
+        MAX(cc.cc_gmt_offset) AS max_cc_offset
     FROM store_sales ss
-    JOIN store s1 ON ss.ss_store_sk = s1.s_store_sk
-    JOIN store s2 ON ss.ss_store_sk = s2.s_store_sk                     -- second alias of store
-    JOIN promotion p1 ON ss.ss_promo_sk = p1.p_promo_sk
-    JOIN promotion p2 ON ss.ss_promo_sk = p2.p_promo_sk                 -- second alias of promotion
-    JOIN customer_demographics cd_sales ON ss.ss_cdemo_sk = cd_sales.cd_demo_sk
-    JOIN catalog_returns cr ON 1 = 1                                      -- cross‑join to bring returns into the same query
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk AND inv.inv_date_sk = d.d_date_sk
+    JOIN warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
+    JOIN catalog_returns cr ON cr.cr_item_sk = i.i_item_sk AND cr.cr_returned_date_sk = d.d_date_sk
+    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
     JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-    JOIN customer_demographics cd_refunded ON cr.cr_refunded_cdemo_sk = cd_refunded.cd_demo_sk
-    JOIN customer_demographics cd_returning ON cr.cr_returning_cdemo_sk = cd_returning.cd_demo_sk
-    WHERE p1.p_discount_active = 'Y'
-      AND sm.sm_contract IS NOT NULL
-    GROUP BY
-        s1.s_manager,
-        p1.p_promo_name,
-        sm.sm_carrier,
-        r.r_reason_desc
-    HAVING SUM(ss.ss_net_paid_inc_tax) > 1000
+    JOIN web_returns wr ON wr.wr_item_sk = i.i_item_sk AND wr.wr_returned_date_sk = d.d_date_sk
+    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    WHERE w.w_street_name IN ('Ash Laurel', 'Elm Madison')
+      AND ca.ca_gmt_offset = -5.00
+      AND i.i_color = 'Red'
+      AND p.p_discount_active = 'Y'
+      AND d.d_year = 2001
+      AND sm.sm_type = 'AIR'
+      AND EXISTS (
+          SELECT 1 FROM web_returns wr2
+          WHERE wr2.wr_item_sk = i.i_item_sk
+            AND wr2.wr_returned_date_sk = d.d_date_sk
+            AND wr2.wr_return_quantity > 0
+      )
+    GROUP BY d.d_year, w.w_warehouse_name
+),
+subquery_b AS (
+    SELECT
+        d.d_year AS year,
+        w.w_warehouse_name AS warehouse,
+        SUM(ss.ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS orders,
+        AVG(i.i_current_price) AS avg_item_price,
+        SUM(cr.cr_return_amount) AS total_catalog_returns,
+        SUM(wr.wr_return_amt) AS total_web_returns,
+        COUNT(DISTINCT p.p_promo_id) AS promo_count,
+        MAX(cc.cc_gmt_offset) AS max_cc_offset
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+    JOIN customer_demographics cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk AND inv.inv_date_sk = d.d_date_sk
+    JOIN warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
+    JOIN catalog_returns cr ON cr.cr_item_sk = i.i_item_sk AND cr.cr_returned_date_sk = d.d_date_sk
+    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN web_returns wr ON wr.wr_item_sk = i.i_item_sk AND wr.wr_returned_date_sk = d.d_date_sk
+    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    WHERE w.w_street_type = 'Ct.'
+      AND ca.ca_gmt_offset = -7.00
+      AND i.i_size = 'M'
+      AND p.p_channel_tv = 'Y'
+      AND d.d_year = 2002
+      AND sm.sm_type = 'GROUND'
+      AND EXISTS (
+          SELECT 1 FROM web_returns wr2
+          WHERE wr2.wr_item_sk = i.i_item_sk
+            AND wr2.wr_returned_date_sk = d.d_date_sk
+            AND wr2.wr_return_quantity > 0
+      )
+    GROUP BY d.d_year, w.w_warehouse_name
 )
-SELECT DISTINCT
-    store_manager,
-    promo_name,
-    carrier,
-    return_reason,
-    total_sales_inc_tax,
-    total_sales_profit,
-    total_return_net_loss,
-    distinct_sales_customers,
-    distinct_return_orders,
-    ROW_NUMBER() OVER (PARTITION BY store_manager ORDER BY total_sales_inc_tax DESC) AS sales_rank
-FROM combined
-ORDER BY total_sales_inc_tax DESC
+SELECT * FROM (
+    SELECT * FROM subquery_a
+    UNION ALL
+    SELECT * FROM subquery_b
+) combined
+ORDER BY year DESC, total_sales DESC
 LIMIT 100

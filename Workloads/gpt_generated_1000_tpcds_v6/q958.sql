@@ -1,49 +1,42 @@
-WITH overall_avg AS (
-    SELECT avg(cr_return_amount) AS avg_return_amount
-    FROM tpcds.catalog_returns
+WITH filtered_ship AS (
+    SELECT DISTINCT
+        sm_ship_mode_sk,
+        sm_ship_mode_id,
+        sm_code,
+        sm_carrier,
+        sm_contract
+    FROM ship_mode
+    WHERE sm_code = 'AIR'
+      AND sm_contract LIKE 'hGoF18%'
 )
-
 SELECT
-    cc.cc_call_center_id,
-    cc.cc_name,
+    sm.sm_carrier,
+    sm.sm_code,
+    t.t_hour,
+    COUNT(DISTINCT cr.cr_order_number) AS distinct_return_orders,
+    SUM(cr.cr_return_quantity) AS total_return_qty,
     SUM(cr.cr_return_amount) AS total_return_amount,
-    AVG(cr.cr_return_quantity) AS avg_return_quantity,
-    overall.avg_return_amount AS overall_avg_return_amount
-FROM tpcds.catalog_returns cr
-JOIN tpcds.call_center cc
-    ON cr.cr_call_center_sk = cc.cc_call_center_sk
-CROSS JOIN overall_avg overall
-WHERE cc.cc_state = 'CA'
-  AND cr.cr_return_amount > 50
-GROUP BY
-    cc.cc_call_center_id,
-    cc.cc_name,
-    overall.avg_return_amount
-HAVING SUM(cr.cr_return_amount) > 1000
-
-UNION ALL
-
-SELECT
-    cc.cc_call_center_id,
-    cc.cc_name,
-    SUM(cr.cr_return_amount) AS total_return_amount,
-    AVG(cr.cr_return_quantity) AS avg_return_quantity,
-    (SELECT avg(cr2.cr_return_amount) FROM tpcds.catalog_returns cr2) AS overall_avg_return_amount
-FROM tpcds.catalog_returns cr
-JOIN tpcds.call_center cc
-    ON cr.cr_call_center_sk = cc.cc_call_center_sk
-WHERE cc.cc_state = 'TX'
-  AND cr.cr_return_amount <= 50
+    AVG(cr.cr_return_tax) AS avg_return_tax,
+    MIN(cr.cr_net_loss) AS min_net_loss,
+    MAX(cr.cr_net_loss) AS max_net_loss
+FROM filtered_ship sm
+JOIN catalog_returns cr
+  ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN time_dim t
+  ON cr.cr_returned_time_sk = t.t_time_sk
+WHERE t.t_minute IN (3, 14, 18)
+  AND cr.cr_store_credit > 100
   AND EXISTS (
         SELECT 1
-        FROM tpcds.catalog_returns cr3
-        WHERE cr3.cr_returning_cdemo_sk = cr.cr_returning_cdemo_sk
-          AND cr3.cr_return_amount > 200
+        FROM web_sales ws
+        WHERE ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+          AND ws.ws_sold_time_sk = t.t_time_sk
+          AND ws.ws_quantity > 5
     )
 GROUP BY
-    cc.cc_call_center_id,
-    cc.cc_name
-HAVING SUM(cr.cr_return_amount) > 500
-
-ORDER BY total_return_amount DESC
+    sm.sm_carrier,
+    sm.sm_code,
+    t.t_hour
+ORDER BY
+    total_return_amount DESC
 LIMIT 100

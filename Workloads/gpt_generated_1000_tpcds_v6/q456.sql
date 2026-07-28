@@ -1,73 +1,66 @@
 WITH
-    joined AS (
-        SELECT
-            cc.cc_name,
-            sm.sm_type,
-            r.r_reason_desc,
-            w_sales.w_warehouse_name AS sales_warehouse,
-            w_inv.w_warehouse_name AS inventory_warehouse,
-            cs_bill.cs_net_paid AS net_paid_bill,
-            cs_bill.cs_net_profit AS net_profit_bill,
-            cs_ship.cs_net_paid AS net_paid_ship,
-            cs_ship.cs_net_profit AS net_profit_ship,
-            cs_bill.cs_order_number AS order_number_bill,
-            cs_ship.cs_order_number AS order_number_ship,
-            wr_refund.wr_return_amt AS return_amount,
-            inv.inv_quantity_on_hand
-        FROM customer c
-        JOIN catalog_sales cs_bill
-            ON cs_bill.cs_bill_customer_sk = c.c_customer_sk
-        JOIN catalog_sales cs_ship
-            ON cs_ship.cs_ship_customer_sk = c.c_customer_sk
-        JOIN call_center cc
-            ON cs_bill.cs_call_center_sk = cc.cc_call_center_sk
-        JOIN ship_mode sm
-            ON cs_ship.cs_ship_mode_sk = sm.sm_ship_mode_sk
-        JOIN warehouse w_sales
-            ON cs_bill.cs_warehouse_sk = w_sales.w_warehouse_sk
-        LEFT JOIN inventory inv
-            ON inv.inv_warehouse_sk = w_sales.w_warehouse_sk
-        LEFT JOIN warehouse w_inv
-            ON inv.inv_warehouse_sk = w_inv.w_warehouse_sk
-        LEFT JOIN web_returns wr_refund
-            ON wr_refund.wr_refunded_customer_sk = c.c_customer_sk
-        LEFT JOIN reason r
-            ON wr_refund.wr_reason_sk = r.r_reason_sk
-        LEFT JOIN web_returns wr_return
-            ON wr_return.wr_returning_customer_sk = c.c_customer_sk
-    ),
-    agg AS (
-        SELECT
-            cc_name,
-            sm_type,
-            r_reason_desc,
-            sales_warehouse,
-            inventory_warehouse,
-            SUM(net_paid_bill) + SUM(net_paid_ship) AS total_sales,
-            SUM(net_profit_bill) + SUM(net_profit_ship) AS total_profit,
-            SUM(COALESCE(return_amount, 0)) AS total_returns,
-            COUNT(DISTINCT order_number_bill) + COUNT(DISTINCT order_number_ship) AS total_orders,
-            CASE WHEN SUM(net_profit_bill) + SUM(net_profit_ship) > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_status
-        FROM joined
-        GROUP BY
-            cc_name,
-            sm_type,
-            r_reason_desc,
-            sales_warehouse,
-            inventory_warehouse
-    )
+  base AS (
+    SELECT
+      i.i_item_id,
+      i.i_category,
+      i.i_manufact,
+      ca_bill.ca_state AS bill_state,
+      ca_ship.ca_state AS ship_state,
+      t_ws.t_hour AS sale_hour,
+      ws.ws_net_profit,
+      cr.cr_net_loss,
+      wr.wr_net_loss,
+      i.i_item_sk
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN time_dim t_ws ON ws.ws_sold_time_sk = t_ws.t_time_sk
+    JOIN customer_address ca_bill ON ws.ws_bill_addr_sk = ca_bill.ca_address_sk
+    JOIN customer_address ca_ship ON ws.ws_ship_addr_sk = ca_ship.ca_address_sk
+    JOIN web_returns wr ON wr.wr_order_number = ws.ws_order_number
+    JOIN time_dim t_wr ON wr.wr_returned_time_sk = t_wr.t_time_sk
+    JOIN catalog_returns cr ON cr.cr_item_sk = i.i_item_sk
+    JOIN time_dim t_cr ON cr.cr_returned_time_sk = t_cr.t_time_sk
+    WHERE i.i_category_id IN (2, 5, 9)
+      AND t_ws.t_hour BETWEEN 9 AND 17
+      AND ws.ws_ext_wholesale_cost > 3000
+      AND NOT EXISTS (
+        SELECT DISTINCT cr_bad.cr_item_sk
+        FROM catalog_returns cr_bad
+        WHERE cr_bad.cr_item_sk = i.i_item_sk
+          AND cr_bad.cr_return_quantity > 5
+      )
+  ),
+  agg AS (
+    SELECT
+      i_item_id,
+      i_category,
+      i_manufact,
+      bill_state,
+      ship_state,
+      sale_hour,
+      SUM(ws_net_profit) AS total_profit,
+      SUM(cr_net_loss) AS total_catalog_loss,
+      SUM(wr_net_loss) AS total_web_return_loss
+    FROM base
+    GROUP BY
+      i_item_id,
+      i_category,
+      i_manufact,
+      bill_state,
+      ship_state,
+      sale_hour
+  )
 SELECT
-    cc_name,
-    sm_type,
-    r_reason_desc,
-    sales_warehouse,
-    inventory_warehouse,
-    total_sales,
-    total_profit,
-    total_returns,
-    total_orders,
-    profit_status,
-    ROW_NUMBER() OVER (PARTITION BY cc_name ORDER BY total_sales DESC) AS sales_rank
+  i_item_id,
+  i_category,
+  i_manufact,
+  bill_state,
+  ship_state,
+  sale_hour,
+  total_profit,
+  total_catalog_loss,
+  total_web_return_loss,
+  ROW_NUMBER() OVER (PARTITION BY i_category ORDER BY total_profit DESC) AS profit_rank
 FROM agg
-ORDER BY total_sales DESC
+ORDER BY total_profit DESC
 LIMIT 100

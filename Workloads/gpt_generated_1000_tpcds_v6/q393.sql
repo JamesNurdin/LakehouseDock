@@ -1,59 +1,72 @@
-WITH item_sales_agg AS (
-    SELECT
-        ws_item_sk,
-        ws_warehouse_sk,
-        SUM(ws_ext_sales_price) AS total_sales,
-        SUM(ws_quantity) AS total_quantity,
-        COUNT(*) AS order_cnt
-    FROM web_sales
-    WHERE ws_quantity > 0
-      AND ws_ext_sales_price > 0
-      AND ws_ship_mode_sk IS NOT NULL
-    GROUP BY ws_item_sk, ws_warehouse_sk
-),
-rep_sales AS (
-    SELECT
-        ws_item_sk,
-        ws_warehouse_sk,
-        MIN(ws_bill_hdemo_sk) AS bill_hdemo_sk,
-        MIN(ws_ship_mode_sk) AS ship_mode_sk,
-        MIN(ws_web_site_sk) AS web_site_sk
-    FROM web_sales
-    GROUP BY ws_item_sk, ws_warehouse_sk
+WITH base AS (
+  SELECT
+    s.s_store_name               AS s_store_name,
+    s.s_state                    AS s_state,
+    i.i_item_id                  AS i_item_id,
+    i.i_brand                    AS i_brand,
+    td.t_hour                    AS t_hour,
+    c.c_customer_id              AS c_customer_id,
+    ss.ss_net_paid               AS ss_net_paid,
+    ws.ws_net_paid_inc_ship      AS ws_net_paid_inc_ship,
+    p.p_cost                     AS p_cost,
+    ib.ib_upper_bound            AS ib_upper_bound,
+    (
+      SELECT SUM(sr2.sr_return_quantity)
+      FROM store_returns sr2
+      WHERE sr2.sr_item_sk = i.i_item_sk
+    )                            AS total_store_return_qty
+  FROM store_sales ss
+  JOIN time_dim td               ON ss.ss_sold_time_sk = td.t_time_sk
+  JOIN item i                    ON ss.ss_item_sk = i.i_item_sk
+  JOIN promotion p               ON ss.ss_promo_sk = p.p_promo_sk
+  JOIN store s                   ON ss.ss_store_sk = s.s_store_sk
+  JOIN customer c                ON ss.ss_customer_sk = c.c_customer_sk
+  JOIN customer_demographics cd  ON ss.ss_cdemo_sk = cd.cd_demo_sk
+  JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+  JOIN income_band ib            ON hd.hd_income_band_sk = ib.ib_income_band_sk
+  JOIN store_returns sr          ON ss.ss_ticket_number = sr.sr_ticket_number
+                                 AND ss.ss_item_sk = sr.sr_item_sk
+  JOIN web_sales ws              ON td.t_time_sk = ws.ws_sold_time_sk
+                                 AND ws.ws_item_sk = i.i_item_sk
+                                 AND ws.ws_bill_customer_sk = c.c_customer_sk
+                                 AND ws.ws_ship_customer_sk = c.c_customer_sk
+                                 AND ws.ws_promo_sk = p.p_promo_sk
+  JOIN web_page wp               ON ws.ws_web_page_sk = wp.wp_web_page_sk
+  JOIN web_site wsite            ON ws.ws_web_site_sk = wsite.web_site_sk
+  JOIN warehouse w               ON ws.ws_warehouse_sk = w.w_warehouse_sk
+  JOIN web_returns wr            ON ws.ws_order_number = wr.wr_order_number
+                                 AND ws.ws_item_sk = wr.wr_item_sk
+                                 AND wr.wr_item_sk = i.i_item_sk
+  WHERE td.t_hour = 14
+    AND i.i_brand = 'Brand#23'
+    AND ib.ib_upper_bound = 100000
+    AND p.p_discount_active = 'Y'
+    AND EXISTS (
+          SELECT 1
+          FROM store_returns sr_check
+          WHERE sr_check.sr_item_sk = i.i_item_sk
+            AND sr_check.sr_return_quantity > 0
+        )
 )
 SELECT
-    i.i_item_id,
-    i.i_product_name,
-    w.w_warehouse_name,
-    w.w_warehouse_sq_ft,
-    hd.hd_vehicle_count,
-    sm.sm_carrier,
-    ws_agg.total_sales,
-    ws_agg.total_quantity,
-    ws_agg.order_cnt,
-    ROUND(ws_agg.total_sales / NULLIF(ws_agg.order_cnt, 0), 2) AS avg_sales_per_order,
-    (SELECT AVG(i_current_price) FROM item WHERE i_brand = i.i_brand) AS brand_avg_price,
-    RANK() OVER (PARTITION BY w.w_warehouse_id ORDER BY ws_agg.total_sales DESC) AS sales_rank_in_warehouse,
-    ROW_NUMBER() OVER (ORDER BY ws_agg.total_sales DESC) AS overall_sales_rn
-FROM item_sales_agg ws_agg
-JOIN rep_sales rs
-    ON ws_agg.ws_item_sk = rs.ws_item_sk
-   AND ws_agg.ws_warehouse_sk = rs.ws_warehouse_sk
-JOIN item i
-    ON ws_agg.ws_item_sk = i.i_item_sk
-JOIN warehouse w
-    ON ws_agg.ws_warehouse_sk = w.w_warehouse_sk
-JOIN household_demographics hd
-    ON rs.bill_hdemo_sk = hd.hd_demo_sk
-JOIN ship_mode sm
-    ON rs.ship_mode_sk = sm.sm_ship_mode_sk
-JOIN web_site ws
-    ON rs.web_site_sk = ws.web_site_sk
-WHERE i.i_current_price > 20.00
-  AND i.i_brand = 'Brand#12'
-  AND w.w_warehouse_sq_ft > 500000
-  AND sm.sm_carrier = 'Carrier#2'
-  AND hd.hd_vehicle_count >= 1
-  AND ws.web_state = 'CA'
-ORDER BY ws_agg.total_sales DESC
+  s_store_name,
+  s_state,
+  i_item_id,
+  i_brand,
+  t_hour,
+  COUNT(DISTINCT c_customer_id)                AS unique_customers,
+  SUM(ss_net_paid)                             AS total_store_sales,
+  SUM(ws_net_paid_inc_ship)                    AS total_web_sales,
+  AVG(p_cost)                                  AS avg_promo_cost,
+  MIN(ib_upper_bound)                          AS min_income_upper,
+  MAX(ib_upper_bound)                          AS max_income_upper,
+  SUM(total_store_return_qty)                  AS total_store_returns
+FROM base
+GROUP BY
+  s_store_name,
+  s_state,
+  i_item_id,
+  i_brand,
+  t_hour
+ORDER BY total_store_sales DESC
 LIMIT 100

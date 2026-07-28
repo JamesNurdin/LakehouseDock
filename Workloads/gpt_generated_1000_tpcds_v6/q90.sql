@@ -1,47 +1,69 @@
-WITH filtered_returns AS (
-  SELECT
-    cr.cr_warehouse_sk,
-    w.w_warehouse_id,
-    w.w_street_name,
-    w.w_city,
-    w.w_state,
-    w.w_county,
-    cr.cr_return_amount,
-    cr.cr_return_quantity,
-    d.d_year
-  FROM catalog_returns cr
-  JOIN date_dim d
-    ON cr.cr_returned_date_sk = d.d_date_sk
-  JOIN warehouse w
-    ON cr.cr_warehouse_sk = w.w_warehouse_sk
-  WHERE d.d_year = 2001
-    AND regexp_like(w.w_street_name, '(?i)^(North|Elm)')
-    AND w.w_county LIKE '%County'
-    AND EXISTS (
-      SELECT 1
-      FROM promotion p
-      WHERE p.p_item_sk = cr.cr_item_sk
-        AND cr.cr_returned_date_sk BETWEEN p.p_start_date_sk AND p.p_end_date_sk
-    )
+WITH sales_join AS (
+    SELECT
+        cs.cs_order_number,
+        cs.cs_net_paid,
+        ss.ss_net_paid,
+        ws.ws_net_paid,
+        c.c_customer_sk,
+        c.c_last_name,
+        c.c_birth_month,
+        i.i_item_sk,
+        i.i_category,
+        i.i_current_price,
+        p.p_promo_sk,
+        p.p_discount_active,
+        cc.cc_suite_number,
+        w.w_state,
+        s.s_state,
+        wp.wp_web_page_sk,
+        inv.inv_quantity_on_hand
+    FROM catalog_sales cs
+    JOIN customer c
+        ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN call_center cc
+        ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN warehouse w
+        ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    JOIN item i
+        ON cs.cs_item_sk = i.i_item_sk
+    JOIN promotion p
+        ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN store_sales ss
+        ON ss.ss_item_sk = i.i_item_sk
+       AND ss.ss_customer_sk = c.c_customer_sk
+    JOIN store s
+        ON ss.ss_store_sk = s.s_store_sk
+    JOIN web_sales ws
+        ON ws.ws_item_sk = i.i_item_sk
+       AND ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN web_page wp
+        ON ws.ws_web_page_sk = wp.wp_web_page_sk
+       AND wp.wp_customer_sk = c.c_customer_sk
+    JOIN inventory inv
+        ON inv.inv_item_sk = i.i_item_sk
+       AND inv.inv_warehouse_sk = w.w_warehouse_sk
+    WHERE cc.cc_suite_number = 'Suite 440'
+      AND c.c_birth_month IN (11, 5)
+      AND c.c_last_review_date BETWEEN 2452400 AND 2452500
+      AND i.i_brand = 'BrandX'
+      AND p.p_discount_active = 'Y'
+      AND w.w_state = 'CA'
+      AND inv.inv_quantity_on_hand > 0
+      AND s.s_state = 'TX'
 )
-SELECT DISTINCT
-  fw.w_warehouse_id AS warehouse_id,
-  concat(fw.w_city, ', ', fw.w_state) AS location,
-  substring(fw.w_street_name, 1, 3) AS street_prefix,
-  regexp_extract(fw.w_street_name, '(North|Elm)', 1) AS street_match,
-  SUM(fw.cr_return_amount) AS total_return_amount,
-  SUM(fw.cr_return_quantity) AS total_return_quantity,
-  AVG(SUM(fw.cr_return_amount)) OVER (PARTITION BY fw.w_warehouse_id) AS avg_return_amount_per_warehouse,
-  CASE
-    WHEN SUM(fw.cr_return_amount) > AVG(SUM(fw.cr_return_amount)) OVER (PARTITION BY fw.w_warehouse_id)
-    THEN 'ABOVE_AVG'
-    ELSE 'BELOW_AVG'
-  END AS performance
-FROM filtered_returns fw
-GROUP BY
-  fw.w_warehouse_id,
-  fw.w_city,
-  fw.w_state,
-  fw.w_street_name
-ORDER BY total_return_amount DESC
+SELECT
+    i_category,
+    w_state,
+    s_state,
+    COUNT(DISTINCT c_customer_sk) AS unique_customers,
+    SUM(cs_net_paid) + SUM(ss_net_paid) + SUM(ws_net_paid) AS total_net_paid,
+    AVG(i_current_price) AS avg_item_price,
+    MIN(inv_quantity_on_hand) AS min_inventory,
+    CASE
+        WHEN SUM(cs_net_paid) + SUM(ss_net_paid) + SUM(ws_net_paid) > 100000 THEN 'High'
+        ELSE 'Low'
+    END AS sales_category
+FROM sales_join
+GROUP BY i_category, w_state, s_state
+ORDER BY total_net_paid DESC
 LIMIT 100

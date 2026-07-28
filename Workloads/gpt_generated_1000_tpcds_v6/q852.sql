@@ -1,36 +1,35 @@
+WITH max_catalog_price AS (
+    SELECT max(cs_ext_sales_price) AS max_price
+    FROM catalog_sales
+)
 SELECT
-  c.c_customer_id,
-  ca.ca_zip,
-  CASE WHEN ss.ss_net_profit > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_category,
-  ss.ss_net_profit,
-  RANK() OVER (PARTITION BY ca.ca_zip ORDER BY ss.ss_net_profit DESC) AS profit_rank,
-  SUM(ss.ss_net_profit) OVER (PARTITION BY ca.ca_zip) AS total_profit_zip
+    c.c_customer_id,
+    'store' AS sales_channel,
+    SUM(ss.ss_ext_sales_price) AS total_sales,
+    SUM(ss.ss_net_profit) AS total_profit,
+    (SELECT max_price FROM max_catalog_price) AS max_catalog_price
 FROM store_sales ss
-JOIN customer c
-  ON ss.ss_customer_sk = c.c_customer_sk
-JOIN customer_address ca
-  ON ss.ss_addr_sk = ca.ca_address_sk
-JOIN store_returns sr
-  ON ss.ss_ticket_number = sr.sr_ticket_number
-  AND ss.ss_item_sk = sr.sr_item_sk
-JOIN reason r
-  ON sr.sr_reason_sk = r.r_reason_sk
-JOIN catalog_returns cr
-  ON cr.cr_refunded_customer_sk = c.c_customer_sk
-  AND cr.cr_refunded_addr_sk = ca.ca_address_sk
-  AND cr.cr_reason_sk = r.r_reason_sk
-WHERE ss.ss_sold_date_sk BETWEEN 2450000 AND 2452000
-  AND ca.ca_zip LIKE '9%'
-  AND ca.ca_location_type = 'apartment'
-  AND c.c_preferred_cust_flag = 'Y'
-  AND r.r_reason_desc IN ('Damaged', 'Defective')
-  AND cr.cr_net_loss > 0
-  AND sr.sr_store_credit > 100
-  AND EXISTS (
-        SELECT 1
-        FROM promotion p
-        WHERE p.p_promo_sk = ss.ss_promo_sk
-          AND p.p_discount_active = 'Y'
-      )
-ORDER BY profit_rank ASC, total_profit_zip DESC
+JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+WHERE EXISTS (
+    SELECT 1
+    FROM catalog_returns cr
+    WHERE cr.cr_refunded_customer_sk = c.c_customer_sk
+)
+GROUP BY c.c_customer_id
+
+UNION ALL
+
+SELECT
+    c.c_customer_id,
+    'web' AS sales_channel,
+    SUM(ws.ws_ext_sales_price) AS total_sales,
+    SUM(ws.ws_net_profit) AS total_profit,
+    (SELECT max_price FROM max_catalog_price) AS max_catalog_price
+FROM web_sales ws
+JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+WHERE sm.sm_carrier = 'DHL'
+GROUP BY c.c_customer_id
+
+ORDER BY total_profit DESC, total_sales DESC
 LIMIT 100

@@ -1,42 +1,67 @@
-WITH store_agg AS (
+WITH sales_summary AS (
     SELECT
-        ss_promo_sk,
-        ss_cdemo_sk,
-        SUM(ss_net_profit) AS store_net_profit,
-        SUM(ss_quantity) AS store_qty
-    FROM store_sales
-    WHERE ss_net_profit > 500
-    GROUP BY ss_promo_sk, ss_cdemo_sk
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        i.i_item_sk,
+        i.i_product_name,
+        SUM(cs.cs_net_paid) AS total_net_paid,
+        SUM(cs.cs_quantity) AS total_quantity,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        COUNT(DISTINCT cs.cs_order_number) AS order_cnt,
+        MAX(cs.cs_sold_date_sk) AS latest_sold_date_sk
+    FROM catalog_sales cs
+    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
+    LEFT JOIN catalog_returns cr ON cr.cr_order_number = cs.cs_order_number
+        AND cr.cr_item_sk = cs.cs_item_sk
+    LEFT JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk
+        AND inv.inv_warehouse_sk = w.w_warehouse_sk
+    WHERE
+        c.c_birth_year BETWEEN 1950 AND 1960
+        AND i.i_current_price > 50
+        AND cc.cc_state = 'CA'
+        AND sm.sm_type = 'AIR'
+        AND p.p_channel_details LIKE '%rare%'
+    GROUP BY
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        i.i_item_sk,
+        i.i_product_name
+),
+customer_with_web_returns AS (
+    SELECT DISTINCT c.c_customer_sk
+    FROM web_returns wr
+    JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
+    WHERE EXISTS (
+        SELECT 1
+        FROM time_dim td2
+        WHERE td2.t_time_sk = wr.wr_returned_time_sk
+          AND td2.t_hour BETWEEN 8 AND 12
+    )
 )
 SELECT
-    p.p_promo_id,
-    cd.cd_gender,
-    cd.cd_education_status,
-    SUM(cs.cs_net_paid_inc_ship) AS catalog_net_paid_inc_ship,
-    SUM(ws.ws_net_paid) AS web_net_paid,
-    store_agg.store_net_profit,
-    (SUM(cs.cs_net_paid_inc_ship) + store_agg.store_net_profit + SUM(ws.ws_net_paid)) AS total_net,
-    RANK() OVER (ORDER BY (SUM(cs.cs_net_paid_inc_ship) + store_agg.store_net_profit + SUM(ws.ws_net_paid)) DESC) AS net_profit_rank
-FROM catalog_sales cs
-JOIN customer_demographics cd
-    ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
-JOIN promotion p
-    ON cs.cs_promo_sk = p.p_promo_sk
-JOIN store_agg
-    ON store_agg.ss_promo_sk = p.p_promo_sk
-   AND store_agg.ss_cdemo_sk = cd.cd_demo_sk
-JOIN web_sales ws
-    ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-   AND ws.ws_promo_sk = p.p_promo_sk
-WHERE cs.cs_net_paid_inc_ship > 2000
-  AND ws.ws_ext_discount_amt < 2000
-  AND p.p_purpose = 'Unknown'
-  AND cd.cd_gender = 'F'
-  AND cs.cs_quantity >= 2
+    ss.c_customer_sk,
+    ss.c_first_name,
+    ss.c_last_name,
+    COUNT(DISTINCT ss.i_item_sk) AS distinct_items,
+    SUM(ss.total_net_paid) AS agg_net_paid,
+    AVG(ss.total_return_amount) AS avg_return_amount,
+    SUM(ss.total_quantity) AS total_quantity,
+    SUM(ss.total_net_paid) / NULLIF(COUNT(DISTINCT ss.i_item_sk), 0) AS avg_net_per_item
+FROM sales_summary ss
+JOIN customer_with_web_returns cwr ON ss.c_customer_sk = cwr.c_customer_sk
 GROUP BY
-    p.p_promo_id,
-    cd.cd_gender,
-    cd.cd_education_status,
-    store_agg.store_net_profit
-ORDER BY net_profit_rank
+    ss.c_customer_sk,
+    ss.c_first_name,
+    ss.c_last_name
+HAVING SUM(ss.total_net_paid) > 10000
+ORDER BY agg_net_paid DESC
 LIMIT 100

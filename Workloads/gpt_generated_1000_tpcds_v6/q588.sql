@@ -1,91 +1,72 @@
-WITH ws AS (
+-- goal: Identify the top‑selling products for the year 2001, comparing catalog and web channel profitability, classifying profit status, and ranking products within each category.
+WITH base AS (
     SELECT
-        ws_order_number,
-        ws_bill_addr_sk,
-        ws_ship_addr_sk,
-        ws_web_site_sk,
-        ws_sales_price,
-        ws_net_paid_inc_ship_tax,
-        ws_quantity,
-        ws_item_sk,
-        ws_sold_date_sk
-    FROM tpcds.web_sales
-    WHERE ws_sales_price > 20
-      AND ws_net_paid_inc_ship_tax BETWEEN 1000 AND 8000
-      AND ws_quantity >= 1
-      AND ws_item_sk IS NOT NULL
-      AND ws_web_site_sk IS NOT NULL
-      AND ws_bill_addr_sk IS NOT NULL
-),
-ca AS (
-    SELECT *
-    FROM tpcds.customer_address
-    WHERE ca_suite_number IN ('Suite 480 ', 'Suite B   ', 'Suite J   ')
-      AND ca_country = 'United States'
-),
-ws_site AS (
-    SELECT
-        w.ws_order_number,
-        w.ws_sales_price,
-        w.ws_net_paid_inc_ship_tax,
-        w.ws_quantity,
-        w.ws_bill_addr_sk,
-        w.ws_ship_addr_sk,
-        w.ws_web_site_sk,
-        w.ws_sold_date_sk,
-        ca_bill.ca_city     AS bill_city,
-        ca_ship.ca_city     AS ship_city,
-        s.web_name,
-        s.web_mkt_class,
-        s.web_rec_start_date,
-        s.web_tax_percentage
-    FROM ws w
-    JOIN ca ca_bill ON w.ws_bill_addr_sk = ca_bill.ca_address_sk
-    JOIN ca ca_ship ON w.ws_ship_addr_sk = ca_ship.ca_address_sk
-    JOIN tpcds.web_site s ON w.ws_web_site_sk = s.web_site_sk
-    WHERE s.web_rec_start_date >= DATE '1999-01-01'
-      AND s.web_mkt_class LIKE '%Wide%'
-      AND s.web_tax_percentage < 0.07
-),
-sr_agg AS (
-    SELECT
-        sr.sr_addr_sk,
-        SUM(sr.sr_return_amt) AS total_return_amt,
-        COUNT(*)               AS cnt_returns,
-        MAX(sr.sr_return_amt) AS max_return_amt
-    FROM tpcds.store_returns sr
-    WHERE sr.sr_return_amt > 0
-      AND sr.sr_return_quantity > 0
-      AND sr.sr_fee < 100
-      AND sr.sr_return_tax < 50
-      AND sr.sr_net_loss > 0
-      AND EXISTS (
-          SELECT 1
-          FROM tpcds.customer_address ca2
-          WHERE ca2.ca_address_sk = sr.sr_addr_sk
-            AND ca2.ca_state = 'CA'
-      )
-    GROUP BY sr.sr_addr_sk
+        d.d_year,
+        i.i_category,
+        i.i_product_name,
+        cs.cs_net_profit,
+        ws.ws_net_profit,
+        i.i_item_sk,
+        cs.cs_ext_sales_price,
+        cs.cs_ext_sales_price,
+        cs.cs_item_sk,
+        cs.cs_order_number,
+        ws.ws_order_number
+    FROM
+        tpcds.catalog_sales cs
+        LEFT JOIN tpcds.date_dim d
+            ON cs.cs_sold_date_sk = d.d_date_sk
+        LEFT JOIN tpcds.item i
+            ON cs.cs_item_sk = i.i_item_sk
+        LEFT JOIN tpcds.warehouse w
+            ON cs.cs_warehouse_sk = w.w_warehouse_sk
+        LEFT JOIN tpcds.call_center cc
+            ON cs.cs_call_center_sk = cc.cc_call_center_sk
+        LEFT JOIN tpcds.catalog_page cp
+            ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+        LEFT JOIN tpcds.household_demographics hd
+            ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+        LEFT JOIN tpcds.customer_address ca
+            ON cs.cs_bill_addr_sk = ca.ca_address_sk
+        LEFT JOIN tpcds.catalog_returns cr
+            ON cr.cr_order_number = cs.cs_order_number
+            AND cr.cr_item_sk = i.i_item_sk
+        LEFT JOIN tpcds.reason r
+            ON cr.cr_reason_sk = r.r_reason_sk
+        LEFT JOIN tpcds.web_sales ws
+            ON ws.ws_item_sk = i.i_item_sk
+            AND ws.ws_sold_date_sk = d.d_date_sk
+        LEFT JOIN tpcds.web_returns wr
+            ON wr.wr_order_number = ws.ws_order_number
+            AND wr.wr_item_sk = i.i_item_sk
+            AND wr.wr_returned_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2001
+        AND i.i_current_price BETWEEN 20 AND 100
+        AND w.w_state = 'CA'
+        AND cc.cc_market_manager = 'John Doe'
 )
 SELECT
-    ws_site.ws_order_number,
-    ws_site.ws_sales_price,
-    ws_site.ws_net_paid_inc_ship_tax,
-    ws_site.bill_city,
-    ws_site.ship_city,
-    ws_site.web_name,
-    ws_site.web_mkt_class,
-    ws_site.web_rec_start_date,
-    COALESCE(sr_agg.total_return_amt, 0) AS total_return_amt,
-    RANK() OVER (PARTITION BY ws_site.web_name ORDER BY ws_site.ws_net_paid_inc_ship_tax DESC) AS sales_rank_by_site,
-    ROW_NUMBER() OVER (ORDER BY ws_site.ws_net_paid_inc_ship_tax DESC) AS global_rank,
-    CASE
-        WHEN sr_agg.cnt_returns > 5 THEN 'High Returns'
-        WHEN sr_agg.cnt_returns BETWEEN 1 AND 5 THEN 'Medium Returns'
-        ELSE 'Low Returns'
-    END AS return_category
-FROM ws_site
-LEFT JOIN sr_agg
-    ON ws_site.ws_ship_addr_sk = sr_agg.sr_addr_sk
-ORDER BY ws_site.ws_net_paid_inc_ship_tax DESC
+    b.d_year,
+    b.i_category,
+    b.i_product_name,
+    SUM(b.cs_net_profit) AS total_catalog_profit,
+    SUM(b.ws_net_profit) AS total_web_profit,
+    CASE WHEN SUM(b.cs_net_profit) > 0 THEN 'Positive' ELSE 'Negative' END AS catalog_profit_status,
+    RANK() OVER (PARTITION BY b.i_category ORDER BY SUM(b.cs_net_profit) DESC) AS category_rank,
+    (
+        SELECT MAX(cs2.cs_ext_sales_price)
+        FROM tpcds.catalog_sales cs2
+        WHERE cs2.cs_item_sk = b.i_item_sk
+    ) AS max_catalog_ext_sales_price
+FROM
+    base b
+GROUP BY
+    b.d_year,
+    b.i_category,
+    b.i_product_name,
+    b.i_item_sk
+ORDER BY
+    total_catalog_profit DESC,
+    category_rank ASC
 LIMIT 100

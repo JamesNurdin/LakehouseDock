@@ -1,85 +1,47 @@
-WITH
-    -- Re‑use date_dim for different roles
-    d_sales AS (SELECT * FROM date_dim),
-    d_sr_ret AS (SELECT * FROM date_dim),
-    d_cs_sold AS (SELECT * FROM date_dim),
-    d_cs_ship AS (SELECT * FROM date_dim),
-    d_cr_ret AS (SELECT * FROM date_dim),
-    d_wr_ret AS (SELECT * FROM date_dim)
 SELECT
-    s.s_store_name,
-    d_sales.d_year,
-    SUM(ss.ss_net_paid)               AS total_store_sales,
-    SUM(sr.sr_net_loss)               AS total_store_return_loss,
-    SUM(cs.cs_net_paid)               AS total_catalog_sales,
-    SUM(cr.cr_net_loss)               AS total_catalog_return_loss,
-    SUM(wr.wr_net_loss)               AS total_web_return_loss
+  p.p_promo_name,
+  s.s_state,
+  d_ss.d_year,
+  COUNT(DISTINCT c.c_customer_sk) AS distinct_customers,
+  SUM(ss.ss_net_paid) AS total_store_sales,
+  SUM(cs.cs_net_paid) AS total_catalog_sales,
+  SUM(wr.wr_net_loss) AS total_web_returns_loss,
+  AVG(ss.ss_ext_tax) AS avg_store_tax,
+  MIN(ib.ib_lower_bound) AS min_income,
+  MAX(ib.ib_upper_bound) AS max_income
 FROM store_sales ss
-JOIN d_sales d_sales
-  ON ss.ss_sold_date_sk = d_sales.d_date_sk
-JOIN store s
-  ON ss.ss_store_sk = s.s_store_sk
-JOIN customer c_ss
-  ON ss.ss_customer_sk = c_ss.c_customer_sk
-JOIN promotion p_sale
-  ON ss.ss_promo_sk = p_sale.p_promo_sk
--- store returns (second role for store and date_dim)
-JOIN store_returns sr
-  ON sr.sr_ticket_number = ss.ss_ticket_number
- AND sr.sr_item_sk = ss.ss_item_sk
-JOIN d_sr_ret d_sr_ret
-  ON sr.sr_returned_date_sk = d_sr_ret.d_date_sk
-JOIN reason r_sr
-  ON sr.sr_reason_sk = r_sr.r_reason_sk
-JOIN store s_sr
-  ON sr.sr_store_sk = s_sr.s_store_sk
--- catalog sales (multiple customer and date aliases)
-JOIN catalog_sales cs
-  ON cs.cs_item_sk = ss.ss_item_sk
-JOIN d_cs_sold d_cs_sold
-  ON cs.cs_sold_date_sk = d_cs_sold.d_date_sk
-JOIN d_cs_ship d_cs_ship
-  ON cs.cs_ship_date_sk = d_cs_ship.d_date_sk
-JOIN customer c_bill
-  ON cs.cs_bill_customer_sk = c_bill.c_customer_sk
-JOIN customer c_ship
-  ON cs.cs_ship_customer_sk = c_ship.c_customer_sk
-JOIN call_center cc_cs
-  ON cs.cs_call_center_sk = cc_cs.cc_call_center_sk
-JOIN ship_mode sm_cs
-  ON cs.cs_ship_mode_sk = sm_cs.sm_ship_mode_sk
-JOIN promotion p_cat
-  ON cs.cs_promo_sk = p_cat.p_promo_sk
--- catalog returns (linked by order number and item)
-JOIN catalog_returns cr
-  ON cr.cr_order_number = cs.cs_order_number
- AND cr.cr_item_sk = cs.cs_item_sk
-JOIN d_cr_ret d_cr_ret
-  ON cr.cr_returned_date_sk = d_cr_ret.d_date_sk
-JOIN customer c_refund_cat
-  ON cr.cr_refunded_customer_sk = c_refund_cat.c_customer_sk
-JOIN customer c_returning_cat
-  ON cr.cr_returning_customer_sk = c_returning_cat.c_customer_sk
-JOIN call_center cc_cr
-  ON cr.cr_call_center_sk = cc_cr.cc_call_center_sk
-JOIN ship_mode sm_cr
-  ON cr.cr_ship_mode_sk = sm_cr.sm_ship_mode_sk
-JOIN reason r_cr
-  ON cr.cr_reason_sk = r_cr.r_reason_sk
--- web returns (linked only through date and customer)
-JOIN web_returns wr
-  ON wr.wr_order_number = cs.cs_order_number
-JOIN d_wr_ret d_wr_ret
-  ON wr.wr_returned_date_sk = d_wr_ret.d_date_sk
-JOIN customer c_refund_web
-  ON wr.wr_refunded_customer_sk = c_refund_web.c_customer_sk
-JOIN reason r_wr
-  ON wr.wr_reason_sk = r_wr.r_reason_sk
--- inventory (joined on the same sales date for completeness)
-JOIN inventory inv
-  ON inv.inv_date_sk = d_sales.d_date_sk
-WHERE d_sales.d_year = 2001
-GROUP BY ROLLUP (s.s_store_name, d_sales.d_year)
-HAVING SUM(ss.ss_net_paid) > 1000
-ORDER BY s.s_store_name, d_sales.d_year
+JOIN date_dim d_ss ON ss.ss_sold_date_sk = d_ss.d_date_sk
+JOIN store s ON ss.ss_store_sk = s.s_store_sk
+JOIN date_dim d_store_closed ON s.s_closed_date_sk = d_store_closed.d_date_sk
+JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+JOIN customer_demographics cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
+JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+-- Catalog sales and its related dimensions
+JOIN catalog_sales cs ON p.p_promo_sk = cs.cs_promo_sk
+JOIN date_dim d_cs ON cs.cs_sold_date_sk = d_cs.d_date_sk
+JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+JOIN date_dim d_cp_start ON cp.cp_start_date_sk = d_cp_start.d_date_sk
+JOIN date_dim d_cp_end ON cp.cp_end_date_sk = d_cp_end.d_date_sk
+-- Catalog returns
+JOIN catalog_returns cr ON cs.cs_order_number = cr.cr_order_number
+JOIN date_dim d_cr ON cr.cr_returned_date_sk = d_cr.d_date_sk
+-- Web returns and its related dimensions
+JOIN web_returns wr ON d_ss.d_date_sk = wr.wr_returned_date_sk
+JOIN date_dim d_wr ON wr.wr_returned_date_sk = d_wr.d_date_sk
+JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+JOIN date_dim d_wp_create ON wp.wp_creation_date_sk = d_wp_create.d_date_sk
+JOIN date_dim d_wp_access ON wp.wp_access_date_sk = d_wp_access.d_date_sk
+JOIN customer c_wp ON wp.wp_customer_sk = c_wp.c_customer_sk
+-- Web site (joined via its open date)
+JOIN web_site ws ON ws.web_open_date_sk = d_ss.d_date_sk
+WHERE d_ss.d_year = 2001
+  AND s.s_state = 'CA'
+  AND p.p_discount_active = 'Y'
+  AND wr.wr_fee > 80
+GROUP BY p.p_promo_name, s.s_state, d_ss.d_year
+ORDER BY total_store_sales DESC
 LIMIT 100

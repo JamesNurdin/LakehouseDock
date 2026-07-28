@@ -1,52 +1,44 @@
-WITH sr_agg AS (
-    SELECT
-        sr_customer_sk,
-        sr_hdemo_sk,
-        sr_store_sk,
-        sr_return_time_sk,
-        SUM(sr_return_amt) AS total_return_amt,
-        SUM(sr_return_tax) AS total_return_tax,
-        COUNT(*) AS return_cnt
-    FROM store_returns
-    WHERE sr_return_quantity > 0
-      AND sr_return_amt > 0
-    GROUP BY sr_customer_sk, sr_hdemo_sk, sr_store_sk, sr_return_time_sk
+WITH sales_promo AS (
+  SELECT
+    cs.cs_sold_date_sk,
+    cs.cs_ship_mode_sk,
+    cs.cs_ship_hdemo_sk,
+    cs.cs_quantity,
+    cs.cs_ext_sales_price,
+    cs.cs_ext_list_price,
+    cs.cs_net_paid_inc_tax,
+    cs.cs_net_profit,
+    p.p_promo_name,
+    p.p_channel_tv,
+    p.p_channel_event,
+    p.p_discount_active
+  FROM catalog_sales cs
+  JOIN promotion p
+    ON cs.cs_promo_sk = p.p_promo_sk
+  WHERE cs.cs_ship_hdemo_sk IN (6547, 3839, 1703)
+    AND cs.cs_ship_mode_sk = 3
+    AND cs.cs_ext_list_price > 5000
+    AND cs.cs_quantity BETWEEN 1 AND 5
+    AND cs.cs_net_paid_inc_tax < 10000
+    AND p.p_channel_event = 'N'
+    AND p.p_discount_active = 'Y'
 )
 SELECT
-    s.s_store_id,
-    s.s_store_name,
-    s.s_city,
-    s.s_state,
-    CASE
-        WHEN ib.ib_upper_bound >= 100000 THEN 'Very High'
-        WHEN ib.ib_upper_bound >= 75000  THEN 'High'
-        ELSE 'Medium/Low'
-    END AS income_band_category,
-    SUM(sr_agg.total_return_amt) AS store_total_return_amt,
-    COUNT(DISTINCT c.c_customer_sk) AS distinct_customers,
-    AVG(sr_agg.total_return_amt) AS avg_return_per_customer,
-    MIN(sr_agg.total_return_amt) AS min_return,
-    MAX(sr_agg.total_return_amt) AS max_return
-FROM sr_agg
-JOIN customer c ON sr_agg.sr_customer_sk = c.c_customer_sk
-JOIN household_demographics hd ON sr_agg.sr_hdemo_sk = hd.hd_demo_sk
-JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
-JOIN store s ON sr_agg.sr_store_sk = s.s_store_sk
-JOIN time_dim t ON sr_agg.sr_return_time_sk = t.t_time_sk
-WHERE t.t_hour BETWEEN 9 AND 17
-  AND s.s_manager = 'David Thomas'
-  AND ib.ib_lower_bound >= 50000
-  AND c.c_birth_year BETWEEN 1960 AND 1980
-GROUP BY
-    s.s_store_id,
-    s.s_store_name,
-    s.s_city,
-    s.s_state,
-    CASE
-        WHEN ib.ib_upper_bound >= 100000 THEN 'Very High'
-        WHEN ib.ib_upper_bound >= 75000  THEN 'High'
-        ELSE 'Medium/Low'
-    END
-HAVING SUM(sr_agg.total_return_amt) > 5000
-ORDER BY store_total_return_amt DESC
+  COALESCE(p_promo_name, 'All Promotions') AS promo_name,
+  COALESCE(p_channel_tv, 'All TV Channels') AS channel_tv,
+  COALESCE(cs_ship_mode_sk, -1) AS ship_mode,
+  SUM(cs_ext_sales_price) AS total_sales,
+  SUM(cs_net_profit) AS total_profit,
+  AVG(cs_quantity) AS avg_quantity,
+  COUNT(*) AS sales_cnt
+FROM sales_promo
+GROUP BY GROUPING SETS (
+  (p_promo_name, p_channel_tv, cs_ship_mode_sk),
+  (p_promo_name, p_channel_tv),
+  (p_promo_name),
+  ()
+)
+ORDER BY
+  CASE WHEN GROUPING(p_promo_name) = 0 THEN 1 ELSE 2 END,
+  total_sales DESC
 LIMIT 100

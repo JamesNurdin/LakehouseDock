@@ -1,42 +1,72 @@
-WITH date_2020 AS (
-    SELECT d_date_sk
-    FROM date_dim
-    WHERE d_year = 2020
+WITH inventory_agg AS (
+  SELECT inv_item_sk,
+         SUM(inv_quantity_on_hand) AS total_on_hand
+  FROM inventory
+  WHERE inv_quantity_on_hand > 0
+    AND inv_warehouse_sk IN (1, 2)
+  GROUP BY inv_item_sk
+),
+sales_agg AS (
+  SELECT ss_item_sk,
+         SUM(ss_ext_sales_price) AS total_sales,
+         SUM(ss_net_profit) AS total_profit,
+         COUNT(*) AS sales_cnt
+  FROM store_sales
+  WHERE ss_quantity > 0
+    AND ss_sales_price > 20
+    AND ss_ext_tax > 0
+    AND ss_sold_date_sk BETWEEN 2451910 AND 2451950
+  GROUP BY ss_item_sk
+),
+returns_agg AS (
+  SELECT cr_item_sk,
+         SUM(cr_return_amount) AS total_return_amount,
+         SUM(cr_return_quantity) AS total_return_qty
+  FROM catalog_returns
+  WHERE cr_return_amount > 0
+    AND cr_return_quantity > 0
+    AND cr_reason_sk IS NOT NULL
+  GROUP BY cr_item_sk
+),
+sales_customer AS (
+  SELECT ss_item_sk,
+         MIN(ss_addr_sk) AS addr_sk,
+         MIN(ss_cdemo_sk) AS cdemo_sk
+  FROM store_sales
+  GROUP BY ss_item_sk
 )
-SELECT state,
-       total_profit,
-       channel
-FROM (
-    SELECT ca.ca_state AS state,
-           SUM(cs.cs_net_profit) AS total_profit,
-           'catalog' AS channel
-    FROM catalog_sales cs
-    JOIN date_2020 d
-      ON cs.cs_sold_date_sk = d.d_date_sk
-    JOIN customer_address ca
-      ON cs.cs_bill_addr_sk = ca.ca_address_sk
-    WHERE EXISTS (
-        SELECT 1
-        FROM customer_address ca2
-        WHERE ca2.ca_state = ca.ca_state
-          AND ca2.ca_county = 'Washington County'
-    )
-    GROUP BY ca.ca_state
-    HAVING SUM(cs.cs_net_profit) > 10000
-
-    UNION ALL
-
-    SELECT ca.ca_state AS state,
-           SUM(ws.ws_net_profit) AS total_profit,
-           'web' AS channel
-    FROM web_sales ws
-    JOIN date_2020 d
-      ON ws.ws_sold_date_sk = d.d_date_sk
-    JOIN customer_address ca
-      ON ws.ws_bill_addr_sk = ca.ca_address_sk
-    WHERE ca.ca_city IN ('Fairview', 'Oakland')
-    GROUP BY ca.ca_state
-    HAVING SUM(ws.ws_net_profit) > 8000
-) AS combined
-ORDER BY total_profit DESC
+SELECT
+  i.i_item_sk,
+  i.i_product_name,
+  i.i_wholesale_cost,
+  i.i_manager_id,
+  i.i_brand,
+  inv.total_on_hand,
+  s.total_sales,
+  s.total_profit,
+  r.total_return_amount,
+  r.total_return_qty,
+  ca.ca_city,
+  cd.cd_gender,
+  p.p_promo_name
+FROM sales_agg s
+JOIN item i
+  ON s.ss_item_sk = i.i_item_sk
+JOIN inventory_agg inv
+  ON i.i_item_sk = inv.inv_item_sk
+LEFT JOIN returns_agg r
+  ON i.i_item_sk = r.cr_item_sk
+JOIN sales_customer sc
+  ON i.i_item_sk = sc.ss_item_sk
+JOIN customer_address ca
+  ON sc.addr_sk = ca.ca_address_sk
+JOIN customer_demographics cd
+  ON sc.cdemo_sk = cd.cd_demo_sk
+LEFT JOIN promotion p
+  ON i.i_item_sk = p.p_item_sk
+WHERE i.i_wholesale_cost BETWEEN 5 AND 50
+  AND i.i_manager_id IN (21, 34)
+  AND ca.ca_gmt_offset = -7.00
+  AND cd.cd_gender = 'F'
+ORDER BY s.total_sales DESC
 LIMIT 100

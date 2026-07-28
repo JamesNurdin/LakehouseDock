@@ -1,62 +1,75 @@
-WITH cs_data AS (
-    SELECT c.c_customer_id AS customer_id,
-           cs.cs_order_number AS order_number,
-           cs.cs_net_profit AS net_profit,
-           p.p_promo_name AS promo_name,
-           sm.sm_type AS ship_type,
-           w.w_city AS city,
-           (
-               SELECT max(cs2.cs_ext_sales_price)
-               FROM catalog_sales cs2
-               WHERE cs2.cs_bill_customer_sk = c.c_customer_sk
-           ) AS max_customer_sales
-    FROM catalog_sales cs
-    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
-    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
-    JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
-    WHERE p.p_channel_tv = 'N'
-      AND w.w_city = 'Shiloh'
-      AND cs.cs_sold_date_sk BETWEEN 2450000 AND 2450100
-),
-ws_data AS (
-    SELECT c2.c_customer_id AS customer_id,
-           ws.ws_order_number AS order_number,
-           ws.ws_net_profit AS net_profit,
-           p2.p_promo_name AS promo_name,
-           sm2.sm_type AS ship_type,
-           w2.w_city AS city,
-           CAST(NULL AS decimal(7,2)) AS max_customer_sales
+WITH ws AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ws.ws_ship_mode_sk,
+        ws.ws_warehouse_sk,
+        ws.ws_sold_time_sk,
+        ws.ws_bill_hdemo_sk,
+        ws.ws_ship_hdemo_sk
     FROM web_sales ws
-    JOIN customer c2 ON ws.ws_bill_customer_sk = c2.c_customer_sk
-    JOIN promotion p2 ON ws.ws_promo_sk = p2.p_promo_sk
-    JOIN ship_mode sm2 ON ws.ws_ship_mode_sk = sm2.sm_ship_mode_sk
-    JOIN warehouse w2 ON ws.ws_warehouse_sk = w2.w_warehouse_sk
-    WHERE p2.p_channel_tv = 'N'
-      AND w2.w_city = 'Shiloh'
-      AND ws.ws_sold_date_sk BETWEEN 2450000 AND 2450100
-      AND EXISTS (
-          SELECT 1
-          FROM catalog_returns cr
-          WHERE cr.cr_order_number = ws.ws_order_number
-            AND cr.cr_return_quantity > 0
-      )
+),
+wr AS (
+    SELECT
+        wr.wr_order_number,
+        wr.wr_item_sk,
+        wr.wr_return_quantity,
+        wr.wr_return_amt,
+        wr.wr_returned_time_sk,
+        wr.wr_refunded_hdemo_sk,
+        wr.wr_returning_hdemo_sk
+    FROM web_returns wr
 )
-SELECT customer_id,
-       order_number,
-       net_profit,
-       promo_name,
-       ship_type,
-       city,
-       max_customer_sales
-FROM cs_data
-UNION ALL
-SELECT customer_id,
-       order_number,
-       net_profit,
-       promo_name,
-       ship_type,
-       city,
-       max_customer_sales
-FROM ws_data
+SELECT
+    i.i_category,
+    sm.sm_type,
+    hd_bill.hd_income_band_sk,
+    td_sold.t_hour,
+    SUM(ws.ws_quantity) AS total_quantity_sold,
+    SUM(ws.ws_net_profit) AS total_profit,
+    SUM(COALESCE(wr.wr_return_quantity, 0)) AS total_return_qty,
+    AVG(inv.inv_quantity_on_hand) AS avg_inventory_on_hand
+FROM ws
+JOIN item i
+    ON ws.ws_item_sk = i.i_item_sk
+JOIN household_demographics hd_bill
+    ON ws.ws_bill_hdemo_sk = hd_bill.hd_demo_sk
+JOIN household_demographics hd_ship
+    ON ws.ws_ship_hdemo_sk = hd_ship.hd_demo_sk
+JOIN ship_mode sm
+    ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN warehouse w
+    ON ws.ws_warehouse_sk = w.w_warehouse_sk
+JOIN time_dim td_sold
+    ON ws.ws_sold_time_sk = td_sold.t_time_sk
+LEFT JOIN wr
+    ON ws.ws_order_number = wr.wr_order_number
+    AND ws.ws_item_sk = wr.wr_item_sk
+LEFT JOIN time_dim td_return
+    ON wr.wr_returned_time_sk = td_return.t_time_sk
+LEFT JOIN household_demographics hd_refunded
+    ON wr.wr_refunded_hdemo_sk = hd_refunded.hd_demo_sk
+LEFT JOIN household_demographics hd_returning
+    ON wr.wr_returning_hdemo_sk = hd_returning.hd_demo_sk
+JOIN inventory inv
+    ON inv.inv_item_sk = i.i_item_sk
+    AND inv.inv_warehouse_sk = w.w_warehouse_sk
+WHERE EXISTS (
+    SELECT 1
+    FROM inventory inv2
+    WHERE inv2.inv_item_sk = i.i_item_sk
+      AND inv2.inv_quantity_on_hand > 0
+      AND inv2.inv_warehouse_sk = w.w_warehouse_sk
+) 
+  AND i.i_current_price > 20
+GROUP BY GROUPING SETS (
+    (i.i_category, sm.sm_type, hd_bill.hd_income_band_sk, td_sold.t_hour),
+    (i.i_category, sm.sm_type, hd_bill.hd_income_band_sk),
+    (i.i_category, sm.sm_type),
+    (i.i_category),
+    ()
+)
+ORDER BY total_profit DESC
 LIMIT 100

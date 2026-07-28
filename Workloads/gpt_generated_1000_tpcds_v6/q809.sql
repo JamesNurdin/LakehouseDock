@@ -1,37 +1,61 @@
-WITH division_sales_a AS (
+WITH catalog_data AS (
     SELECT
-        s.s_division_name,
-        CASE WHEN SUM(ss.ss_net_profit) > 100000 THEN 'High' ELSE 'Low' END AS profit_category,
-        SUM(ss.ss_net_profit) AS total_profit,
-        COUNT(DISTINCT ss.ss_ticket_number) AS distinct_tickets
-    FROM store_sales ss
-    JOIN store s ON ss.ss_store_sk = s.s_store_sk
-    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
-    WHERE s.s_market_desc LIKE '%Local%'
-      AND ca.ca_state = 'CA'
-    GROUP BY s.s_division_name
-    HAVING SUM(ss.ss_net_profit) > 50000
+        w.w_warehouse_name AS warehouse_name,
+        'catalog' AS source_type,
+        SUM(cs.cs_net_profit) AS total_profit,
+        COUNT(DISTINCT cs.cs_order_number) AS order_cnt
+    FROM
+        catalog_sales cs
+        JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+        JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+        JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    WHERE
+        p.p_discount_active = 'Y'
+        AND cc.cc_state = 'CA'
+        AND EXISTS (
+            SELECT 1
+            FROM inventory i
+            WHERE i.inv_warehouse_sk = w.w_warehouse_sk
+              AND i.inv_quantity_on_hand > 0
+        )
+    GROUP BY
+        w.w_warehouse_name
 ),
-
-division_sales_b AS (
+web_data AS (
     SELECT
-        s.s_division_name,
-        CASE WHEN SUM(ss.ss_net_profit) > 200000 THEN 'High' ELSE 'Low' END AS profit_category,
-        SUM(ss.ss_net_profit) AS total_profit,
-        COUNT(DISTINCT ss.ss_ticket_number) AS distinct_tickets
-    FROM store_sales ss
-    JOIN store s ON ss.ss_store_sk = s.s_store_sk
-    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
-    WHERE s.s_market_desc LIKE '%Formal%'
-      AND ca.ca_state = 'TX'
-    GROUP BY s.s_division_name
-    HAVING SUM(ss.ss_net_profit) > 80000
+        w.w_warehouse_name AS warehouse_name,
+        'web' AS source_type,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS order_cnt
+    FROM
+        web_sales ws
+        JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+        JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+        JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    WHERE
+        p.p_discount_active = 'Y'
+        AND wp.wp_type = 'content'
+        AND EXISTS (
+            SELECT 1
+            FROM inventory i
+            WHERE i.inv_warehouse_sk = w.w_warehouse_sk
+              AND i.inv_quantity_on_hand > 0
+        )
+    GROUP BY
+        w.w_warehouse_name
 )
-SELECT *
-FROM division_sales_a
+SELECT
+    warehouse_name,
+    source_type,
+    total_profit,
+    order_cnt
+FROM catalog_data
 UNION ALL
-SELECT *
-FROM division_sales_b
+SELECT
+    warehouse_name,
+    source_type,
+    total_profit,
+    order_cnt
+FROM web_data
 ORDER BY total_profit DESC
+LIMIT 100

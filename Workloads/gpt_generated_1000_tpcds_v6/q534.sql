@@ -1,55 +1,63 @@
-WITH recent_inventory AS (
-    SELECT
-        w.w_city,
-        w.w_warehouse_sk,
-        SUM(i.inv_quantity_on_hand) AS total_qty,
-        (SELECT MAX(i2.inv_quantity_on_hand)
-         FROM inventory i2
-         WHERE i2.inv_warehouse_sk = w.w_warehouse_sk) AS max_qty_warehouse
-    FROM inventory i
-    JOIN warehouse w ON i.inv_warehouse_sk = w.w_warehouse_sk
-    WHERE i.inv_date_sk BETWEEN 2450920 AND 2450950
-      AND w.w_city IN ('Liberty', 'Pine Grove')
-      AND EXISTS (
-          SELECT 1
-          FROM inventory i3
-          WHERE i3.inv_item_sk = i.inv_item_sk
-            AND i3.inv_quantity_on_hand > 500
-      )
-    GROUP BY w.w_city, w.w_warehouse_sk
+WITH enriched AS (
+   SELECT
+     cc.cc_call_center_sk,
+     cc.cc_name,
+     cc.cc_manager,
+     cc.cc_mkt_desc,
+     hd.hd_buy_potential,
+     d.d_year,
+     t.t_hour,
+     cs.cs_net_paid_inc_ship,
+     cs.cs_quantity
+   FROM catalog_sales cs
+   JOIN call_center cc
+     ON cs.cs_call_center_sk = cc.cc_call_center_sk
+   JOIN date_dim d
+     ON cs.cs_sold_date_sk = d.d_date_sk
+   JOIN time_dim t
+     ON cs.cs_sold_time_sk = t.t_time_sk
+   JOIN household_demographics hd
+     ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+   WHERE d.d_year = 2002
+     AND regexp_like(cc.cc_mkt_desc, '(?i)development|dangerous')
+     AND cc.cc_manager LIKE '%Bob%'
+     AND hd.hd_buy_potential LIKE 'HIGH%'
 ),
-older_inventory AS (
-    SELECT
-        w.w_city,
-        w.w_warehouse_sk,
-        SUM(i.inv_quantity_on_hand) AS total_qty,
-        (SELECT MAX(i2.inv_quantity_on_hand)
-         FROM inventory i2
-         WHERE i2.inv_warehouse_sk = w.w_warehouse_sk) AS max_qty_warehouse
-    FROM inventory i
-    JOIN warehouse w ON i.inv_warehouse_sk = w.w_warehouse_sk
-    WHERE i.inv_date_sk BETWEEN 2450800 AND 2450830
-      AND w.w_county LIKE '%County'
-      AND EXISTS (
-          SELECT 1
-          FROM inventory i3
-          WHERE i3.inv_item_sk = i.inv_item_sk
-            AND i3.inv_quantity_on_hand > 500
-      )
-    GROUP BY w.w_city, w.w_warehouse_sk
+aggregated AS (
+   SELECT
+     cc_call_center_sk,
+     cc_name,
+     cc_manager,
+     cc_mkt_desc,
+     d_year,
+     t_hour,
+     SUM(cs_net_paid_inc_ship) AS total_sales,
+     SUM(cs_quantity) AS total_qty,
+     COUNT(*) AS sales_cnt,
+     CONCAT(SUBSTRING(cc_manager, 1, 1), '. ', SUBSTRING(cc_name, 1, 10)) AS manager_name_snippet,
+     regexp_extract(cc_mkt_desc, '(\\w+)', 1) AS mkt_first_word
+   FROM enriched
+   GROUP BY
+     cc_call_center_sk,
+     cc_name,
+     cc_manager,
+     cc_mkt_desc,
+     d_year,
+     t_hour
 )
-SELECT DISTINCT
-    ci.w_city,
-    ci.total_qty,
-    'recent' AS period,
-    ci.max_qty_warehouse
-FROM recent_inventory ci
-UNION ALL
-SELECT DISTINCT
-    oi.w_city,
-    oi.total_qty,
-    'older' AS period,
-    oi.max_qty_warehouse
-FROM older_inventory oi
-ORDER BY w_city, period
+SELECT
+  cc_call_center_sk,
+  cc_name,
+  cc_manager,
+  cc_mkt_desc,
+  manager_name_snippet,
+  mkt_first_word,
+  d_year,
+  t_hour,
+  total_sales,
+  total_qty,
+  sales_cnt,
+  ROW_NUMBER() OVER (PARTITION BY t_hour ORDER BY total_sales DESC) AS sales_rank_in_hour
+FROM aggregated
+ORDER BY total_sales DESC
 LIMIT 100

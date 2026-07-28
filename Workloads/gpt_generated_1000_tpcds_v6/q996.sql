@@ -1,33 +1,43 @@
-WITH returns_agg AS (
-    SELECT
-        cp.cp_department,
-        d_ret.d_year,
-        SUM(wr.wr_net_loss) AS total_net_loss,
-        COUNT(*) AS returns_cnt,
-        CASE
-            WHEN SUM(wr.wr_fee) > 100 THEN 'High Fee'
-            ELSE 'Low Fee'
-        END AS fee_category
-    FROM web_returns wr
-    JOIN date_dim d_ret
-        ON wr.wr_returned_date_sk = d_ret.d_date_sk
-    JOIN customer cust_ref
-        ON wr.wr_refunded_customer_sk = cust_ref.c_customer_sk
-    JOIN catalog_page cp
-        ON cp.cp_start_date_sk = d_ret.d_date_sk
-    WHERE d_ret.d_year BETWEEN 2000 AND 2002
-      AND wr.wr_fee > 5
-      AND wr.wr_return_quantity >= 1
-      AND cp.cp_catalog_number IN (5, 9, 12)
-      AND cust_ref.c_current_cdemo_sk > 200000
-    GROUP BY cp.cp_department, d_ret.d_year
+WITH inv AS (
+    SELECT inv_date_sk, inv_item_sk, inv_warehouse_sk, inv_quantity_on_hand
+    FROM inventory
+    WHERE inv_quantity_on_hand > 0
 )
 SELECT
-    cp_department,
-    fee_category,
-    AVG(total_net_loss) AS avg_total_net_loss,
-    SUM(returns_cnt) AS total_returns
-FROM returns_agg
-GROUP BY cp_department, fee_category
-ORDER BY avg_total_net_loss DESC
+    s.s_store_id,
+    s.s_store_name,
+    d.d_year,
+    COUNT(DISTINCT cs.cs_order_number) AS unique_orders,
+    SUM(ss.ss_net_paid) AS total_store_net_paid,
+    AVG(cs.cs_ext_sales_price) AS avg_catalog_sales_price,
+    MAX(ss.ss_ext_sales_price) AS max_store_sale_price,
+    MIN(wr.wr_return_amt) AS min_web_return_amt,
+    (SELECT AVG(cc_sub.cc_gmt_offset)
+       FROM call_center cc_sub
+       WHERE cc_sub.cc_state = s.s_state) AS avg_gmt_offset_state,
+    ROW_NUMBER() OVER (PARTITION BY s.s_store_id ORDER BY SUM(ss.ss_net_paid) DESC) AS rn
+FROM store_sales ss
+JOIN date_dim d
+  ON ss.ss_sold_date_sk = d.d_date_sk
+JOIN store s
+  ON ss.ss_store_sk = s.s_store_sk
+LEFT JOIN inv
+  ON d.d_date_sk = inv.inv_date_sk
+JOIN store_returns sr
+  ON sr.sr_ticket_number = ss.ss_ticket_number
+ AND sr.sr_item_sk = ss.ss_item_sk
+ AND sr.sr_store_sk = s.s_store_sk
+JOIN catalog_sales cs
+  ON cs.cs_sold_date_sk = d.d_date_sk
+JOIN call_center cc
+  ON cs.cs_call_center_sk = cc.cc_call_center_sk
+JOIN web_returns wr
+  ON wr.wr_returned_date_sk = d.d_date_sk
+WHERE d.d_year = 1912
+  AND s.s_state = 'CA'
+  AND cc.cc_market_manager = 'Jane Smith'
+  AND ss.ss_ext_sales_price > 1000
+GROUP BY s.s_store_id, s.s_store_name, d.d_year, s.s_state
+HAVING SUM(ss.ss_net_paid) > 5000
+ORDER BY total_store_net_paid DESC
 LIMIT 100

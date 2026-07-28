@@ -1,45 +1,56 @@
-WITH returns_agg AS (
+WITH filtered_store_sales AS (
     SELECT
-        sr.sr_store_sk,
-        sr.sr_hdemo_sk,
-        d_ret.d_year,
-        d_ret.d_month_seq,
-        SUM(sr.sr_return_amt) AS total_return_amt,
-        SUM(sr.sr_net_loss) AS total_net_loss,
-        COUNT(*) AS cnt_returns,
-        SUM(CASE WHEN sr.sr_return_tax > 0 THEN 1 ELSE 0 END) AS cnt_taxed_returns
-    FROM store_returns sr
-    JOIN date_dim d_ret
-        ON sr.sr_returned_date_sk = d_ret.d_date_sk
-    WHERE d_ret.d_year = 2002
-    GROUP BY sr.sr_store_sk, sr.sr_hdemo_sk, d_ret.d_year, d_ret.d_month_seq
+        ss.ss_sold_date_sk AS sold_date_sk,
+        ca.ca_state AS state,
+        ss.ss_ticket_number,
+        ss.ss_net_paid,
+        hd.hd_income_band_sk
+    FROM store_sales ss
+    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    WHERE ca.ca_location_type = 'apartment'
+      AND NOT EXISTS (
+            SELECT 1
+            FROM store_returns sr
+            WHERE sr.sr_ticket_number = ss.ss_ticket_number
+        )
+),
+aggregated_store_sales AS (
+    SELECT
+        sold_date_sk,
+        state,
+        SUM(ss_net_paid) AS total_net_paid,
+        CASE WHEN hd_income_band_sk >= 5 THEN 'High' ELSE 'Low' END AS category,
+        'store' AS source
+    FROM filtered_store_sales
+    GROUP BY sold_date_sk, state, hd_income_band_sk
+),
+aggregated_web_sales AS (
+    SELECT
+        ws.ws_sold_date_sk AS sold_date_sk,
+        wp.wp_type AS state,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        CASE WHEN sm.sm_code = 'EXP' THEN 'Express' ELSE 'Standard' END AS category,
+        'web' AS source
+    FROM web_sales ws
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE wp.wp_type = 'article'
+    GROUP BY ws.ws_sold_date_sk, wp.wp_type, sm.sm_code
 )
 SELECT
-    s.s_store_id,
-    s.s_city,
-    s.s_state,
-    d_store_closed.d_year AS store_closed_year,
-    cp.cp_department,
-    wp.wp_type,
-    ra.total_return_amt,
-    ra.total_net_loss,
-    ra.cnt_returns,
-    CASE WHEN ra.total_return_amt = 0 THEN 0
-         ELSE ra.total_net_loss / ra.total_return_amt
-    END AS loss_ratio,
-    (SELECT AVG(sr_inner.sr_return_amt) FROM store_returns sr_inner) AS overall_avg_return_amt
-FROM returns_agg ra
-JOIN store s
-    ON ra.sr_store_sk = s.s_store_sk
-JOIN date_dim d_store_closed
-    ON s.s_closed_date_sk = d_store_closed.d_date_sk
-JOIN household_demographics hd
-    ON ra.sr_hdemo_sk = hd.hd_demo_sk
-JOIN catalog_page cp
-    ON cp.cp_start_date_sk = d_store_closed.d_date_sk
-JOIN web_page wp
-    ON wp.wp_creation_date_sk = d_store_closed.d_date_sk
-WHERE s.s_state = 'CA'
-  AND wp.wp_type = 'ad'
-  AND hd.hd_vehicle_count >= 2
-ORDER BY loss_ratio DESC, s.s_store_id
+    sold_date_sk,
+    state,
+    category,
+    total_net_paid,
+    source
+FROM aggregated_store_sales
+UNION ALL
+SELECT
+    sold_date_sk,
+    state,
+    category,
+    total_net_paid,
+    source
+FROM aggregated_web_sales
+ORDER BY sold_date_sk DESC, total_net_paid DESC

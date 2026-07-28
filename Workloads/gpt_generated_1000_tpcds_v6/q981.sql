@@ -1,68 +1,38 @@
-WITH catalog_agg AS (
+WITH cs_base AS (
     SELECT
-        cr_item_sk,
-        cr_reason_sk,
-        SUM(cr_return_amount) AS total_cat_return_amount,
-        SUM(cr_return_quantity) AS total_cat_return_qty
-    FROM catalog_returns
-    WHERE cr_returned_date_sk BETWEEN 2450000 AND 2453650
-      AND cr_return_amount > 0
-      AND cr_return_quantity > 0
-    GROUP BY cr_item_sk, cr_reason_sk
+        cs.cs_sold_date_sk,
+        cs.cs_sold_time_sk,
+        cs.cs_quantity,
+        cs.cs_ext_sales_price,
+        cs.cs_net_profit,
+        cs.cs_order_number,
+        cs.cs_bill_customer_sk,
+        cs.cs_warehouse_sk,
+        cs.cs_promo_sk
+    FROM catalog_sales cs
+    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
 )
 SELECT
-    i.i_item_id,
-    i.i_category,
-    i.i_class,
-    r.r_reason_desc,
-    cc.cc_name,
-    sm.sm_type,
-    w.w_warehouse_name,
-    wp.wp_type,
-    ca.total_cat_return_amount,
-    SUM(wr.wr_return_amt) AS total_web_return_amt,
-    CASE
-        WHEN SUM(wr.wr_return_amt) > ca.total_cat_return_amount THEN 'WEB > CAT'
-        ELSE 'CAT >= WEB'
-    END AS comparison_flag
-FROM catalog_agg ca
-JOIN item i
-    ON ca.cr_item_sk = i.i_item_sk
-JOIN reason r
-    ON ca.cr_reason_sk = r.r_reason_sk
--- Join a raw catalog_returns row to bring in the remaining dimensions
-JOIN catalog_returns cr2
-    ON cr2.cr_item_sk = i.i_item_sk
-   AND cr2.cr_reason_sk = r.r_reason_sk
-JOIN call_center cc
-    ON cr2.cr_call_center_sk = cc.cc_call_center_sk
-JOIN ship_mode sm
-    ON cr2.cr_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN warehouse w
-    ON cr2.cr_warehouse_sk = w.w_warehouse_sk
-JOIN customer c
-    ON cr2.cr_refunded_customer_sk = c.c_customer_sk
-JOIN web_returns wr
-    ON wr.wr_item_sk = i.i_item_sk
-   AND wr.wr_reason_sk = r.r_reason_sk
-JOIN web_page wp
-    ON wr.wr_web_page_sk = wp.wp_web_page_sk
-WHERE i.i_category = 'sports-apparel'
-  AND r.r_reason_desc LIKE '%damaged%'
-  AND cc.cc_state = 'CA'
-  AND w.w_city = 'Los Angeles'
-  AND sm.sm_carrier = 'FedEx'
-  AND wp.wp_type = 'article'
-  AND c.c_preferred_cust_flag = 'Y'
-GROUP BY
-    i.i_item_id,
-    i.i_category,
-    i.i_class,
-    r.r_reason_desc,
-    cc.cc_name,
-    sm.sm_type,
-    w.w_warehouse_name,
-    wp.wp_type,
-    ca.total_cat_return_amount
-ORDER BY total_web_return_amt DESC
+    s.s_store_name,
+    web.web_state,
+    SUM(cs_base.cs_ext_sales_price)                               AS total_catalog_sales,
+    SUM(ws.ws_ext_sales_price)                                    AS total_web_sales,
+    SUM(CASE WHEN p_active.p_discount_active = 'Y' THEN cs_base.cs_net_profit ELSE 0 END) AS profit_active_promo,
+    COUNT(DISTINCT cs_base.cs_order_number)                      AS num_orders
+FROM cs_base
+JOIN time_dim td           ON cs_base.cs_sold_time_sk = td.t_time_sk
+JOIN customer c_bill       ON cs_base.cs_bill_customer_sk = c_bill.c_customer_sk
+JOIN promotion p_active    ON cs_base.cs_promo_sk = p_active.p_promo_sk
+JOIN web_sales ws          ON ws.ws_sold_time_sk = td.t_time_sk
+JOIN promotion p_ws        ON ws.ws_promo_sk = p_ws.p_promo_sk
+JOIN web_page wp           ON ws.ws_web_page_sk = wp.wp_web_page_sk
+JOIN web_site web          ON ws.ws_web_site_sk = web.web_site_sk
+JOIN store_returns sr     ON sr.sr_return_time_sk = td.t_time_sk
+JOIN store s               ON sr.sr_store_sk = s.s_store_sk
+JOIN customer c_ws        ON ws.ws_bill_customer_sk = c_ws.c_customer_sk
+JOIN customer c_sr        ON sr.sr_customer_sk = c_sr.c_customer_sk
+GROUP BY s.s_store_name, web.web_state
+HAVING SUM(cs_base.cs_ext_sales_price) > 10000
+ORDER BY total_catalog_sales DESC
 LIMIT 100

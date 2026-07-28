@@ -1,42 +1,46 @@
-WITH sales_by_state_city AS (
-    SELECT
-        ca.ca_state,
-        ca.ca_city,
-        SUM(ss.ss_net_profit) AS profit_city
-    FROM store_sales ss
-    JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
-    WHERE regexp_like(ca.ca_city, '^[A-Z][a-z]+(?:[ -][A-Z][a-z]+)*$')
-      AND ss.ss_ext_tax > 100
-    GROUP BY ca.ca_state, ca.ca_city
-),
-returns_by_state AS (
-    SELECT
-        ca.ca_state,
-        SUM(wr.wr_net_loss) AS loss_state
-    FROM web_returns wr
-    JOIN customer_address ca ON wr.wr_refunded_addr_sk = ca.ca_address_sk
-    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    WHERE wp.wp_url LIKE '%example.com/%'
-      AND regexp_extract(wp.wp_type, '(\\w+)', 1) = 'content'
-      AND wr.wr_return_amt > 500
-    GROUP BY ca.ca_state
-)
 SELECT
-    s.ca_state,
-    SUM(s.profit_city) AS total_profit,
-    COALESCE(r.loss_state, 0) AS total_loss,
-    (SUM(s.profit_city) - COALESCE(r.loss_state, 0)) AS net_gain,
-    CONCAT(s.ca_state, '-', MIN(s.ca_city)) AS state_city_key,
-    SUBSTRING(MIN(s.ca_city), 1, 3) AS city_prefix,
-    (
-        SELECT AVG(ss2.ss_net_paid)
-        FROM store_sales ss2
-        JOIN customer_address ca2 ON ss2.ss_addr_sk = ca2.ca_address_sk
-        WHERE ca2.ca_state = s.ca_state
-    ) AS avg_paid_per_state
-FROM sales_by_state_city s
-LEFT JOIN returns_by_state r ON s.ca_state = r.ca_state
-GROUP BY s.ca_state, r.loss_state
-HAVING (SUM(s.profit_city) - COALESCE(r.loss_state, 0)) > 5000
-ORDER BY net_gain DESC
+  dr.d_year,
+  dr.d_moy,
+  cc.cc_name,
+  ws.web_site_id,
+  r_cr.r_reason_desc,
+  SUM(cr.cr_net_loss)               AS total_catalog_net_loss,
+  SUM(sr.sr_net_loss)               AS total_store_net_loss,
+  SUM(wr.wr_net_loss)               AS total_web_net_loss,
+  COUNT(*)                          AS total_transactions,
+  AVG(cr.cr_return_amount)          AS avg_catalog_return_amount,
+  MIN(dr.d_date)                    AS min_return_date,
+  MAX(dr.d_date)                    AS max_return_date
+FROM call_center cc
+JOIN catalog_returns cr
+  ON cr.cr_call_center_sk = cc.cc_call_center_sk
+JOIN date_dim dr
+  ON cr.cr_returned_date_sk = dr.d_date_sk
+JOIN reason r_cr
+  ON cr.cr_reason_sk = r_cr.r_reason_sk
+JOIN store_returns sr
+  ON sr.sr_returned_date_sk = dr.d_date_sk
+JOIN reason r_sr
+  ON sr.sr_reason_sk = r_sr.r_reason_sk
+JOIN web_returns wr
+  ON wr.wr_returned_date_sk = dr.d_date_sk
+JOIN reason r_wr
+  ON wr.wr_reason_sk = r_wr.r_reason_sk
+JOIN web_site ws
+  ON ws.web_open_date_sk = dr.d_date_sk
+WHERE dr.d_moy = 10
+  AND dr.d_current_quarter = 'Y'
+  AND dr.d_year = 2022
+  AND r_cr.r_reason_desc = 'Package was damaged'
+  AND cc.cc_state = 'CA'
+  AND ws.web_city = 'San Francisco'
+  AND ws.web_suite_number = 'Suite 350 '
+  AND NOT EXISTS (
+        SELECT 1
+        FROM catalog_returns cr2
+        WHERE cr2.cr_item_sk = sr.sr_item_sk
+          AND cr2.cr_returned_date_sk = sr.sr_returned_date_sk
+      )
+GROUP BY dr.d_year, dr.d_moy, cc.cc_name, ws.web_site_id, r_cr.r_reason_desc
+ORDER BY total_catalog_net_loss DESC
 LIMIT 100

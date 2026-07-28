@@ -1,51 +1,52 @@
-WITH cp_dates AS (
-  SELECT
-    cp.cp_catalog_page_id,
-    cp.cp_department,
-    cp.cp_type,
-    cp.cp_catalog_number,
-    cp.cp_catalog_page_number,
-    cp.cp_start_date_sk,
-    d_start.d_year,
-    d_start.d_month_seq,
-    d_start.d_date
-  FROM catalog_page cp
-  JOIN date_dim d_start
-    ON cp.cp_start_date_sk = d_start.d_date_sk
-  WHERE cp.cp_department = 'Books'
-    AND cp.cp_type = 'A'
-    AND d_start.d_year = 2001
+WITH filtered_returns AS (
+    SELECT
+        cr.cr_returned_date_sk,
+        cr.cr_returned_time_sk,
+        cr.cr_return_amount,
+        cr.cr_net_loss,
+        cr.cr_refunded_cdemo_sk,
+        cr.cr_refunded_customer_sk,
+        cr.cr_call_center_sk,
+        cc.cc_name,
+        cc.cc_state,
+        td.t_hour
+    FROM catalog_returns cr
+    JOIN catalog_sales cs
+        ON cr.cr_order_number = cs.cs_order_number
+       AND cr.cr_item_sk = cs.cs_item_sk
+    JOIN call_center cc
+        ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    JOIN time_dim td
+        ON cr.cr_returned_time_sk = td.t_time_sk
+    WHERE regexp_like(cc.cc_name, '^.*Center.*$')
+      AND cc.cc_state LIKE 'C%'
+      AND cr.cr_return_amount > 0
 )
 SELECT
-  cp_dates.cp_department,
-  cp_dates.cp_type,
-  cp_dates.d_year,
-  COUNT(*) AS page_cnt,
-  SUM(cp_dates.cp_catalog_number) AS total_catalog_number,
-  AVG(cp_dates.cp_catalog_page_number) AS avg_page_number,
-  MAX(cp_dates.cp_catalog_page_number) AS max_page_number,
-  CASE
-    WHEN cp_dates.cp_type = 'A' THEN 'Type A'
-    WHEN cp_dates.cp_type = 'B' THEN 'Type B'
-    ELSE 'Other'
-  END AS type_label,
-  ROW_NUMBER() OVER (PARTITION BY cp_dates.cp_department ORDER BY COUNT(*) DESC) AS dept_rank
-FROM cp_dates
-WHERE EXISTS (
-  SELECT 1
-  FROM web_site ws
-  WHERE ws.web_open_date_sk = cp_dates.cp_start_date_sk
-    AND ws.web_mkt_desc LIKE '%technical%'
-    AND ws.web_country = 'United States'
+    cc_name,
+    cc_state,
+    concat(cc_name, ' - ', cc_state) AS center_full,
+    regexp_extract(cc_name, '(\\w+) Center', 1) AS name_prefix,
+    t_hour,
+    COUNT(*) AS return_cnt,
+    SUM(cr_net_loss) AS total_net_loss,
+    CASE
+        WHEN SUM(cr_net_loss) > 10000 THEN 'Very High'
+        WHEN SUM(cr_net_loss) > 5000  THEN 'High'
+        ELSE 'Moderate'
+    END AS loss_category
+FROM filtered_returns fr
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM store_sales ss
+    WHERE ss.ss_customer_sk = fr.cr_refunded_customer_sk
+      AND ss.ss_sold_date_sk = fr.cr_returned_date_sk
 )
 GROUP BY
-  cp_dates.cp_department,
-  cp_dates.cp_type,
-  cp_dates.d_year,
-  CASE
-    WHEN cp_dates.cp_type = 'A' THEN 'Type A'
-    WHEN cp_dates.cp_type = 'B' THEN 'Type B'
-    ELSE 'Other'
-  END
-ORDER BY page_cnt DESC
+    cc_name,
+    cc_state,
+    concat(cc_name, ' - ', cc_state),
+    regexp_extract(cc_name, '(\\w+) Center', 1),
+    t_hour
+ORDER BY total_net_loss DESC
 LIMIT 100

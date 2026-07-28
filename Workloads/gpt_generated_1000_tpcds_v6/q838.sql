@@ -1,58 +1,57 @@
 WITH base AS (
     SELECT
+        cc.cc_name,
+        cp.cp_department,
+        sm.sm_type,
+        r.r_reason_desc,
         td.t_hour,
-        hd.hd_buy_potential,
-        SUM(ss.ss_net_paid) AS store_net_paid,
-        SUM(cs.cs_net_paid) AS catalog_net_paid,
-        SUM(wr.wr_net_loss) AS web_net_loss,
-        COUNT(DISTINCT c.c_customer_id) AS distinct_customers,
-        SUM(CASE WHEN cs.cs_quantity > 5 THEN cs.cs_ext_sales_price ELSE 0 END) AS high_qty_sales
-    FROM store_sales ss
-    JOIN time_dim td ON ss.ss_sold_time_sk = td.t_time_sk
-    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
-    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    JOIN catalog_sales cs ON cs.cs_bill_customer_sk = c.c_customer_sk
-        AND cs.cs_sold_time_sk = td.t_time_sk
-        AND cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+        p.p_channel_radio,
+        cc.cc_employees,
+        wp.wp_image_count,
+        cs.cs_net_profit,
+        ws.ws_net_profit,
+        sr.sr_net_loss,
+        wr.wr_net_loss,
+        cs.cs_quantity,
+        CASE WHEN cs.cs_quantity > 5 THEN 'Bulk' ELSE 'Single' END AS order_type
+    FROM catalog_sales cs
+    JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
+    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN inventory i ON i.inv_warehouse_sk = w.w_warehouse_sk
+    JOIN web_sales ws ON ws.ws_warehouse_sk = w.w_warehouse_sk
+                      AND ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+                      AND ws.ws_promo_sk = p.p_promo_sk
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN store_returns sr ON sr.sr_return_time_sk = td.t_time_sk
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
     JOIN web_returns wr ON wr.wr_returned_time_sk = td.t_time_sk
-        AND wr.wr_refunded_customer_sk = c.c_customer_sk
-        AND wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
-    WHERE td.t_hour BETWEEN 8 AND 20
-      AND hd.hd_buy_potential IN ('5001-10000', '>10000')
-      AND r.r_reason_desc LIKE '%Did not get it on time%'
-      AND ss.ss_ext_tax > 10
-    GROUP BY ROLLUP (td.t_hour, hd.hd_buy_potential)
-),
-agg AS (
-    SELECT
-        t_hour,
-        hd_buy_potential,
-        store_net_paid,
-        catalog_net_paid,
-        web_net_loss,
-        distinct_customers,
-        high_qty_sales,
-        (store_net_paid + catalog_net_paid - web_net_loss) AS total_contribution,
-        CASE
-            WHEN (store_net_paid + catalog_net_paid) = 0 THEN NULL
-            ELSE web_net_loss / (store_net_paid + catalog_net_paid)
-        END AS loss_ratio
-    FROM base
+                        AND wr.wr_web_page_sk = wp.wp_web_page_sk
+                        AND wr.wr_reason_sk = r.r_reason_sk
+                        AND wr.wr_item_sk = ws.ws_item_sk
+                        AND wr.wr_order_number = ws.ws_order_number
+    WHERE p.p_channel_radio = 'N'
+      AND cc.cc_employees > 1000000
+      AND wp.wp_image_count >= 3
+      AND td.t_hour BETWEEN 9 AND 17
 )
 SELECT
-    t_hour,
-    hd_buy_potential,
-    store_net_paid,
-    catalog_net_paid,
-    web_net_loss,
-    distinct_customers,
-    high_qty_sales,
-    total_contribution,
-    loss_ratio
-FROM agg
-WHERE total_contribution > (
-    SELECT AVG(total_contribution) FROM agg
-)
-ORDER BY total_contribution DESC
+    cc_name,
+    cp_department,
+    sm_type,
+    r_reason_desc,
+    SUM(cs_net_profit) AS total_catalog_profit,
+    SUM(ws_net_profit) AS total_web_profit,
+    SUM(sr_net_loss) AS total_store_return_loss,
+    SUM(wr_net_loss) AS total_web_return_loss,
+    COUNT(*) AS txn_count,
+    CASE WHEN SUM(cs_net_profit) + SUM(ws_net_profit) - SUM(sr_net_loss) - SUM(wr_net_loss) > 0
+         THEN 'Overall Profit' ELSE 'Overall Loss' END AS overall_status
+FROM base
+GROUP BY ROLLUP (cc_name, cp_department, sm_type, r_reason_desc)
+HAVING SUM(cs_net_profit) > 10000
+ORDER BY total_catalog_profit DESC
 LIMIT 100

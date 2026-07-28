@@ -1,44 +1,37 @@
-WITH sales_summary AS (
-  SELECT
-    d.d_year,
-    sm.sm_type,
-    ca_store.ca_state AS ca_state,
-    SUM(ss.ss_net_profit) AS store_profit,
-    SUM(ws.ws_net_profit) AS web_profit,
-    SUM(wr.wr_net_loss) AS return_loss
-  FROM store_sales ss
-  JOIN date_dim d
-    ON ss.ss_sold_date_sk = d.d_date_sk
-  JOIN customer_address ca_store
-    ON ss.ss_addr_sk = ca_store.ca_address_sk
-  JOIN web_sales ws
-    ON ws.ws_sold_date_sk = d.d_date_sk
-  JOIN ship_mode sm
-    ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-  JOIN web_returns wr
-    ON wr.wr_order_number = ws.ws_order_number
-   AND wr.wr_item_sk = ws.ws_item_sk
-   AND wr.wr_returned_date_sk = d.d_date_sk
-  JOIN customer_address ca_refund
-    ON wr.wr_refunded_addr_sk = ca_refund.ca_address_sk
-  WHERE d.d_date BETWEEN DATE '2000-01-01' AND DATE '2000-12-31'
-    AND sm.sm_type = 'OVERNIGHT'
-    AND ca_store.ca_state = 'CA'
-  GROUP BY GROUPING SETS (
-    (d.d_year, sm.sm_type, ca_store.ca_state),
-    (d.d_year, sm.sm_type),
-    (d.d_year),
-    ()
-  )
+WITH agg AS (
+    SELECT
+        ca_state,
+        c_birth_year,
+        COUNT(*) AS customer_cnt,
+        AVG(c_current_cdemo_sk) AS avg_cdemo_sk
+    FROM (
+        SELECT
+            c.c_birth_year,
+            c.c_current_cdemo_sk,
+            ca.ca_state,
+            ca.ca_zip
+        FROM tpcds.customer c
+        JOIN tpcds.customer_address ca
+          ON c.c_current_addr_sk = ca.ca_address_sk
+        WHERE c.c_preferred_cust_flag = 'Y'
+          AND c.c_birth_year IN (1970, 1991, 1966, 1950)
+          AND ca.ca_zip = '90419'
+          AND c.c_current_cdemo_sk > 800000
+          AND EXISTS (
+              SELECT 1
+              FROM tpcds.customer_address ca2
+              WHERE ca2.ca_state = 'CA'
+                AND ca2.ca_address_sk = c.c_current_addr_sk
+          )
+    ) sub
+    GROUP BY ca_state, c_birth_year
 )
 SELECT
-  d_year,
-  sm_type,
-  ca_state,
-  store_profit,
-  web_profit,
-  return_loss,
-  (store_profit + web_profit - return_loss) AS total_net
-FROM sales_summary
-WHERE (store_profit + web_profit - return_loss) > 0
-ORDER BY d_year, sm_type, ca_state
+    ca_state,
+    c_birth_year,
+    customer_cnt,
+    avg_cdemo_sk,
+    ROW_NUMBER() OVER (PARTITION BY ca_state ORDER BY customer_cnt DESC) AS rn_state
+FROM agg
+ORDER BY customer_cnt DESC, ca_state
+LIMIT 100

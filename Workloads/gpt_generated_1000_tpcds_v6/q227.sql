@@ -1,67 +1,45 @@
-WITH catalog_part AS (
+WITH agg_returns AS (
     SELECT
-        c.c_customer_id,
-        d.d_year,
-        SUM(cr.cr_return_amount) AS total_return_amount,
-        COUNT(DISTINCT cr.cr_item_sk) AS distinct_items_returned,
-        'catalog' AS channel,
-        (SELECT AVG(cr2.cr_return_amount)
-         FROM catalog_returns cr2
-         JOIN date_dim d2 ON cr2.cr_returned_date_sk = d2.d_date_sk
-         WHERE d2.d_year = 2020) AS avg_return_amount
-    FROM catalog_returns cr
-    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN customer c ON cr.cr_refunded_customer_sk = c.c_customer_sk
-    WHERE d.d_year = 2020
-      AND EXISTS (
-          SELECT 1
-          FROM catalog_sales cs
-          WHERE cs.cs_order_number = cr.cr_order_number
-            AND cs.cs_item_sk = cr.cr_item_sk
-      )
-    GROUP BY c.c_customer_id, d.d_year
-    HAVING SUM(cr.cr_return_amount) > 1000
-),
-web_part AS (
-    SELECT
-        c.c_customer_id,
-        d.d_year,
-        SUM(wr.wr_return_amt) AS total_return_amount,
-        COUNT(DISTINCT wr.wr_item_sk) AS distinct_items_returned,
-        'web' AS channel,
-        (SELECT AVG(wr2.wr_return_amt)
-         FROM web_returns wr2
-         JOIN date_dim d2 ON wr2.wr_returned_date_sk = d2.d_date_sk
-         WHERE d2.d_year = 2020) AS avg_return_amount
-    FROM web_returns wr
-    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
-    JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
-    WHERE d.d_year = 2020
-      AND EXISTS (
-          SELECT 1
-          FROM web_sales ws
-          WHERE ws.ws_order_number = wr.wr_order_number
-            AND ws.ws_item_sk = wr.wr_item_sk
-      )
-    GROUP BY c.c_customer_id, d.d_year
-    HAVING SUM(wr.wr_return_amt) > 1000
+        s.s_store_id          AS store_id,
+        d_ret.d_year          AS year,
+        cd.cd_gender          AS gender,
+        cp.cp_department      AS department,
+        SUM(sr.sr_net_loss)          AS total_net_loss,
+        SUM(sr.sr_refunded_cash)    AS total_refunded_cash,
+        AVG(sr.sr_fee)              AS avg_fee,
+        COUNT(*)                    AS return_cnt
+    FROM store_returns sr
+    JOIN date_dim d_ret        ON sr.sr_returned_date_sk = d_ret.d_date_sk
+    JOIN time_dim t            ON sr.sr_return_time_sk   = t.t_time_sk
+    JOIN customer c            ON sr.sr_customer_sk      = c.c_customer_sk
+    JOIN customer_demographics cd ON sr.sr_cdemo_sk        = cd.cd_demo_sk
+    JOIN customer_address ca   ON sr.sr_addr_sk          = ca.ca_address_sk
+    JOIN store s               ON sr.sr_store_sk         = s.s_store_sk
+    JOIN catalog_page cp       ON cp.cp_end_date_sk     = d_ret.d_date_sk
+    WHERE
+        s.s_state = 'CA'
+        AND d_ret.d_year BETWEEN 2000 AND 2002
+        AND t.t_hour BETWEEN 8 AND 20
+        AND ca.ca_county LIKE '%County'
+        AND cp.cp_department = 'Electronics'
+        AND sr.sr_refunded_cash > 0
+    GROUP BY
+        s.s_store_id,
+        d_ret.d_year,
+        cd.cd_gender,
+        cp.cp_department
 )
-SELECT DISTINCT
-    cp.c_customer_id,
-    cp.d_year,
-    cp.channel,
-    cp.total_return_amount,
-    cp.distinct_items_returned,
-    cp.avg_return_amount
-FROM catalog_part cp
-UNION ALL
-SELECT DISTINCT
-    wp.c_customer_id,
-    wp.d_year,
-    wp.channel,
-    wp.total_return_amount,
-    wp.distinct_items_returned,
-    wp.avg_return_amount
-FROM web_part wp
-ORDER BY total_return_amount DESC
+SELECT
+    store_id,
+    year,
+    SUM(total_net_loss)        AS store_year_net_loss,
+    SUM(total_refunded_cash)   AS store_year_refunded_cash,
+    SUM(return_cnt)            AS total_returns,
+    AVG(avg_fee)               AS avg_fee_over_groups
+FROM agg_returns
+GROUP BY store_id, year
+HAVING
+    SUM(total_net_loss) > 10000
+    AND SUM(return_cnt)   > 50
+ORDER BY store_year_net_loss DESC
 LIMIT 100

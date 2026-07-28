@@ -1,43 +1,97 @@
-WITH sales_enriched AS (
+WITH cte_a AS (
     SELECT
-        ws.ws_sold_date_sk,
-        ws.ws_sold_time_sk,
-        ws.ws_promo_sk,
-        ws.ws_quantity,
-        ws.ws_sales_price,
-        ws.ws_net_paid,
+        cp.cp_catalog_page_id,
+        d.d_year,
+        cr.cr_return_amount,
+        cr.cr_net_loss,
+        ws.ws_ext_tax,
         ws.ws_net_profit,
-        ws.ws_order_number,
-        t.t_hour,
-        t.t_meal_time,
-        p.p_promo_name,
-        p.p_channel_event,
-        p.p_channel_demo
-    FROM web_sales ws
+        ws.ws_ext_ship_cost
+    FROM catalog_page cp
+    JOIN catalog_returns cr
+        ON cp.cp_catalog_page_sk = cr.cr_catalog_page_sk
+    JOIN date_dim d
+        ON cr.cr_returned_date_sk = d.d_date_sk
     JOIN time_dim t
-        ON ws.ws_sold_time_sk = t.t_time_sk
-    JOIN promotion p
-        ON ws.ws_promo_sk = p.p_promo_sk
-    WHERE p.p_channel_event = 'N'
-      AND p.p_channel_demo = 'N'
-      AND t.t_hour BETWEEN 8 AND 20
-      AND t.t_meal_time = 'Lunch'
-      AND ws.ws_sales_price > 20
-      AND ws.ws_quantity >= 2
+        ON cr.cr_returned_time_sk = t.t_time_sk
+    JOIN household_demographics hd
+        ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
+    JOIN inventory i
+        ON i.inv_date_sk = d.d_date_sk
+    JOIN web_sales ws
+        ON ws.ws_sold_date_sk = d.d_date_sk
+           AND ws.ws_sold_time_sk = t.t_time_sk
+    WHERE d.d_year = 2001
+      AND ws.ws_ext_tax > 40
+      AND hd.hd_vehicle_count >= 2
+),
+cte_b AS (
+    SELECT
+        cp.cp_catalog_page_id,
+        d.d_year,
+        cr.cr_return_amount,
+        cr.cr_net_loss,
+        ws.ws_ext_tax,
+        ws.ws_net_profit,
+        ws.ws_ext_ship_cost
+    FROM catalog_page cp
+    JOIN catalog_returns cr
+        ON cp.cp_catalog_page_sk = cr.cr_catalog_page_sk
+    JOIN date_dim d
+        ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN time_dim t
+        ON cr.cr_returned_time_sk = t.t_time_sk
+    JOIN household_demographics hd
+        ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
+    JOIN inventory i
+        ON i.inv_date_sk = d.d_date_sk
+    JOIN web_sales ws
+        ON ws.ws_sold_date_sk = d.d_date_sk
+           AND ws.ws_sold_time_sk = t.t_time_sk
+    WHERE d.d_year = 2002
+      AND ws.ws_ext_tax BETWEEN 10 AND 30
+      AND hd.hd_vehicle_count = 1
+),
+combined AS (
+    SELECT
+        cp_catalog_page_id,
+        d_year,
+        cr_return_amount,
+        cr_net_loss,
+        ws_ext_tax,
+        ws_net_profit,
+        ws_ext_ship_cost
+    FROM cte_a
+    UNION ALL
+    SELECT
+        cp_catalog_page_id,
+        d_year,
+        cr_return_amount,
+        cr_net_loss,
+        ws_ext_tax,
+        ws_net_profit,
+        ws_ext_ship_cost
+    FROM cte_b
+),
+aggregated AS (
+    SELECT
+        cp_catalog_page_id,
+        d_year,
+        SUM(cr_return_amount) AS total_return_amount,
+        SUM(ws_net_profit) AS total_net_profit,
+        SUM(cr_net_loss) AS total_net_loss,
+        SUM(ws_ext_tax) AS total_ext_tax,
+        SUM(ws_ext_ship_cost) AS total_ship_cost
+    FROM combined
+    GROUP BY cp_catalog_page_id, d_year
 )
 SELECT
-    p_promo_name,
-    t_hour,
-    t_meal_time,
-    COUNT(DISTINCT ws_order_number) AS orders,
-    SUM(ws_quantity) AS total_quantity,
-    SUM(ws_net_paid) AS total_net_paid,
-    AVG(ws_sales_price) AS avg_sales_price,
-    CASE
-        WHEN SUM(ws_net_profit) > 0 THEN 'PROFIT'
-        ELSE 'LOSS'
-    END AS profit_status
-FROM sales_enriched
-GROUP BY p_promo_name, t_hour, t_meal_time
-ORDER BY total_net_paid DESC
+    cp_catalog_page_id,
+    d_year,
+    total_return_amount,
+    total_net_profit,
+    CASE WHEN total_net_loss > 150 THEN 'HIGH' ELSE 'LOW' END AS loss_category,
+    RANK() OVER (PARTITION BY d_year ORDER BY total_net_profit DESC) AS profit_rank
+FROM aggregated
+ORDER BY d_year, profit_rank
 LIMIT 100

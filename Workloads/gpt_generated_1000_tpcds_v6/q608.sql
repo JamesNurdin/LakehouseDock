@@ -1,47 +1,41 @@
-WITH demo_sales AS (
+WITH sales_agg AS (
     SELECT
-        cd.cd_demo_sk,
-        cd.cd_gender,
-        cd.cd_credit_rating,
-        CONCAT(cd.cd_gender, '-', cd.cd_credit_rating) AS gender_rating_key,
+        i.i_category AS category,
+        i.i_class AS class,
+        i.i_manufact AS manufact,
+        hd.hd_income_band_sk AS income_band_sk,
+        ib.ib_lower_bound AS lower_bound,
+        ib.ib_upper_bound AS upper_bound,
         SUM(ss.ss_ext_sales_price) AS total_sales,
-        COUNT(*) AS txn_cnt,
-        AVG(ss.ss_sales_price) AS avg_price,
-        MAX(ss.ss_sales_price) AS max_price
+        AVG(ss.ss_net_profit) AS avg_profit,
+        COUNT(*) AS sales_cnt,
+        SUM(ss.ss_quantity) AS total_quantity
     FROM store_sales ss
-    JOIN customer_demographics cd
-      ON ss.ss_cdemo_sk = cd.cd_demo_sk
-    WHERE REGEXP_LIKE(cd.cd_credit_rating, '(?i)good|high risk')
-      AND cd.cd_gender LIKE 'F%'
-      AND REGEXP_EXTRACT(cd.cd_credit_rating, '(\\w+)') <> ''
-    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_credit_rating
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk
+    WHERE hd.hd_dep_count BETWEEN 2 AND 5
+      AND hd.hd_buy_potential = '5001-10000'
+      AND i.i_manufact = 'callyeingeing'
+      AND i.i_class_id IN (1, 6, 10)
+      AND inv.inv_quantity_on_hand > 800
+    GROUP BY i.i_category, i.i_class, i.i_manufact, hd.hd_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+    HAVING SUM(ss.ss_ext_sales_price) > 20000
 )
 SELECT
-    ds.cd_demo_sk,
-    ds.gender_rating_key,
-    ds.total_sales,
-    ds.txn_cnt,
-    ds.avg_price,
-    ds.max_price,
-    CASE
-        WHEN ds.total_sales >= 20000 THEN 'Platinum'
-        WHEN ds.total_sales >= 10000 THEN 'Gold'
-        ELSE 'Silver'
-    END AS tier,
-    (
-        SELECT COUNT(*)
-        FROM store_sales ss2
-        WHERE ss2.ss_cdemo_sk = ds.cd_demo_sk
-          AND ss2.ss_sales_price > 50
-          AND ss2.ss_list_price < 200
-    ) AS high_price_txn_cnt
-FROM demo_sales ds
-WHERE ds.txn_cnt >= 3
-  AND EXISTS (
-        SELECT 1
-        FROM customer_demographics cd2
-        WHERE cd2.cd_demo_sk = ds.cd_demo_sk
-          AND cd2.cd_education_status LIKE '%College%'
-    )
-ORDER BY ds.total_sales DESC, ds.cd_demo_sk
+    category,
+    class,
+    manufact,
+    income_band_sk,
+    lower_bound,
+    upper_bound,
+    total_sales,
+    avg_profit,
+    sales_cnt,
+    total_quantity,
+    SUM(total_sales) OVER (PARTITION BY category ORDER BY total_sales DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_sales_by_category,
+    RANK() OVER (ORDER BY total_sales DESC) AS sales_rank
+FROM sales_agg
+ORDER BY total_sales DESC
 LIMIT 100

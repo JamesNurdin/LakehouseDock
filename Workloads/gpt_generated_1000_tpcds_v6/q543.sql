@@ -1,35 +1,37 @@
-WITH filtered_items AS (
-    SELECT i_item_sk,
-           i_product_name,
-           i_item_desc,
-           regexp_extract(i_item_desc, '(\\w+)', 1) AS first_word
-    FROM item
-    WHERE regexp_like(i_item_desc, '^\\w{4,}\\s')
+WITH reason_agg AS (
+    SELECT
+        r.r_reason_desc,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        SUM(cr.cr_fee) AS total_fee,
+        COUNT(*) AS return_cnt,
+        CASE
+            WHEN SUM(cr.cr_net_loss) > 1000 THEN 'HighLoss'
+            ELSE 'LowLoss'
+        END AS loss_category
+    FROM tpcds.catalog_returns cr
+    JOIN tpcds.reason r
+        ON cr.cr_reason_sk = r.r_reason_sk
+    WHERE cr.cr_fee > 20
+        AND cr.cr_return_amount BETWEEN 10 AND 500
+        AND r.r_reason_id IN ('AAAAAAAAFAAAAAAA', 'AAAAAAAACAAAAAAA')
+        AND EXISTS (
+            SELECT 1
+            FROM tpcds.household_demographics hd
+            WHERE hd.hd_demo_sk = cr.cr_refunded_hdemo_sk
+              AND hd.hd_dep_count >= 4
+              AND hd.hd_buy_potential = '>10000'
+        )
+    GROUP BY r.r_reason_desc
 )
 SELECT
-    d.d_year,
-    d.d_month_seq AS month_seq,
-    s.s_store_name,
-    CONCAT(s.s_store_name, ' - ', SUBSTRING(ca.ca_city, 1, 3)) AS store_city_code,
-    COUNT(sr.sr_ticket_number) AS total_returns,
-    SUM(sr.sr_return_amt) AS total_return_amount,
-    AVG(sr.sr_return_amt) AS avg_return_amount,
-    (
-        SELECT AVG(sr2.sr_return_amt)
-        FROM store_returns sr2
-        JOIN date_dim d2 ON sr2.sr_returned_date_sk = d2.d_date_sk
-        WHERE d2.d_year = d.d_year
-          AND d2.d_month_seq = d.d_month_seq
-    ) AS avg_monthly_return_amount,
-    SUM(CASE WHEN regexp_like(ca.ca_city, '.*County$') THEN 1 ELSE 0 END) AS returns_in_county_cities
-FROM store_returns sr
-JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
-JOIN filtered_items fi ON sr.sr_item_sk = fi.i_item_sk
-JOIN store s ON sr.sr_store_sk = s.s_store_sk
-JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
-WHERE d.d_year = 2001
-  AND s.s_state = 'CA'
-  AND ca.ca_city LIKE '%County'
-GROUP BY d.d_year, d.d_month_seq, s.s_store_name, CONCAT(s.s_store_name, ' - ', SUBSTRING(ca.ca_city, 1, 3))
-ORDER BY total_return_amount DESC
-LIMIT 10
+    ra.r_reason_desc,
+    ra.total_return_amount,
+    ra.total_fee,
+    ra.return_cnt,
+    ra.loss_category,
+    ROW_NUMBER() OVER (ORDER BY ra.total_return_amount DESC) AS revenue_rank,
+    AVG(ra.total_fee) OVER () AS avg_fee_all_reasons
+FROM reason_agg ra
+WHERE ra.return_cnt >= 5
+ORDER BY ra.total_return_amount DESC
+LIMIT 100

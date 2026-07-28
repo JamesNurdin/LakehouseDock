@@ -1,58 +1,48 @@
-WITH base AS (
+WITH sales_enhanced AS (
     SELECT
-        s.s_store_id,
-        s.s_manager,
-        d.d_year,
-        d.d_month_seq,
-        cp.cp_department,
-        cp.cp_type,
-        SUM(cs.cs_net_paid) AS total_net_paid,
-        AVG(ss.ss_sales_price) AS avg_store_sales_price,
-        COUNT(DISTINCT cs.cs_order_number) AS orders_cnt,
-        MIN(i.inv_quantity_on_hand) AS min_inventory,
-        MAX(cs.cs_ext_ship_cost) AS max_ship_cost
-    FROM catalog_sales cs
-    JOIN catalog_page cp
-        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN date_dim d
-        ON cs.cs_sold_date_sk = d.d_date_sk
-    JOIN store_sales ss
-        ON ss.ss_sold_date_sk = d.d_date_sk
-    JOIN store s
-        ON ss.ss_store_sk = s.s_store_sk
-    JOIN inventory i
-        ON i.inv_date_sk = d.d_date_sk
-    WHERE d.d_year = 2001
-      AND s.s_manager = 'John Mccoy'
-      AND cp.cp_type = 'PROMO'
-      AND i.inv_quantity_on_hand > 0
-    GROUP BY
-        s.s_store_id,
-        s.s_manager,
-        d.d_year,
-        d.d_month_seq,
-        cp.cp_department,
-        cp.cp_type
+        ws.ws_sold_date_sk,
+        ws.ws_ship_date_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_list_price,
+        ws.ws_ext_sales_price,
+        ws.ws_net_profit,
+        ws.ws_net_paid,
+        d_sold.d_year,
+        d_sold.d_month_seq,
+        d_ship.d_month_seq AS ship_month_seq,
+        d_sold.d_quarter_name,
+        CASE WHEN ws.ws_net_profit > 0 THEN 'POS' ELSE 'NEG' END AS profit_flag
+    FROM web_sales ws
+    JOIN date_dim d_sold
+        ON ws.ws_sold_date_sk = d_sold.d_date_sk
+    JOIN date_dim d_ship
+        ON ws.ws_ship_date_sk = d_ship.d_date_sk
+    WHERE d_sold.d_year BETWEEN 1999 AND 2002
+      AND d_sold.d_current_quarter = 'Y'
+      AND ws.ws_quantity >= 2
+      AND ws.ws_list_price BETWEEN 20 AND 100
 )
 SELECT
-    b.s_store_id,
-    b.s_manager,
-    b.d_year,
-    b.d_month_seq,
-    b.cp_department,
-    b.cp_type,
-    b.total_net_paid,
-    b.avg_store_sales_price,
-    b.orders_cnt,
-    b.min_inventory,
-    b.max_ship_cost,
-    SUM(b.total_net_paid) OVER (PARTITION BY b.s_store_id ORDER BY b.d_month_seq ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_net_paid,
-    (
-        SELECT AVG(cs2.cs_wholesale_cost)
-        FROM catalog_sales cs2
-        JOIN date_dim d2 ON cs2.cs_sold_date_sk = d2.d_date_sk
-        WHERE d2.d_year = 2001
-    ) AS avg_wholesale_cost_2001
-FROM base b
-ORDER BY b.s_store_id, b.d_month_seq
+    ws_enh.ws_sold_date_sk,
+    ws_enh.ws_ship_date_sk,
+    ws_enh.ws_order_number,
+    ws_enh.ws_quantity,
+    ws_enh.ws_list_price,
+    ws_enh.ws_ext_sales_price,
+    ws_enh.ws_net_profit,
+    ws_enh.ws_net_paid,
+    ws_enh.d_year,
+    ws_enh.d_month_seq,
+    ws_enh.ship_month_seq,
+    ws_enh.d_quarter_name,
+    ws_enh.profit_flag,
+    RANK() OVER (PARTITION BY ws_enh.d_year ORDER BY ws_enh.ws_net_profit DESC) AS profit_rank_year,
+    SUM(ws_enh.ws_ext_sales_price) OVER (
+        PARTITION BY ws_enh.d_year
+        ORDER BY ws_enh.ws_sold_date_sk
+        ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+    ) AS rolling_7day_sales
+FROM sales_enhanced ws_enh
+ORDER BY ws_enh.d_year DESC, profit_rank_year ASC
 LIMIT 100

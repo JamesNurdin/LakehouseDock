@@ -1,45 +1,61 @@
-WITH customer_losses AS (
+WITH sr_agg AS (
     SELECT
-        c.c_customer_sk,
-        c.c_customer_id,
-        c.c_birth_country,
-        c.c_preferred_cust_flag,
-        SUM(COALESCE(sr.sr_net_loss, 0)) AS store_net_loss,
-        SUM(COALESCE(wr.wr_net_loss, 0)) AS web_net_loss,
-        SUM(COALESCE(sr.sr_net_loss, 0) + COALESCE(wr.wr_net_loss, 0)) AS total_net_loss,
-        COUNT(DISTINCT sr.sr_ticket_number) AS distinct_store_tickets,
-        COUNT(DISTINCT wr.wr_order_number) AS distinct_web_orders
-    FROM tpcds.customer c
-    LEFT JOIN tpcds.store_returns sr
-        ON sr.sr_customer_sk = c.c_customer_sk
-    LEFT JOIN tpcds.web_returns wr
-        ON wr.wr_refunded_customer_sk = c.c_customer_sk
-    WHERE c.c_birth_country = 'KOREA'
-      AND c.c_preferred_cust_flag = 'Y'
-      AND sr.sr_return_tax > 20
-      AND wr.wr_return_amt > 100
-    GROUP BY
-        c.c_customer_sk,
-        c.c_customer_id,
-        c.c_birth_country,
-        c.c_preferred_cust_flag
+        sr_cdemo_sk,
+        SUM(sr_return_amt) AS total_return_amt,
+        SUM(sr_return_quantity) AS total_return_qty,
+        COUNT(DISTINCT sr_ticket_number) AS distinct_tickets
+    FROM store_returns
+    WHERE sr_return_amt > 20.00
+      AND sr_return_quantity >= 1
+      AND sr_return_ship_cost < 1000.00
+      AND sr_fee BETWEEN 0 AND 500
+      AND sr_refunded_cash > 0
+      AND sr_net_loss > 0
+    GROUP BY sr_cdemo_sk
+),
+ws_agg AS (
+    SELECT
+        ws_warehouse_sk,
+        ws_bill_cdemo_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws_order_number) AS distinct_orders
+    FROM web_sales
+    WHERE ws_quantity > 0
+      AND ws_sales_price > 0
+      AND ws_ext_discount_amt < 100.00
+      AND ws_ext_tax > 0
+      AND ws_coupon_amt >= 0
+      AND ws_ship_mode_sk IN (1, 2, 3)
+    GROUP BY ws_warehouse_sk, ws_bill_cdemo_sk
 )
 SELECT
-    cl.c_customer_id,
-    cl.c_birth_country,
-    cl.c_preferred_cust_flag,
-    cl.store_net_loss,
-    cl.web_net_loss,
-    cl.total_net_loss,
-    cl.distinct_store_tickets,
-    cl.distinct_web_orders,
-    RANK() OVER (ORDER BY cl.total_net_loss DESC) AS loss_rank,
-    CASE
-        WHEN cl.total_net_loss > 5000 THEN 'HIGH'
-        WHEN cl.total_net_loss > 1000 THEN 'MEDIUM'
-        ELSE 'LOW'
-    END AS loss_category
-FROM customer_losses cl
-WHERE cl.total_net_loss > 0
-ORDER BY loss_rank
-LIMIT 100
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_education_status,
+    sr.total_return_amt,
+    sr.total_return_qty,
+    sr.distinct_tickets,
+    ws.total_sales,
+    ws.total_profit,
+    ws.distinct_orders,
+    w.w_warehouse_name,
+    w.w_city,
+    w.w_state,
+    w.w_warehouse_sq_ft
+FROM customer_demographics cd
+JOIN sr_agg sr
+    ON sr.sr_cdemo_sk = cd.cd_demo_sk
+JOIN ws_agg ws
+    ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+JOIN warehouse w
+    ON ws.ws_warehouse_sk = w.w_warehouse_sk
+WHERE cd.cd_dep_count >= 2
+  AND cd.cd_dep_employed_count <= 5
+  AND cd.cd_credit_rating IN ('A', 'B', 'C')
+  AND w.w_city = 'Seattle'
+  AND w.w_state = 'CA'
+  AND w.w_warehouse_sq_ft > 800000
+  AND w.w_warehouse_name IS NOT NULL
+ORDER BY cd.cd_demo_sk

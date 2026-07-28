@@ -1,40 +1,38 @@
-WITH filtered AS (
+WITH sales AS (
     SELECT
-        cr.cr_returned_date_sk,
-        cr.cr_returned_time_sk,
-        cr.cr_item_sk,
-        cr.cr_refunded_customer_sk,
-        cr.cr_return_quantity,
-        cr.cr_net_loss,
-        cr.cr_order_number,
-        i.i_manufact,
-        i.i_item_desc,
-        i.i_color,
+        i.i_item_id,
         i.i_product_name,
-        c.c_salutation,
-        t.t_am_pm,
-        i.i_color AS i_color_original
-    FROM catalog_returns cr
-    JOIN item i
-        ON cr.cr_item_sk = i.i_item_sk
-    JOIN customer c
-        ON cr.cr_refunded_customer_sk = c.c_customer_sk
-    JOIN time_dim t
-        ON cr.cr_returned_time_sk = t.t_time_sk
-    WHERE regexp_like(i.i_item_desc, '\\bre\\w+')
-      AND c.c_salutation LIKE 'Mr.%'
-      AND t.t_am_pm = 'PM'
-      AND concat('ORD', CAST(cr.cr_order_number AS varchar)) LIKE 'ORD5%'
-      AND substring(i.i_product_name, 1, 3) = 'Pro'
+        SUM(cs.cs_ext_sales_price) AS total_sales,
+        SUM(cs.cs_quantity) AS units_sold,
+        CAST(NULL AS decimal(7,2)) AS total_returns,
+        CAST(NULL AS integer) AS units_returned,
+        'catalog' AS channel
+    FROM catalog_sales cs
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    WHERE p.p_discount_active = 'Y'
+      AND cs.cs_sold_date_sk BETWEEN 2450000 AND 2450100
+    GROUP BY i.i_item_id, i.i_product_name
+),
+returns AS (
+    SELECT
+        i.i_item_id,
+        i.i_product_name,
+        CAST(NULL AS decimal(7,2)) AS total_sales,
+        CAST(NULL AS integer) AS units_sold,
+        SUM(sr.sr_return_amt) AS total_returns,
+        SUM(sr.sr_return_quantity) AS units_returned,
+        'store' AS channel
+    FROM store_returns sr
+    JOIN item i ON sr.sr_item_sk = i.i_item_sk
+    JOIN store s ON sr.sr_store_sk = s.s_store_sk
+    WHERE s.s_state = 'California'
+    GROUP BY i.i_item_id, i.i_product_name
 )
-SELECT
-    i_manufact,
-    regexp_extract(i_color_original, '([a-z]+)', 1) AS color,
-    SUM(cr_net_loss) AS total_net_loss,
-    COUNT(*) AS return_cnt
-FROM filtered
-GROUP BY
-    i_manufact,
-    regexp_extract(i_color_original, '([a-z]+)', 1)
-ORDER BY total_net_loss DESC
+SELECT *
+FROM sales
+UNION ALL
+SELECT *
+FROM returns
+ORDER BY total_sales DESC NULLS LAST, total_returns DESC NULLS LAST
 LIMIT 100

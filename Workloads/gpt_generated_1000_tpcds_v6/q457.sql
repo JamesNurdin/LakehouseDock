@@ -1,45 +1,63 @@
-/*
-Goal: Analyze sales performance by brand and customer demographic, focusing on high‑value items sold at a specific store price point and filtered by color, size, manager, and customer attributes. The query joins the fact table store_sales with item and customer_demographics, applies multiple realistic predicates, uses a scalar subquery, counts distinct customers, and orders by total sales.
-*/
-WITH brand_avg_price AS (
-    SELECT i_brand,
-           AVG(i_current_price) AS avg_price
-    FROM item
-    WHERE i_manager_id IN (4, 23, 40)
-    GROUP BY i_brand
+WITH recent_dates AS (
+    SELECT d_date_sk, d_year, d_month_seq
+    FROM date_dim
+    WHERE d_year = 2001
 )
 SELECT
-    i.i_brand,
-    cd.cd_gender,
-    cd.cd_marital_status,
-    SUM(ss.ss_ext_sales_price)               AS total_sales,
-    AVG(ss.ss_net_profit)                    AS avg_profit,
-    COUNT(DISTINCT ss.ss_customer_sk)        AS unique_customers,
-    MAX(ss.ss_ext_sales_price)               AS max_sale,
-    MIN(ss.ss_ext_sales_price)               AS min_sale
-FROM store_sales ss
+    s.s_store_name,
+    cp.cp_description,
+    rd.d_year,
+    SUM(ss.ss_net_profit) AS store_sales_profit,
+    SUM(cs.cs_net_profit) AS catalog_sales_profit,
+    SUM(CASE WHEN cr.cr_return_amount IS NOT NULL THEN cr.cr_return_amount ELSE 0 END) AS total_catalog_return,
+    COUNT(DISTINCT ss.ss_ticket_number) AS store_sales_orders,
+    CASE
+        WHEN SUM(ss.ss_net_profit) + SUM(cs.cs_net_profit) - COALESCE(SUM(cr.cr_return_amount), 0) > 0 THEN 'Profit'
+        ELSE 'Loss'
+    END AS overall_status
+FROM recent_dates rd
+JOIN store_sales ss
+    ON ss.ss_sold_date_sk = rd.d_date_sk
+JOIN store s
+    ON s.s_store_sk = ss.ss_store_sk
 JOIN item i
-    ON ss.ss_item_sk = i.i_item_sk
-JOIN customer_demographics cd
-    ON ss.ss_cdemo_sk = cd.cd_demo_sk
-JOIN brand_avg_price bap
-    ON i.i_brand = bap.i_brand
-WHERE
-    i.i_color IN ('red', 'purple', 'turquoise')
-    AND i.i_size = 'large'
-    AND i.i_manager_id = 23
-    AND cd.cd_gender = 'M'
-    AND cd.cd_marital_status = 'M'
-    AND cd.cd_purchase_estimate >= 2000
-    AND ss.ss_wholesale_cost > 10.00
-    AND ss.ss_ext_sales_price > (
-        SELECT AVG(ss2.ss_ext_sales_price)
-        FROM store_sales ss2
-        WHERE ss2.ss_item_sk = ss.ss_item_sk
-    )
+    ON i.i_item_sk = ss.ss_item_sk
+JOIN catalog_sales cs
+    ON cs.cs_sold_date_sk = rd.d_date_sk
+    AND cs.cs_item_sk = i.i_item_sk
+JOIN catalog_page cp
+    ON cp.cp_catalog_page_sk = cs.cs_catalog_page_sk
+JOIN call_center cc
+    ON cc.cc_call_center_sk = cs.cs_call_center_sk
+JOIN ship_mode sm
+    ON sm.sm_ship_mode_sk = cs.cs_ship_mode_sk
+LEFT JOIN catalog_returns cr
+    ON cr.cr_order_number = cs.cs_order_number
+    AND cr.cr_item_sk = i.i_item_sk
+    AND cr.cr_returned_date_sk = rd.d_date_sk
+LEFT JOIN call_center cc2
+    ON cc2.cc_call_center_sk = cr.cr_call_center_sk
+LEFT JOIN (
+    SELECT inv_item_sk, inv_date_sk, inv_quantity_on_hand
+    FROM inventory
+    WHERE inv_quantity_on_hand > 800
+) inv
+    ON inv.inv_item_sk = i.i_item_sk
+    AND inv.inv_date_sk = rd.d_date_sk
+LEFT JOIN web_returns wr
+    ON wr.wr_item_sk = i.i_item_sk
+    AND wr.wr_returned_date_sk = rd.d_date_sk
+WHERE EXISTS (
+    SELECT 1 FROM ship_mode sm2
+    WHERE sm2.sm_carrier = sm.sm_carrier
+      AND sm2.sm_code = sm.sm_code
+      AND sm2.sm_ship_mode_id <> sm.sm_ship_mode_id
+)
 GROUP BY
-    i.i_brand,
-    cd.cd_gender,
-    cd.cd_marital_status
-ORDER BY total_sales DESC
+    s.s_store_name,
+    cp.cp_description,
+    rd.d_year
+ORDER BY
+    overall_status DESC,
+    store_sales_profit DESC
 LIMIT 100

@@ -1,30 +1,31 @@
-WITH agg AS (
-  SELECT
-    wp.wp_type,
-    dr_return.d_month_seq,
-    SUM(wr.wr_return_amt) AS total_return_amt,
-    AVG(wr.wr_return_ship_cost) AS avg_ship_cost,
-    COUNT(*) AS return_cnt
-  FROM web_returns wr
-  JOIN date_dim dr_return ON wr.wr_returned_date_sk = dr_return.d_date_sk
-  JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-  JOIN date_dim dr_creation ON wp.wp_creation_date_sk = dr_creation.d_date_sk
-  WHERE dr_return.d_year = 2001
-    AND dr_return.d_month_seq BETWEEN 1200 AND 1220
-    AND wp.wp_type IN ('A', 'B', 'C')
-    AND wp.wp_image_count >= 2
-    AND wp.wp_char_count BETWEEN 1000 AND 6000
-    AND wr.wr_return_amt > 100
-    AND wr.wr_return_ship_cost < 500
-    AND dr_creation.d_day_name = 'Monday'
-  GROUP BY ROLLUP (wp.wp_type, dr_return.d_month_seq)
+WITH sales_by_state AS (
+    SELECT
+        ca.ca_state AS state,
+        COUNT(DISTINCT ws.ws_order_number) AS orders,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        CASE WHEN SUM(ws.ws_ext_sales_price) > 100000 THEN 'HIGH' ELSE 'NORMAL' END AS sales_category
+    FROM tpcds.web_sales ws
+    INNER JOIN tpcds.customer c
+        ON ws.ws_bill_customer_sk = c.c_customer_sk
+    INNER JOIN tpcds.customer_address ca
+        ON ws.ws_bill_addr_sk = ca.ca_address_sk
+    LEFT OUTER JOIN tpcds.customer_address ca_ship
+        ON ws.ws_ship_addr_sk = ca_ship.ca_address_sk
+    WHERE c.c_birth_month IN (1, 2, 3, 4)
+      AND c.c_birth_day BETWEEN 10 AND 28
+      AND ws.ws_wholesale_cost > 45.00
+      AND ws.ws_ship_cdemo_sk IS NOT NULL
+    GROUP BY ca.ca_state
 )
 SELECT
-  wp_type,
-  d_month_seq,
-  total_return_amt,
-  avg_ship_cost,
-  return_cnt,
-  RANK() OVER (PARTITION BY wp_type ORDER BY total_return_amt DESC) AS month_rank_by_return
-FROM agg
-ORDER BY wp_type, d_month_seq
+    sb.state,
+    sb.orders,
+    sb.total_sales,
+    sb.total_profit,
+    sb.sales_category,
+    ROUND(sb.total_profit / NULLIF(sb.total_sales, 0), 4) AS profit_margin
+FROM sales_by_state sb
+WHERE sb.total_sales > 50000
+ORDER BY profit_margin DESC
+LIMIT 100

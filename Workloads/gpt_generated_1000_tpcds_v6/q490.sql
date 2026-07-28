@@ -1,51 +1,44 @@
-WITH inventory_agg AS (
-    SELECT inv_warehouse_sk,
-           SUM(inv_quantity_on_hand) AS total_qty
-    FROM inventory
+WITH filtered_inventory AS (
+    SELECT
+        i.inv_warehouse_sk,
+        i.inv_quantity_on_hand,
+        w.w_state
+    FROM inventory i
+    JOIN warehouse w
+        ON i.inv_warehouse_sk = w.w_warehouse_sk
+    WHERE i.inv_date_sk = 2450829                     -- filter on a specific date surrogate key
+      AND i.inv_quantity_on_hand BETWEEN 10 AND 500   -- filter on realistic quantity range
+      AND w.w_city = 'Seattle'                        -- filter on a realistic city value
+      AND EXISTS (
+          SELECT 1
+          FROM warehouse w2
+          WHERE w2.w_warehouse_sk = i.inv_warehouse_sk
+            AND w2.w_suite_number = 'Suite 160'      -- semi‑join predicate using suite number
+      )
+),
+unioned AS (
+    SELECT inv_warehouse_sk, inv_quantity_on_hand, w_state
+    FROM filtered_inventory
+    WHERE w_state = 'CA'
+    UNION ALL
+    SELECT inv_warehouse_sk, inv_quantity_on_hand, w_state
+    FROM filtered_inventory
+    WHERE w_state = 'WA'
+),
+aggregated AS (
+    SELECT
+        inv_warehouse_sk,
+        SUM(inv_quantity_on_hand) AS total_qty,
+        AVG(inv_quantity_on_hand) AS avg_qty,
+        COUNT(*) AS cnt_rows
+    FROM unioned
     GROUP BY inv_warehouse_sk
 )
 SELECT
-    s.s_store_id,
-    cc.cc_name,
-    t.t_hour,
-    SUM(sr.sr_net_loss)               AS total_store_return_loss,
-    SUM(cr.cr_net_loss)               AS total_catalog_return_loss,
-    SUM(ss.ss_net_profit)             AS total_sales_profit,
-    CASE
-        WHEN SUM(sr.sr_net_loss) > 0 THEN 'StoreLoss'
-        WHEN SUM(cr.cr_net_loss) > 0 THEN 'CatalogLoss'
-        ELSE 'Profit'
-    END                               AS loss_category,
-    ia.total_qty                      AS warehouse_inventory_qty
-FROM store_sales ss
-JOIN time_dim t
-  ON ss.ss_sold_time_sk = t.t_time_sk
-JOIN household_demographics hd
-  ON ss.ss_hdemo_sk = hd.hd_demo_sk
-JOIN store s
-  ON ss.ss_store_sk = s.s_store_sk
-JOIN store_returns sr
-  ON sr.sr_ticket_number = ss.ss_ticket_number
- AND sr.sr_item_sk = ss.ss_item_sk
-JOIN catalog_returns cr
-  ON cr.cr_returned_time_sk = t.t_time_sk
- AND cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
-JOIN call_center cc
-  ON cr.cr_call_center_sk = cc.cc_call_center_sk
-JOIN warehouse w
-  ON cr.cr_warehouse_sk = w.w_warehouse_sk
-JOIN inventory_agg ia
-  ON ia.inv_warehouse_sk = w.w_warehouse_sk
-WHERE s.s_number_employees > 200
-  AND s.s_state = 'CA'
-  AND t.t_hour BETWEEN 9 AND 17
-  AND hd.hd_vehicle_count >= 1
-  AND cr.cr_return_amount > 100
-GROUP BY
-    s.s_store_id,
-    cc.cc_name,
-    t.t_hour,
-    ia.total_qty
-HAVING SUM(ss.ss_net_profit) > 1000
-ORDER BY total_sales_profit DESC
+    a.inv_warehouse_sk,
+    a.total_qty,
+    a.avg_qty,
+    a.cnt_rows
+FROM aggregated a
+ORDER BY a.total_qty DESC
 LIMIT 100

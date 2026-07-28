@@ -1,73 +1,107 @@
-WITH joined_data AS (
-    SELECT
-        cr.cr_return_amount,
-        cr.cr_return_quantity,
-        cr.cr_reason_sk,
-        r.r_reason_desc,
-        d.d_year,
-        d.d_quarter_seq,
-        cc.cc_name,
-        cp.cp_department,
-        inv.inv_quantity_on_hand,
-        sr.sr_return_amt,
-        sr.sr_return_quantity,
-        wp.wp_type,
-        ws.web_name
-    FROM catalog_returns cr
-    JOIN date_dim d
-      ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN reason r
-      ON cr.cr_reason_sk = r.r_reason_sk
-    JOIN call_center cc
-      ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    JOIN catalog_page cp
-      ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN inventory inv
-      ON inv.inv_date_sk = d.d_date_sk
-    LEFT JOIN store_returns sr
-      ON sr.sr_returned_date_sk = d.d_date_sk
-     AND sr.sr_reason_sk = r.r_reason_sk
-    LEFT JOIN web_page wp
-      ON wp.wp_creation_date_sk = d.d_date_sk
-    LEFT JOIN web_site ws
-      ON ws.web_open_date_sk = d.d_date_sk
-    WHERE d.d_year = 2001
-      AND cc.cc_state = 'CA'
-      AND r.r_reason_desc LIKE '%size%'
-      AND cp.cp_department = 'Electronics'
-      AND inv.inv_quantity_on_hand > 0
+WITH catalog_agg AS (
+  SELECT d.d_year,
+         d.d_month_seq,
+         SUM(cs.cs_ext_sales_price)            AS sales_amount,
+         COUNT(DISTINCT cs.cs_order_number)    AS metric_cnt
+  FROM   tpcds.date_dim d
+  JOIN   tpcds.catalog_sales cs ON cs.cs_sold_date_sk = d.d_date_sk
+  LEFT   JOIN tpcds.catalog_returns cr ON cr.cr_order_number = cs.cs_order_number
+                                      AND cr.cr_item_sk = cs.cs_item_sk
+  LEFT   JOIN tpcds.reason r ON r.r_reason_sk = cr.cr_reason_sk
+  LEFT   JOIN tpcds.ship_mode sm ON sm.sm_ship_mode_sk = cs.cs_ship_mode_sk
+  LEFT   JOIN tpcds.warehouse w ON w.w_warehouse_sk = cs.cs_warehouse_sk
+  LEFT   JOIN tpcds.inventory inv ON inv.inv_date_sk = d.d_date_sk
+  LEFT   JOIN tpcds.promotion p ON p.p_promo_sk = cs.cs_promo_sk
+  WHERE  d.d_year = 2001
+    AND  p.p_discount_active = 'Y'
+    AND  cs.cs_quantity > 0
+    AND  cs.cs_sales_price > 10
+    AND  cs.cs_ext_tax > 0
+    AND  sm.sm_type = 'AIR'
+    AND  w.w_state = 'CA'
+    AND  r.r_reason_desc LIKE '%late%'
+  GROUP BY d.d_year, d.d_month_seq
+  HAVING SUM(cs.cs_ext_sales_price) > 10000
 ),
-aggregated AS (
-    SELECT
-        r_reason_desc,
-        d_year,
-        d_quarter_seq,
-        SUM(cr_return_amount) AS sum_catalog_return_amount,
-        SUM(sr_return_amt) AS sum_store_return_amount,
-        SUM(inv_quantity_on_hand) AS sum_inventory_qty,
-        COUNT(DISTINCT web_name) AS distinct_web_sites
-    FROM joined_data
-    GROUP BY r_reason_desc, d_year, d_quarter_seq
-    HAVING SUM(cr_return_amount) > 1000
+store_agg AS (
+  SELECT d.d_year,
+         d.d_month_seq,
+         SUM(ss.ss_ext_sales_price)            AS sales_amount,
+         COUNT(DISTINCT ss.ss_ticket_number)   AS metric_cnt
+  FROM   tpcds.date_dim d
+  JOIN   tpcds.store_sales ss ON ss.ss_sold_date_sk = d.d_date_sk
+  LEFT   JOIN tpcds.store_returns sr ON sr.sr_returned_date_sk = d.d_date_sk
+                                      AND sr.sr_item_sk = ss.ss_item_sk
+                                      AND sr.sr_ticket_number = ss.ss_ticket_number
+  LEFT   JOIN tpcds.reason r ON r.r_reason_sk = sr.sr_reason_sk
+  LEFT   JOIN tpcds.ship_mode sm ON sm.sm_ship_mode_sk = ss.ss_promo_sk
+  LEFT   JOIN tpcds.warehouse w ON w.w_warehouse_sk = ss.ss_store_sk
+  LEFT   JOIN tpcds.inventory inv ON inv.inv_date_sk = d.d_date_sk
+  LEFT   JOIN tpcds.promotion p ON p.p_promo_sk = ss.ss_promo_sk
+  WHERE  d.d_year = 2001
+    AND  p.p_discount_active = 'Y'
+    AND  ss.ss_quantity > 0
+    AND  ss.ss_sales_price > 10
+    AND  ss.ss_ext_tax > 0
+    AND  sm.sm_type = 'AIR'
+    AND  w.w_state = 'CA'
+    AND  r.r_reason_desc LIKE '%late%'
+  GROUP BY d.d_year, d.d_month_seq
+  HAVING SUM(ss.ss_ext_sales_price) > 8000
+),
+web_agg AS (
+  SELECT d.d_year,
+         d.d_month_seq,
+         SUM(ws.ws_ext_sales_price)            AS sales_amount,
+         COUNT(DISTINCT ws.ws_order_number)    AS metric_cnt
+  FROM   tpcds.date_dim d
+  JOIN   tpcds.web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
+  LEFT   JOIN tpcds.web_returns wr ON wr.wr_returned_date_sk = d.d_date_sk
+                                      AND wr.wr_item_sk = ws.ws_item_sk
+                                      AND wr.wr_order_number = ws.ws_order_number
+  LEFT   JOIN tpcds.reason r ON r.r_reason_sk = wr.wr_reason_sk
+  LEFT   JOIN tpcds.ship_mode sm ON sm.sm_ship_mode_sk = ws.ws_ship_mode_sk
+  LEFT   JOIN tpcds.warehouse w ON w.w_warehouse_sk = ws.ws_warehouse_sk
+  LEFT   JOIN tpcds.inventory inv ON inv.inv_date_sk = d.d_date_sk
+  LEFT   JOIN tpcds.promotion p ON p.p_promo_sk = ws.ws_promo_sk
+  LEFT   JOIN tpcds.web_page wp ON wp.wp_web_page_sk = ws.ws_web_page_sk
+  LEFT   JOIN tpcds.web_site wsit ON wsit.web_site_sk = ws.ws_web_site_sk
+  WHERE  d.d_year = 2001
+    AND  p.p_discount_active = 'Y'
+    AND  ws.ws_quantity > 0
+    AND  ws.ws_sales_price > 10
+    AND  ws.ws_ext_tax > 0
+    AND  sm.sm_type = 'AIR'
+    AND  w.w_state = 'CA'
+    AND  r.r_reason_desc LIKE '%late%'
+  GROUP BY d.d_year, d.d_month_seq
+  HAVING SUM(ws.ws_ext_sales_price) > 9000
+),
+combined AS (
+  SELECT 'Catalog' AS channel, d_year, d_month_seq, sales_amount, metric_cnt
+  FROM   catalog_agg
+  UNION ALL
+  SELECT 'Store'   AS channel, d_year, d_month_seq, sales_amount, metric_cnt
+  FROM   store_agg
+  UNION ALL
+  SELECT 'Web'     AS channel, d_year, d_month_seq, sales_amount, metric_cnt
+  FROM   web_agg
+),
+ranked AS (
+  SELECT channel,
+         d_year,
+         d_month_seq,
+         sales_amount,
+         metric_cnt,
+         ROW_NUMBER() OVER (PARTITION BY channel ORDER BY sales_amount DESC) AS rn
+  FROM   combined
 )
-SELECT
-    a.r_reason_desc,
-    a.d_year,
-    a.d_quarter_seq,
-    a.sum_catalog_return_amount,
-    a.sum_store_return_amount,
-    a.sum_inventory_qty,
-    a.distinct_web_sites,
-    (a.sum_catalog_return_amount + a.sum_store_return_amount) / NULLIF(a.sum_inventory_qty, 0) AS return_per_inventory
-FROM aggregated a
-WHERE a.distinct_web_sites > (
-    SELECT COUNT(DISTINCT ws2.web_name)
-    FROM web_site ws2
-    WHERE ws2.web_open_date_sk = (
-        SELECT MAX(d2.d_date_sk)
-        FROM date_dim d2
-        WHERE d2.d_year = 2001
-    )
-)
-ORDER BY a.sum_catalog_return_amount DESC
-LIMIT 10
+SELECT channel,
+       d_year,
+       d_month_seq,
+       sales_amount,
+       metric_cnt
+FROM   ranked
+WHERE  rn <= 5
+ORDER BY channel, sales_amount DESC
+LIMIT 100

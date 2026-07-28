@@ -1,33 +1,42 @@
-WITH max_promo_cost AS (
-       SELECT MAX(p_cost) AS max_cost
-       FROM promotion
-       WHERE p_channel_event = 'N'
-   )
-SELECT
-       w.w_warehouse_name,
-       p.p_promo_name,
-       wp.wp_type,
-       SUM(ws.ws_net_paid_inc_ship_tax) AS total_net_paid,
-       AVG(ws.ws_quantity) AS avg_quantity,
-       COUNT(DISTINCT ws.ws_order_number) AS distinct_orders,
-       MAX(ws.ws_ext_list_price) AS max_list_price,
-       (
-           SELECT COUNT(*)
-           FROM promotion p2
-           WHERE p2.p_cost = max_promo_cost.max_cost
-       ) AS promo_with_max_cost_cnt
-FROM web_sales ws
-JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
-JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
-JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
-CROSS JOIN max_promo_cost
-WHERE wp.wp_link_count >= 10
-  AND wp.wp_rec_start_date >= DATE '1999-01-01'
-  AND p.p_channel_event = 'N'
-  AND ws.ws_quantity > 20
-GROUP BY w.w_warehouse_name,
-         p.p_promo_name,
-         wp.wp_type,
-         max_promo_cost.max_cost
-ORDER BY total_net_paid DESC
+WITH ws_agg AS (
+    SELECT
+        ws.ws_warehouse_sk,
+        COUNT(*) AS order_cnt,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        SUM(ws.ws_ext_ship_cost) AS total_ship_cost,
+        AVG(ws.ws_ext_ship_cost) AS avg_ship_cost
+    FROM web_sales ws
+    WHERE ws.ws_ship_date_sk BETWEEN 2452000 AND 2452400
+      AND ws.ws_ext_ship_cost > 100
+      AND ws.ws_quantity >= 1
+      AND ws.ws_net_profit IS NOT NULL
+    GROUP BY ws.ws_warehouse_sk
+)
+SELECT DISTINCT
+    w.w_warehouse_id,
+    w.w_city,
+    w.w_state,
+    agg.order_cnt,
+    agg.total_sales,
+    agg.total_profit,
+    agg.total_ship_cost,
+    CASE WHEN agg.total_profit > 50000 THEN 'HIGH' ELSE 'NORMAL' END AS profit_category,
+    RANK() OVER (PARTITION BY w.w_state ORDER BY agg.total_profit DESC) AS profit_state_rank,
+    ROW_NUMBER() OVER (ORDER BY agg.total_profit DESC) AS overall_rank
+FROM warehouse w
+JOIN ws_agg agg
+  ON agg.ws_warehouse_sk = w.w_warehouse_sk
+WHERE EXISTS (
+        SELECT 1
+        FROM warehouse w2
+        WHERE w2.w_warehouse_sk = w.w_warehouse_sk
+          AND w2.w_suite_number LIKE 'Suite %'
+          AND w2.w_gmt_offset >= -5.00
+          AND w2.w_gmt_offset <= 5.00
+          AND w2.w_city = w.w_city
+      )
+  AND w.w_state IN ('CA', 'TX', 'NY', 'WA')
+  AND w.w_city <> 'Unknown'
+ORDER BY agg.total_profit DESC
 LIMIT 100

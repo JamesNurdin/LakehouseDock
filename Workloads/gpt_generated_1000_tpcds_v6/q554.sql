@@ -1,43 +1,72 @@
-WITH avg_return_by_date AS (
-    SELECT d.d_date,
-           AVG(wr.wr_return_amt) AS avg_return_amt
-    FROM web_returns wr
-    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
-    WHERE d.d_year = 2002
-    GROUP BY d.d_date
+WITH base AS (
+  SELECT
+    s.s_store_id,
+    s.s_store_name,
+    i.i_brand,
+    i.i_category,
+    ss.ss_net_paid,
+    ss.ss_ticket_number,
+    sr.sr_net_loss,
+    p.p_cost,
+    inv.inv_quantity_on_hand,
+    r.r_reason_desc,
+    ca.ca_street_type,
+    ca.ca_gmt_offset,
+    i.i_current_price
+  FROM store_sales ss
+  JOIN item i ON ss.ss_item_sk = i.i_item_sk
+  JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+  JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+  JOIN store s ON ss.ss_store_sk = s.s_store_sk
+  JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+  JOIN store_returns sr ON sr.sr_ticket_number = ss.ss_ticket_number
+  JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk
+  JOIN catalog_returns cr ON cr.cr_item_sk = i.i_item_sk
+  JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
+  JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+  JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk AND cr.cr_reason_sk = r.r_reason_sk
+  WHERE ca.ca_street_type = 'Avenue'
+    AND ca.ca_gmt_offset = -5.00
+    AND r.r_reason_desc LIKE '%price%'
+    AND i.i_current_price > 20.00
+    AND EXISTS (
+      SELECT 1
+      FROM web_returns wr
+      WHERE wr.wr_item_sk = i.i_item_sk
+        AND wr.wr_reason_sk = r.r_reason_sk
+    )
+),
+agg AS (
+  SELECT
+    s_store_id,
+    s_store_name,
+    i_brand,
+    i_category,
+    SUM(ss_net_paid) AS total_sales,
+    SUM(sr_net_loss) AS total_return_loss,
+    COUNT(DISTINCT ss_ticket_number) AS num_transactions,
+    AVG(p_cost) AS avg_promo_cost,
+    MIN(inv_quantity_on_hand) AS min_inventory,
+    MAX(inv_quantity_on_hand) AS max_inventory
+  FROM base
+  GROUP BY
+    s_store_id,
+    s_store_name,
+    i_brand,
+    i_category
 )
 SELECT
-    c.c_customer_id,
-    d.d_date,
-    SUM(wr.wr_return_amt) AS total_return_amt,
-    CASE WHEN SUM(wr.wr_net_loss) > 1000 THEN 'High' ELSE 'Low' END AS loss_category,
-    (SELECT ad.avg_return_amt FROM avg_return_by_date ad WHERE ad.d_date = d.d_date) AS avg_return_on_date
-FROM web_returns wr
-JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
-JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
-WHERE c.c_preferred_cust_flag = 'Y'
-  AND d.d_month_seq BETWEEN 1200 AND 1211
-GROUP BY c.c_customer_id, d.d_date
-
-UNION ALL
-
-SELECT
-    c.c_customer_id,
-    d.d_date,
-    SUM(wr.wr_return_amt) AS total_return_amt,
-    CASE WHEN SUM(wr.wr_net_loss) > 1000 THEN 'High' ELSE 'Low' END AS loss_category,
-    (SELECT ad.avg_return_amt FROM avg_return_by_date ad WHERE ad.d_date = d.d_date) AS avg_return_on_date
-FROM web_returns wr
-JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
-JOIN customer c ON wr.wr_returning_customer_sk = c.c_customer_sk
-WHERE c.c_preferred_cust_flag = 'N'
-  AND EXISTS (
-        SELECT 1
-        FROM household_demographics hd
-        WHERE hd.hd_demo_sk = c.c_current_hdemo_sk
-          AND hd.hd_vehicle_count >= 2
-      )
-GROUP BY c.c_customer_id, d.d_date
-
-ORDER BY total_return_amt DESC
+  s_store_id,
+  s_store_name,
+  i_brand,
+  i_category,
+  total_sales,
+  total_return_loss,
+  num_transactions,
+  avg_promo_cost,
+  min_inventory,
+  max_inventory,
+  ROW_NUMBER() OVER (ORDER BY total_sales DESC) AS sales_rank
+FROM agg
+ORDER BY total_sales DESC
 LIMIT 100

@@ -1,34 +1,47 @@
-/*
-Goal: Identify high‑value customers by state and gender whose email address belongs to the example.com domain and whose login contains the substring "123". Summarize net paid sales, count distinct customers, and show a sample email domain.
-*/
-WITH customer_sales AS (
+WITH inv_avg AS (
     SELECT
-        c.c_customer_sk,
-        c.c_email_address,
-        c.c_login,
-        ca.ca_state,
-        cd.cd_gender,
-        cs.cs_net_paid,
-        REGEXP_EXTRACT(c.c_email_address, '@([^.]*)\\.', 1) AS email_domain
-    FROM catalog_sales cs
-    INNER JOIN customer c
-        ON cs.cs_bill_customer_sk = c.c_customer_sk
-    INNER JOIN customer_address ca
-        ON cs.cs_bill_addr_sk = ca.ca_address_sk
-    INNER JOIN customer_demographics cd
-        ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
-    WHERE REGEXP_LIKE(c.c_email_address, '^[A-Za-z0-9._%+-]+@example\\.com$')
-      AND c.c_login LIKE '%123%'
+        inv_item_sk,
+        inv_date_sk,
+        AVG(inv_quantity_on_hand) OVER (PARTITION BY inv_item_sk) AS avg_qty
+    FROM inventory
 )
 SELECT
-    ca_state AS state,
-    cd_gender AS gender,
-    COUNT(DISTINCT c_customer_sk) AS unique_customers,
-    SUM(cs_net_paid) AS total_net_paid,
-    AVG(cs_net_paid) AS avg_net_paid,
-    MIN(email_domain) AS sample_email_domain
-FROM customer_sales
-GROUP BY ca_state, cd_gender
-HAVING SUM(cs_net_paid) > 10000
-ORDER BY total_net_paid DESC
+    ws.ws_order_number,
+    d_sold.d_date AS sold_date,
+    d_ship.d_date AS ship_date,
+    s.s_store_id,
+    s.s_city,
+    w.w_warehouse_id,
+    ws.ws_net_paid_inc_ship_tax,
+    CASE
+        WHEN i.inv_quantity_on_hand > a.avg_qty THEN 'Above Avg'
+        ELSE 'Below Avg'
+    END AS inventory_level,
+    ROW_NUMBER() OVER (PARTITION BY s.s_store_id ORDER BY ws.ws_net_paid_inc_ship_tax DESC) AS rn_store_sales
+FROM web_sales ws
+JOIN date_dim d_sold
+  ON ws.ws_sold_date_sk = d_sold.d_date_sk
+JOIN date_dim d_ship
+  ON ws.ws_ship_date_sk = d_ship.d_date_sk
+JOIN warehouse w
+  ON ws.ws_warehouse_sk = w.w_warehouse_sk
+JOIN inventory i
+  ON i.inv_date_sk = d_ship.d_date_sk
+  AND i.inv_warehouse_sk = w.w_warehouse_sk
+JOIN inv_avg a
+  ON a.inv_item_sk = i.inv_item_sk
+  AND a.inv_date_sk = i.inv_date_sk
+JOIN store s
+  ON s.s_closed_date_sk = d_ship.d_date_sk
+WHERE d_sold.d_year = 2001
+  AND ws.ws_net_paid_inc_ship_tax > 1000
+  AND s.s_state = 'CA'
+  AND EXISTS (
+        SELECT 1
+        FROM store_returns sr
+        WHERE sr.sr_store_sk = s.s_store_sk
+          AND sr.sr_returned_date_sk = d_sold.d_date_sk
+          AND sr.sr_return_amt > 0
+      )
+ORDER BY ws.ws_net_paid_inc_ship_tax DESC
 LIMIT 100

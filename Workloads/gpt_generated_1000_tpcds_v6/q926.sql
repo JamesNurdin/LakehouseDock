@@ -1,41 +1,40 @@
-WITH sales_by_store_hour AS (
+WITH filtered_warehouses AS (
     SELECT
-        s.s_store_id AS store_id,
-        s.s_state AS state,
-        td.t_hour AS hour_of_day,
-        SUM(ss.ss_ext_sales_price) AS total_sales,
-        SUM(ss.ss_net_profit) AS total_profit,
-        COUNT(*) AS txn_count
-    FROM store_sales ss
-    JOIN store s
-        ON ss.ss_store_sk = s.s_store_sk
-    JOIN time_dim td
-        ON ss.ss_sold_time_sk = td.t_time_sk
-    JOIN customer_demographics cd
-        ON ss.ss_cdemo_sk = cd.cd_demo_sk
-    JOIN household_demographics hd
-        ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    JOIN income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    WHERE s.s_state = 'CA'
-      AND s.s_rec_start_date >= DATE '1999-01-01'
-      AND td.t_hour BETWEEN 9 AND 17
-      AND cd.cd_gender = 'M'
-      AND hd.hd_buy_potential = '>10000'
-    GROUP BY s.s_store_id, s.s_state, td.t_hour
+        w.w_warehouse_sk,
+        w.w_warehouse_name,
+        w.w_suite_number,
+        w.w_street_type,
+        w.w_city,
+        w.w_state,
+        CONCAT(w.w_city, ', ', w.w_state) AS location,
+        regexp_extract(w.w_warehouse_name, '^(\\w+)', 1) AS name_prefix
+    FROM warehouse w
+    WHERE regexp_like(w.w_suite_number, '^Suite [A-Z]$')
+      AND w.w_street_type LIKE '%Ave%'
 )
 SELECT
-    store_id,
-    state,
-    AVG(total_sales) AS avg_hourly_sales,
-    SUM(total_profit) AS total_profit,
-    COUNT(*) AS hours_with_sales
-FROM sales_by_store_hour
-WHERE total_sales > (
-    SELECT AVG(ss_ext_sales_price)
-    FROM store_sales
+    fw.w_warehouse_sk,
+    fw.location,
+    fw.name_prefix,
+    COUNT(DISTINCT cs.cs_order_number) AS distinct_orders,
+    SUM(cs.cs_net_profit) AS total_net_profit,
+    SUM(cr.cr_net_loss) AS total_return_loss
+FROM filtered_warehouses fw
+JOIN catalog_sales cs
+    ON cs.cs_warehouse_sk = fw.w_warehouse_sk
+JOIN catalog_returns cr
+    ON cr.cr_warehouse_sk = fw.w_warehouse_sk
+   AND cr.cr_order_number = cs.cs_order_number
+WHERE cs.cs_net_paid_inc_tax > 1000
+  AND EXISTS (
+        SELECT 1
+        FROM customer c
+        WHERE c.c_customer_sk = cs.cs_bill_customer_sk
+          AND c.c_email_address LIKE '%@example.com'
+    )
+GROUP BY GROUPING SETS (
+    (fw.w_warehouse_sk, fw.location, fw.name_prefix),
+    ()
 )
-GROUP BY store_id, state
-HAVING SUM(total_profit) > 0
-ORDER BY avg_hourly_sales DESC
+ORDER BY fw.w_warehouse_sk ASC, total_net_profit DESC
 LIMIT 100

@@ -1,33 +1,64 @@
-WITH sales_by_time AS (
+WITH returns_detail AS (
     SELECT
-        ws_sold_time_sk,
-        SUM(ws_net_profit) AS total_profit,
-        SUM(ws_quantity) AS total_qty
-    FROM web_sales
-    WHERE ws_net_paid_inc_tax > 1000
-    GROUP BY ws_sold_time_sk
+        cr.cr_returned_date_sk,
+        cr.cr_return_quantity,
+        cr.cr_return_amount,
+        cr.cr_catalog_page_sk,
+        cr.cr_item_sk,
+        cr.cr_warehouse_sk,
+        i.i_item_id,
+        i.i_category,
+        i.i_formulation,
+        i.i_size,
+        cp.cp_catalog_page_id,
+        cp.cp_description,
+        w.w_warehouse_id,
+        w.w_country
+    FROM catalog_returns cr
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    WHERE w.w_country = 'United States'
 )
+
 SELECT
-    td.t_hour,
-    td.t_shift,
-    sbt.total_profit,
-    sbt.total_qty
-FROM sales_by_time sbt
-JOIN time_dim td
-    ON sbt.ws_sold_time_sk = td.t_time_sk
-WHERE td.t_shift = 'first' AND td.t_hour BETWEEN 6 AND 12
+    rd.cp_catalog_page_id AS catalog_page_id,
+    rd.i_category AS item_category,
+    SUM(rd.cr_return_amount) AS total_return_amount,
+    COUNT(*) AS return_cnt,
+    (SELECT AVG(cr2.cr_return_amount)
+     FROM catalog_returns cr2
+     WHERE cr2.cr_item_sk = rd.cr_item_sk) AS avg_item_return_amount
+FROM returns_detail rd
+WHERE rd.i_formulation LIKE '%thistle%'
+  AND EXISTS (
+        SELECT 1
+        FROM catalog_returns cr3
+        WHERE cr3.cr_catalog_page_sk = rd.cr_catalog_page_sk
+          AND cr3.cr_return_quantity > 5
+      )
+GROUP BY rd.cp_catalog_page_id, rd.i_category, rd.cr_item_sk
+HAVING SUM(rd.cr_return_amount) > 1000
 
 UNION ALL
 
 SELECT
-    td.t_hour,
-    td.t_shift,
-    sbt.total_profit,
-    sbt.total_qty
-FROM sales_by_time sbt
-JOIN time_dim td
-    ON sbt.ws_sold_time_sk = td.t_time_sk
-WHERE td.t_shift = 'third' AND td.t_hour BETWEEN 18 AND 23
+    rd.cp_catalog_page_id,
+    rd.i_category,
+    SUM(rd.cr_return_amount),
+    COUNT(*),
+    (SELECT AVG(cr2.cr_return_amount)
+     FROM catalog_returns cr2
+     WHERE cr2.cr_item_sk = rd.cr_item_sk)
+FROM returns_detail rd
+WHERE rd.i_formulation LIKE '%papaya%'
+  AND EXISTS (
+        SELECT 1
+        FROM catalog_returns cr3
+        WHERE cr3.cr_catalog_page_sk = rd.cr_catalog_page_sk
+          AND cr3.cr_return_quantity > 5
+      )
+GROUP BY rd.cp_catalog_page_id, rd.i_category, rd.cr_item_sk
+HAVING SUM(rd.cr_return_amount) > 1000
 
-ORDER BY t_hour
-LIMIT 100
+ORDER BY total_return_amount DESC

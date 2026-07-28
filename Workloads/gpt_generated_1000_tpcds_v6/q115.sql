@@ -1,32 +1,39 @@
-WITH sales AS (
+WITH sales_agg AS (
     SELECT
-        d.d_date AS transaction_date,
-        c.c_customer_id AS customer_id,
-        SUM(cs.cs_ext_sales_price) AS total_amount,
-        'sale' AS transaction_type,
-        NULL AS return_reason
+        cp.cp_department,
+        cp.cp_catalog_page_id,
+        i.i_item_id,
+        CONCAT(i.i_brand, ' ', i.i_product_name) AS product_label,
+        SUM(cs.cs_net_profit) AS total_profit,
+        COUNT(*) AS sales_cnt
     FROM catalog_sales cs
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
     JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
-    JOIN customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
     WHERE d.d_year = 2001
-    GROUP BY d.d_date, c.c_customer_id
-),
-returns AS (
-    SELECT
-        d.d_date AS transaction_date,
-        c.c_customer_id AS customer_id,
-        SUM(wr.wr_return_amt) AS total_amount,
-        'return' AS transaction_type,
-        MIN(r.r_reason_desc) AS return_reason
-    FROM web_returns wr
-    JOIN date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
-    JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
-    JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
-    WHERE d.d_year = 2001
-    GROUP BY d.d_date, c.c_customer_id
+      AND REGEXP_LIKE(cp.cp_description, '(?i)promo')
+      AND i.i_brand LIKE 'Brand%'
+      AND EXISTS (
+          SELECT 1
+          FROM inventory inv
+          WHERE inv.inv_item_sk = i.i_item_sk
+            AND inv.inv_quantity_on_hand > 0
+      )
+    GROUP BY cp.cp_department, cp.cp_catalog_page_id, i.i_item_id, i.i_brand, i.i_product_name
 )
-SELECT * FROM sales
-UNION ALL
-SELECT * FROM returns
-ORDER BY transaction_date DESC, total_amount DESC
+SELECT
+    sa.cp_department,
+    sa.cp_catalog_page_id,
+    sa.i_item_id,
+    sa.product_label,
+    sa.total_profit,
+    (
+        SELECT AVG(cs2.cs_net_profit)
+        FROM catalog_sales cs2
+        JOIN date_dim d2 ON cs2.cs_sold_date_sk = d2.d_date_sk
+        WHERE d2.d_year = 2001
+    ) AS avg_year_profit,
+    RANK() OVER (PARTITION BY sa.cp_department ORDER BY sa.total_profit DESC) AS dept_rank
+FROM sales_agg sa
+ORDER BY sa.total_profit DESC
 LIMIT 100

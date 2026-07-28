@@ -1,40 +1,49 @@
-WITH store_demo_returns AS (
+WITH filtered AS (
     SELECT
-        s.s_store_sk,
-        s.s_store_name,
-        cd.cd_demo_sk,
-        cd.cd_gender,
-        SUM(sr.sr_return_amt_inc_tax) AS total_return_inc_tax,
-        SUM(sr.sr_net_loss) AS total_net_loss,
-        COUNT(*) AS return_cnt,
-        AVG(sr.sr_return_quantity) AS avg_return_qty
-    FROM store s
-    JOIN store_returns sr ON sr.sr_store_sk = s.s_store_sk
-    JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
-    WHERE s.s_closed_date_sk > 2450800
-      AND s.s_company_id = 1
-      AND s.s_tax_percentage < 5.00
-      AND cd.cd_purchase_estimate >= 6000
-      AND cd.cd_dep_count <= 3
-      AND sr.sr_return_quantity > 10
-      AND sr.sr_return_amt > 100.00
-    GROUP BY s.s_store_sk, s.s_store_name, cd.cd_demo_sk, cd.cd_gender
+        cr.cr_returned_date_sk,
+        cr.cr_return_quantity,
+        cr.cr_refunded_cash,
+        cr.cr_return_amount,
+        cr.cr_returning_customer_sk,
+        cr.cr_refunded_customer_sk,
+        cust.c_customer_sk,
+        cust.c_birth_day,
+        cust.c_birth_month,
+        cust.c_salutation,
+        cust.c_first_shipto_date_sk
+    FROM catalog_returns cr
+    JOIN customer cust
+        ON cr.cr_refunded_customer_sk = cust.c_customer_sk
+    WHERE cust.c_birth_day IN (16, 11, 20)
+        AND cr.cr_return_quantity > 10
+        AND cr.cr_refunded_cash > 100
+        AND NOT EXISTS (
+            SELECT 1
+            FROM customer rc
+            WHERE rc.c_customer_sk = cr.cr_returning_customer_sk
+              AND rc.c_salutation = 'Mr.'
+        )
+),
+agg AS (
+    SELECT
+        f.c_birth_month,
+        f.c_salutation,
+        COUNT(*) AS cnt_returns,
+        SUM(f.cr_return_amount) AS total_return_amount,
+        AVG(f.cr_refunded_cash) AS avg_refunded_cash
+    FROM filtered f
+    GROUP BY ROLLUP (f.c_birth_month, f.c_salutation)
+    HAVING COUNT(*) > 0
 )
 SELECT
-    sdr.s_store_name,
-    sdr.cd_gender,
-    sdr.total_return_inc_tax,
-    sdr.total_net_loss,
-    sdr.return_cnt,
-    CASE
-        WHEN sdr.total_net_loss > 10000 THEN 'High'
-        WHEN sdr.total_net_loss > 5000 THEN 'Medium'
-        ELSE 'Low'
-    END AS loss_category,
-    (SELECT AVG(total_net_loss) FROM store_demo_returns sd2 WHERE sd2.s_store_sk = sdr.s_store_sk) AS store_avg_net_loss,
-    RANK() OVER (PARTITION BY sdr.s_store_name ORDER BY sdr.total_net_loss DESC) AS loss_rank_within_store,
-    ROW_NUMBER() OVER (ORDER BY sdr.total_net_loss DESC) AS overall_loss_rank
-FROM store_demo_returns sdr
-WHERE sdr.total_return_inc_tax IS NOT NULL
-ORDER BY sdr.total_net_loss DESC
+    a.c_birth_month,
+    a.c_salutation,
+    a.cnt_returns,
+    a.total_return_amount,
+    a.avg_refunded_cash,
+    ROW_NUMBER() OVER (PARTITION BY a.c_birth_month ORDER BY a.total_return_amount DESC) AS rn_by_month
+FROM agg a
+ORDER BY a.c_birth_month NULLS LAST,
+         a.c_salutation NULLS LAST,
+         a.cnt_returns DESC
 LIMIT 100

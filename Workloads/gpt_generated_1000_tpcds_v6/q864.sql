@@ -1,40 +1,34 @@
-WITH sales_union AS (
+WITH sales_agg AS (
     SELECT
-        ws.ws_web_site_sk,
-        td.t_hour,
-        td.t_am_pm,
-        SUM(ws.ws_net_profit) AS total_profit,
-        COUNT(DISTINCT ws.ws_order_number) AS distinct_orders
-    FROM web_sales ws
-    JOIN time_dim td ON ws.ws_sold_time_sk = td.t_time_sk
-    JOIN web_site wsit ON ws.ws_web_site_sk = wsit.web_site_sk
-    WHERE td.t_am_pm = 'PM'
-      AND wsit.web_state = 'CA'
-    GROUP BY ws.ws_web_site_sk, td.t_hour, td.t_am_pm
-
-    UNION ALL
-
-    SELECT
-        ws.ws_web_site_sk,
-        td.t_hour,
-        td.t_am_pm,
-        SUM(ws.ws_net_profit) AS total_profit,
-        COUNT(DISTINCT ws.ws_order_number) AS distinct_orders
-    FROM web_sales ws
-    JOIN time_dim td ON ws.ws_sold_time_sk = td.t_time_sk
-    JOIN web_site wsit ON ws.ws_web_site_sk = wsit.web_site_sk
-    WHERE td.t_am_pm = 'AM'
-      AND wsit.web_state = 'NY'
-    GROUP BY ws.ws_web_site_sk, td.t_hour, td.t_am_pm
+        w.w_warehouse_id,
+        cp.cp_department,
+        cd.cd_gender,
+        SUM(cs.cs_ext_sales_price) AS total_sales,
+        SUM(cs.cs_net_profit) AS total_profit,
+        COUNT(*) AS order_cnt
+    FROM tpcds.catalog_sales cs
+    JOIN tpcds.time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
+    JOIN tpcds.customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+    JOIN tpcds.catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN tpcds.warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    JOIN tpcds.promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    WHERE td.t_hour >= 12
+      AND cd.cd_dep_count <= 3
+      AND cp.cp_catalog_number IN (4, 8, 16)
+      AND w.w_state = 'CA'
+      AND p.p_discount_active = 'Y'
+    GROUP BY w.w_warehouse_id, cp.cp_department, cd.cd_gender
 )
-SELECT DISTINCT
-    wsit.web_name,
-    su.t_hour,
-    su.t_am_pm,
-    su.total_profit,
-    su.distinct_orders,
-    ROW_NUMBER() OVER (PARTITION BY su.t_hour ORDER BY su.total_profit DESC) AS profit_rank
-FROM sales_union su
-JOIN web_site wsit ON su.ws_web_site_sk = wsit.web_site_sk
-ORDER BY su.t_hour, profit_rank
-LIMIT 100
+SELECT
+    sa.cp_department,
+    AVG(sa.total_sales) AS avg_sales,
+    AVG(sa.total_profit) AS avg_profit,
+    COUNT(DISTINCT sa.w_warehouse_id) AS warehouse_count,
+    CASE
+        WHEN AVG(sa.total_sales) > (SELECT AVG(cs_ext_sales_price) FROM tpcds.catalog_sales) THEN 'High'
+        ELSE 'Low'
+    END AS sales_level
+FROM sales_agg sa
+GROUP BY sa.cp_department
+HAVING AVG(sa.total_sales) > 20000
+ORDER BY avg_sales DESC

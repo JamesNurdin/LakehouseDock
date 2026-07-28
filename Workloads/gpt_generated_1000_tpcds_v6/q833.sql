@@ -1,41 +1,40 @@
-WITH store_part AS (
-   SELECT
-      cd.cd_gender AS gender,
-      SUM(sr.sr_net_loss) AS total_net_loss,
-      'store' AS source
-   FROM store_returns sr
-   JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
-   JOIN time_dim td ON sr.sr_return_time_sk = td.t_time_sk
-   WHERE cd.cd_credit_rating = 'High Risk'
-     AND td.t_meal_time = 'dinner'
-     AND EXISTS (
-         SELECT 1
-         FROM web_returns wr
-         WHERE wr.wr_refunded_cdemo_sk = sr.sr_cdemo_sk
-           AND wr.wr_returned_time_sk = sr.sr_return_time_sk
-     )
-   GROUP BY cd.cd_gender
-),
-web_part AS (
-   SELECT
-      cd.cd_gender AS gender,
-      SUM(wr.wr_net_loss) AS total_net_loss,
-      'web' AS source
-   FROM web_returns wr
-   JOIN customer_demographics cd ON wr.wr_refunded_cdemo_sk = cd.cd_demo_sk
-   JOIN time_dim td ON wr.wr_returned_time_sk = td.t_time_sk
-   WHERE cd.cd_credit_rating = 'Low Risk'
-     AND td.t_meal_time = 'lunch'
-   GROUP BY cd.cd_gender
+WITH ws_filtered AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_net_paid_inc_tax,
+        ws.ws_net_profit,
+        ws.ws_item_sk,
+        ws.ws_bill_customer_sk,
+        ws.ws_bill_addr_sk,
+        ws.ws_web_site_sk
+    FROM web_sales ws
+    WHERE ws.ws_net_paid_inc_tax > 500
+      AND ws.ws_ext_tax IS NOT NULL
 )
-SELECT gender,
-       total_net_loss,
-       source
-FROM store_part
-UNION ALL
-SELECT gender,
-       total_net_loss,
-       source
-FROM web_part
-ORDER BY total_net_loss DESC
+SELECT
+    d.d_year,
+    we.web_mkt_class,
+    SUM(ws.ws_net_paid_inc_tax) AS total_paid,
+    SUM(ws.ws_net_profit) AS total_profit,
+    COUNT(*) AS order_cnt,
+    COUNT(DISTINCT REGEXP_EXTRACT(ca.ca_suite_number, '\\d+')) AS distinct_suite_cnt
+FROM ws_filtered ws
+JOIN date_dim d
+    ON ws.ws_sold_date_sk = d.d_date_sk
+JOIN web_site we
+    ON ws.ws_web_site_sk = we.web_site_sk
+JOIN customer_address ca
+    ON ws.ws_bill_addr_sk = ca.ca_address_sk
+WHERE REGEXP_LIKE(we.web_mkt_class, '(?i)Leaders|Labour|Continuous')
+  AND ca.ca_suite_number LIKE 'Suite %'
+  AND NOT EXISTS (
+        SELECT 1
+        FROM store_returns sr
+        WHERE sr.sr_item_sk = ws.ws_item_sk
+          AND sr.sr_customer_sk = ws.ws_bill_customer_sk
+          AND sr.sr_returned_date_sk >= ws.ws_sold_date_sk
+    )
+GROUP BY ROLLUP (d.d_year, we.web_mkt_class)
+ORDER BY total_paid DESC
 LIMIT 100

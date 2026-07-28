@@ -1,47 +1,51 @@
-WITH refunded AS (
+WITH avg_profit AS (
+    SELECT avg(cs_net_profit) AS val
+    FROM catalog_sales
+),
+union_data AS (
     SELECT
-        cr.cr_return_amount,
-        CASE WHEN cr.cr_store_credit > 100 THEN 'HIGH' ELSE 'LOW' END AS credit_category
-    FROM catalog_returns cr
-    JOIN customer c
-        ON cr.cr_refunded_customer_sk = c.c_customer_sk
-    WHERE cr.cr_return_amount > 50
+        cp.cp_catalog_page_id,
+        CASE WHEN SUM(cs.cs_net_profit) > 10000 THEN 'High' ELSE 'Low' END AS profit_tier,
+        SUM(cs.cs_net_profit) AS total_profit,
+        COUNT(DISTINCT cs.cs_order_number) AS total_sales,
+        (SELECT val FROM avg_profit) AS avg_all_profit
+    FROM catalog_sales cs
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
+    JOIN promotion pr ON cs.cs_promo_sk = pr.p_promo_sk
+    WHERE td.t_hour BETWEEN 9 AND 12
+      AND pr.p_discount_active = 'Y'
       AND EXISTS (
           SELECT 1
-          FROM catalog_returns cr2
-          WHERE cr2.cr_refunded_customer_sk = c.c_customer_sk
-            AND cr2.cr_fee > 70
+          FROM promotion p2
+          WHERE p2.p_promo_sk = cs.cs_promo_sk
+            AND p2.p_cost > 500
       )
-),
-returning AS (
-    SELECT
-        cr.cr_return_amount,
-        CASE WHEN cr.cr_fee > 80 THEN 'EXPENSIVE' ELSE 'NORMAL' END AS fee_category
-    FROM catalog_returns cr
-    JOIN customer c
-        ON cr.cr_returning_customer_sk = c.c_customer_sk
-    WHERE cr.cr_store_credit BETWEEN 50 AND 200
-      AND c.c_birth_month IN (1, 8, 12)
-)
-SELECT category,
-       cnt,
-       total_return_amount
-FROM (
-    SELECT
-        credit_category AS category,
-        COUNT(*) AS cnt,
-        SUM(cr_return_amount) AS total_return_amount
-    FROM refunded
-    GROUP BY credit_category
+    GROUP BY cp.cp_catalog_page_id
 
     UNION ALL
 
     SELECT
-        fee_category AS category,
-        COUNT(*) AS cnt,
-        SUM(cr_return_amount) AS total_return_amount
-    FROM returning
-    GROUP BY fee_category
-) AS combined
-ORDER BY total_return_amount DESC
+        cp.cp_catalog_page_id,
+        CASE WHEN SUM(cs.cs_net_profit) > 10000 THEN 'High' ELSE 'Low' END AS profit_tier,
+        SUM(cs.cs_net_profit) AS total_profit,
+        COUNT(DISTINCT cs.cs_order_number) AS total_sales,
+        (SELECT val FROM avg_profit) AS avg_all_profit
+    FROM catalog_sales cs
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
+    JOIN promotion pr ON cs.cs_promo_sk = pr.p_promo_sk
+    WHERE td.t_hour BETWEEN 17 AND 20
+      AND pr.p_discount_active = 'N'
+      AND EXISTS (
+          SELECT 1
+          FROM promotion p2
+          WHERE p2.p_promo_sk = cs.cs_promo_sk
+            AND p2.p_cost > 1000
+      )
+    GROUP BY cp.cp_catalog_page_id
+)
+SELECT *
+FROM union_data
+ORDER BY total_profit DESC
 LIMIT 100

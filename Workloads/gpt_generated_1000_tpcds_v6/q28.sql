@@ -1,44 +1,42 @@
-WITH returning_addr AS (
+WITH high_sales AS (
     SELECT
-        wr.wr_returning_addr_sk,
-        wr.wr_return_amt,
-        wr.wr_return_quantity,
-        wr.wr_refunded_cash,
-        wr.wr_return_ship_cost,
-        ca.ca_county,
-        ca.ca_address_id,
-        ca.ca_suite_number
-    FROM web_returns wr
-    JOIN customer_address ca
-      ON wr.wr_returning_addr_sk = ca.ca_address_sk
-    WHERE regexp_like(ca.ca_address_id, '^A{8}I')
-      AND ca.ca_suite_number LIKE 'Suite %'
+        promotion.p_promo_name AS promo_name,
+        web_site.web_name AS site_name,
+        SUM(web_sales.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT web_sales.ws_order_number) AS order_cnt
+    FROM web_sales
+    JOIN promotion ON web_sales.ws_promo_sk = promotion.p_promo_sk
+    JOIN customer ON web_sales.ws_bill_customer_sk = customer.c_customer_sk
+    JOIN customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    JOIN web_site ON web_sales.ws_web_site_sk = web_site.web_site_sk
+    WHERE promotion.p_discount_active = 'Y'
+      AND customer_demographics.cd_purchase_estimate >= 7000
+    GROUP BY promotion.p_promo_name, web_site.web_name
 ),
-agg AS (
+low_sales AS (
     SELECT
-        r.ca_county,
-        COUNT(*) AS returns_cnt,
-        SUM(r.wr_return_amt) AS total_return_amt,
-        AVG(r.wr_return_amt) AS avg_return_amt,
-        SUM(CASE WHEN r.wr_return_amt > (SELECT AVG(wr_return_amt) FROM web_returns) THEN 1 ELSE 0 END) AS high_return_cnt
-    FROM returning_addr r
-    WHERE EXISTS (
-        SELECT 1
-        FROM web_returns wr2
-        JOIN customer_address ca2
-          ON wr2.wr_refunded_addr_sk = ca2.ca_address_sk
-        WHERE ca2.ca_county = r.ca_county
-          AND wr2.wr_refunded_cash > 100
-    )
-    GROUP BY r.ca_county
+        promotion.p_promo_name AS promo_name,
+        web_site.web_name AS site_name,
+        SUM(web_sales.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT web_sales.ws_order_number) AS order_cnt
+    FROM web_sales
+    JOIN promotion ON web_sales.ws_promo_sk = promotion.p_promo_sk
+    JOIN customer ON web_sales.ws_bill_customer_sk = customer.c_customer_sk
+    JOIN customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    JOIN web_site ON web_sales.ws_web_site_sk = web_site.web_site_sk
+    WHERE promotion.p_discount_active = 'N'
+      AND customer_demographics.cd_purchase_estimate < 5000
+    GROUP BY promotion.p_promo_name, web_site.web_name
 )
 SELECT
-    a.ca_county,
-    a.returns_cnt,
-    a.total_return_amt,
-    a.avg_return_amt,
-    a.high_return_cnt,
-    RANK() OVER (ORDER BY a.total_return_amt DESC) AS county_rank
-FROM agg a
-ORDER BY a.total_return_amt DESC
+    promo_name,
+    site_name,
+    total_sales,
+    order_cnt
+FROM (
+    SELECT promo_name, site_name, total_sales, order_cnt FROM high_sales
+    UNION ALL
+    SELECT promo_name, site_name, total_sales, order_cnt FROM low_sales
+) AS combined
+ORDER BY total_sales DESC
 LIMIT 100

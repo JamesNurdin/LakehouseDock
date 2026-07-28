@@ -1,44 +1,36 @@
-WITH filtered_ship AS (
-    SELECT sm_ship_mode_sk,
-           sm_ship_mode_id,
-           sm_contract
-    FROM ship_mode
-    WHERE sm_ship_mode_id IN ('AAAAAAAADAAAAAAA', 'AAAAAAAABAAAAAA')
-      AND sm_contract LIKE 'yVf%'
-),
-filtered_site AS (
-    SELECT web_site_sk,
-           web_company_name,
-           web_county,
-           web_gmt_offset
-    FROM web_site
-    WHERE web_company_name IN ('ese', 'anti')
-      AND web_county = 'Williamson County'
-      AND web_gmt_offset = -6.00
+WITH catalog_filtered AS (
+    SELECT
+        cr.cr_returned_time_sk AS time_sk,
+        cr.cr_return_quantity AS qty,
+        cr.cr_net_loss AS net_loss,
+        cd.cd_gender AS gender,
+        cd.cd_education_status AS education,
+        td.t_hour AS hour,
+        td.t_time_id AS time_id,
+        hd.hd_buy_potential AS buy_potential
+    FROM catalog_returns cr
+    JOIN time_dim td ON cr.cr_returned_time_sk = td.t_time_sk
+    JOIN customer_demographics cd ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
+    JOIN household_demographics hd ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
+    WHERE regexp_like(td.t_time_id, '^A{5}C')
+      AND cd.cd_education_status LIKE '%Degree%'
+      AND hd.hd_buy_potential LIKE '%Potential%'
 )
 SELECT
-    sm.sm_ship_mode_id,
-    site.web_site_sk,
-    site.web_company_name,
-    COUNT(ws.ws_order_number) AS order_cnt,
-    SUM(ws.ws_net_profit) AS total_profit,
-    AVG(ws.ws_ext_tax) AS avg_tax,
-    MIN(ws.ws_ext_wholesale_cost) AS min_wholesale,
-    MAX(ws.ws_ext_wholesale_cost) AS max_wholesale
-FROM web_sales ws
-JOIN filtered_ship sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN filtered_site site ON ws.ws_web_site_sk = site.web_site_sk
-WHERE ws.ws_ext_tax > 20.00
-  AND ws.ws_ext_wholesale_cost BETWEEN 500.00 AND 2000.00
-  AND ws.ws_quantity >= 2
-  AND ws.ws_sold_date_sk BETWEEN 2450000 AND 2455000
-  AND ws.ws_ext_discount_amt < 50.00
-  AND ws.ws_coupon_amt = 0.00
-GROUP BY sm.sm_ship_mode_id,
-         site.web_site_sk,
-         site.web_company_name
-HAVING SUM(ws.ws_net_profit) > (
-    SELECT AVG(ws_net_profit) FROM web_sales
-)
-ORDER BY total_profit DESC
+    cf.hour,
+    cf.gender,
+    COUNT(*) AS return_cnt,
+    SUM(cf.qty) AS total_qty,
+    SUM(cf.net_loss) AS total_net_loss,
+    MIN(regexp_extract(cf.time_id, '(C[A-Z]+)', 1)) AS sample_code,
+    (
+        SELECT AVG(wr.wr_net_loss)
+        FROM web_returns wr
+        JOIN time_dim td2 ON wr.wr_returned_time_sk = td2.t_time_sk
+        WHERE td2.t_hour = cf.hour
+    ) AS avg_web_net_loss
+FROM catalog_filtered cf
+GROUP BY cf.hour, cf.gender
+HAVING SUM(cf.net_loss) > 0
+ORDER BY total_net_loss DESC
 LIMIT 100

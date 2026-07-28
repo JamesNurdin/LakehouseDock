@@ -1,70 +1,40 @@
-WITH base AS (
-  SELECT
-    s.s_store_sk,
-    s.s_store_name,
-    s.s_state,
-    i.i_item_sk,
-    i.i_category,
-    i.i_current_price,
-    ca.ca_address_sk,
-    ca.ca_state AS ca_state,
-    ca.ca_gmt_offset,
-    cd1.cd_gender,
-    cd1.cd_marital_status,
-    hd1.hd_buy_potential,
-    hd1.hd_vehicle_count,
-    sr.sr_return_quantity,
-    sr.sr_return_amt,
-    sr.sr_fee,
-    sr.sr_net_loss AS store_net_loss,
-    wr.wr_return_quantity,
-    wr.wr_return_amt,
-    wr.wr_fee,
-    wr.wr_net_loss AS web_net_loss,
-    wp.wp_type,
-    CASE WHEN sr.sr_net_loss > 500 THEN 'HIGH' ELSE 'LOW' END AS store_loss_category,
-    CASE WHEN wr.wr_net_loss > 500 THEN 'HIGH' ELSE 'LOW' END AS web_loss_category
-  FROM store_returns sr
-  JOIN item i ON sr.sr_item_sk = i.i_item_sk
-  JOIN store s ON sr.sr_store_sk = s.s_store_sk
-  JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
-  JOIN customer_demographics cd1 ON sr.sr_cdemo_sk = cd1.cd_demo_sk
-  JOIN household_demographics hd1 ON sr.sr_hdemo_sk = hd1.hd_demo_sk
-  JOIN web_returns wr ON wr.wr_item_sk = i.i_item_sk
-  JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-  JOIN customer_demographics cd2 ON wr.wr_refunded_cdemo_sk = cd2.cd_demo_sk
-  JOIN household_demographics hd2 ON wr.wr_refunded_hdemo_sk = hd2.hd_demo_sk
-  WHERE s.s_state = 'CA'
-    AND i.i_category = 'Electronics'
-    AND ca.ca_gmt_offset BETWEEN -8.00 AND -5.00
-    AND hd1.hd_vehicle_count >= 1
-    AND cd1.cd_gender = 'M'
-    AND sr.sr_fee > 20
-    AND wr.wr_return_amt > 50
-),
-agg AS (
-  SELECT
-    s_store_sk,
-    s_store_name,
-    s_state,
-    i_category,
-    SUM(store_net_loss) AS total_store_loss,
-    SUM(web_net_loss) AS total_web_loss,
-    SUM(store_net_loss + web_net_loss) AS total_combined_loss,
-    COUNT(*) AS txn_count
-  FROM base
-  GROUP BY s_store_sk, s_store_name, s_state, i_category
+/*
+ * Goal: Summarize store return performance by store, state, and store size category, showing counts, total net loss, average tax, and a flag indicating whether the subtotal net loss exceeds the overall average net loss. The query uses a CTE for filtering, a scalar subquery for the overall average, a CASE expression for size categorisation, and a ROLLUP to produce subtotal rows.
+ */
+WITH filtered_data AS (
+    SELECT
+        sr.sr_ticket_number,
+        sr.sr_return_tax,
+        sr.sr_net_loss,
+        ca.ca_state,
+        s.s_store_name,
+        s.s_floor_space,
+        CASE
+            WHEN s.s_floor_space > 20000 THEN 'Large'
+            WHEN s.s_floor_space > 10000 THEN 'Medium'
+            ELSE 'Small'
+        END AS store_size_category
+    FROM store_returns sr
+    JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
+    JOIN store s ON sr.sr_store_sk = s.s_store_sk
+    WHERE sr.sr_net_loss > 100.00
+      AND sr.sr_return_tax >= 1.00
+      AND s.s_manager = 'Jerry Brooks'
+      AND ca.ca_state = 'CA'
+      AND s.s_hours LIKE '8AM-4PM%'
 )
 SELECT
-  s_store_sk,
-  s_store_name,
-  s_state,
-  i_category,
-  total_store_loss,
-  total_web_loss,
-  total_combined_loss,
-  txn_count,
-  ROW_NUMBER() OVER (PARTITION BY s_state ORDER BY total_combined_loss DESC) AS loss_rank
-FROM agg
-ORDER BY s_state, loss_rank
+    s_store_name,
+    ca_state,
+    store_size_category,
+    COUNT(DISTINCT sr_ticket_number) AS returns_cnt,
+    SUM(sr_net_loss) AS total_net_loss,
+    AVG(sr_return_tax) AS avg_return_tax,
+    CASE
+        WHEN SUM(sr_net_loss) > (SELECT AVG(sr_net_loss) FROM store_returns) THEN 'Above Avg'
+        ELSE 'Below Avg'
+    END AS loss_vs_avg
+FROM filtered_data
+GROUP BY ROLLUP (s_store_name, ca_state, store_size_category)
+ORDER BY total_net_loss DESC NULLS LAST
 LIMIT 100

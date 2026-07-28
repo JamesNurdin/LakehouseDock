@@ -1,40 +1,53 @@
-WITH returns_agg AS (
+WITH store_sales_agg AS (
     SELECT
-        'Return' AS source,
-        ca.ca_city AS city,
-        SUM(cr.cr_return_amount) AS total_amount,
-        COUNT(DISTINCT cr.cr_order_number) AS distinct_orders
-    FROM catalog_returns cr
-    JOIN customer_address ca
-        ON cr.cr_refunded_addr_sk = ca.ca_address_sk
-    WHERE cr.cr_return_amount > 100.00
-      AND cr.cr_return_quantity >= 10
-    GROUP BY ca.ca_city
+        c.c_customer_id,
+        d.d_date,
+        SUM(ss.ss_net_paid) AS total_sales,
+        CASE WHEN SUM(ss.ss_net_paid) > 1000 THEN 'high' ELSE 'low' END AS sales_category,
+        s.s_store_name
+    FROM store_sales ss
+    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    WHERE d.d_year = 2001
+    GROUP BY c.c_customer_id, d.d_date, s.s_store_name
 ),
-sales_agg AS (
+web_sales_agg AS (
     SELECT
-        'Sale' AS source,
-        ca.ca_city AS city,
-        SUM(ws.ws_net_paid) AS total_amount,
-        COUNT(DISTINCT ws.ws_order_number) AS distinct_orders
+        c.c_customer_id,
+        d.d_date,
+        SUM(ws.ws_net_paid) AS total_sales,
+        CASE WHEN SUM(ws.ws_net_paid) > 1000 THEN 'high' ELSE 'low' END AS sales_category,
+        CAST(NULL AS varchar) AS s_store_name
     FROM web_sales ws
-    JOIN customer_address ca
-        ON ws.ws_bill_addr_sk = ca.ca_address_sk
-    WHERE ws.ws_ext_ship_cost > 200.00
-      AND ws.ws_quantity >= 2
-    GROUP BY ca.ca_city
-),
-combined AS (
-    SELECT * FROM returns_agg
-    UNION ALL
-    SELECT * FROM sales_agg
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE d.d_year = 2001
+    GROUP BY c.c_customer_id, d.d_date
 )
 SELECT
-    source,
-    city,
-    total_amount,
-    distinct_orders,
-    ROW_NUMBER() OVER (PARTITION BY source ORDER BY total_amount DESC) AS city_rank
-FROM combined
-ORDER BY source, city_rank
+    cust_id,
+    sales_date,
+    total_sales,
+    sales_category,
+    store_name,
+    ROW_NUMBER() OVER (PARTITION BY sales_category ORDER BY total_sales DESC) AS category_rank
+FROM (
+    SELECT
+        c_customer_id AS cust_id,
+        d_date AS sales_date,
+        total_sales,
+        sales_category,
+        s_store_name AS store_name
+    FROM store_sales_agg
+    UNION ALL
+    SELECT
+        c_customer_id AS cust_id,
+        d_date AS sales_date,
+        total_sales,
+        sales_category,
+        s_store_name AS store_name
+    FROM web_sales_agg
+) combined
+ORDER BY total_sales DESC
 LIMIT 100

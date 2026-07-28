@@ -1,49 +1,38 @@
-WITH recent_dates AS (
-    SELECT d_date_sk, d_year, d_month_seq
-    FROM date_dim
-    WHERE d_year = 2002
+WITH promo_data AS (
+    SELECT DISTINCT
+        i.i_category,
+        p.p_promo_name,
+        d.d_year,
+        'Promotion' AS src
+    FROM promotion p
+    JOIN date_dim d ON p.p_start_date_sk = d.d_date_sk
+    JOIN item i ON p.p_item_sk = i.i_item_sk
+    WHERE d.d_year = 2020
+      AND p.p_channel_email = 'Y'
 ),
-warehouse_sales AS (
-    SELECT
-        w.w_warehouse_id AS location_id,
-        w.w_city AS location_city,
-        d.d_month_seq,
-        SUM(cs.cs_ext_sales_price) AS total_sales,
-        SUM(cs.cs_net_profit) AS total_profit,
-        'Warehouse' AS source_type
-    FROM catalog_sales cs
-    JOIN recent_dates d ON cs.cs_ship_date_sk = d.d_date_sk
-    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
-    WHERE w.w_warehouse_sq_ft > 300000
-    GROUP BY w.w_warehouse_id, w.w_city, d.d_month_seq
-),
-store_sales AS (
-    SELECT
-        s.s_store_id AS location_id,
-        s.s_city AS location_city,
-        d.d_month_seq,
-        SUM(cs.cs_ext_sales_price) AS total_sales,
-        SUM(cs.cs_net_profit) AS total_profit,
-        'Store' AS source_type
-    FROM catalog_sales cs
-    JOIN recent_dates d ON cs.cs_sold_date_sk = d.d_date_sk
-    JOIN store s ON s.s_closed_date_sk = d.d_date_sk
-    WHERE s.s_state = 'CA'
-    GROUP BY s.s_store_id, s.s_city, d.d_month_seq
-),
-combined_sales AS (
-    SELECT * FROM warehouse_sales
-    UNION ALL
-    SELECT * FROM store_sales
+return_data AS (
+    SELECT DISTINCT
+        i.i_category,
+        CAST(NULL AS varchar) AS p_promo_name,
+        d.d_year,
+        'Return' AS src
+    FROM store_returns sr
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    JOIN item i ON sr.sr_item_sk = i.i_item_sk
+    WHERE d.d_year = 2020
+      AND sr.sr_return_quantity > 0
 )
 SELECT
-    location_id,
-    location_city,
-    source_type,
-    d_month_seq,
-    total_sales,
-    total_profit,
-    CASE WHEN total_sales > 50000 THEN 'Large' ELSE 'Small' END AS size_category,
-    ROW_NUMBER() OVER (PARTITION BY source_type ORDER BY total_sales DESC) AS sales_rank
-FROM combined_sales
-ORDER BY source_type, sales_rank
+    i_category,
+    p_promo_name,
+    d_year,
+    src
+FROM promo_data
+UNION ALL
+SELECT
+    i_category,
+    p_promo_name,
+    d_year,
+    src
+FROM return_data
+ORDER BY i_category, src

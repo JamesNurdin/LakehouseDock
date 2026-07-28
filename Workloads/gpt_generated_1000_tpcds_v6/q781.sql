@@ -1,55 +1,67 @@
-WITH cc_filtered AS (
-    SELECT
-        cc.cc_call_center_sk,
-        cc.cc_call_center_id,
-        cc.cc_state,
-        cc.cc_employees,
-        cc.cc_tax_percentage,
-        cc.cc_closed_date_sk,
-        cc.cc_open_date_sk
-    FROM call_center cc
-    WHERE cc.cc_state = 'CA'
-      AND cc.cc_employees > 50
-      AND cc.cc_street_name LIKE 'Hill%'
-      AND cc.cc_tax_percentage > 0.05
+WITH store_agg AS (
+   SELECT
+       i.i_item_id,
+       i.i_product_name,
+       SUM(ss.ss_ext_sales_price) AS total_sales,
+       AVG(ss.ss_ext_discount_amt) AS avg_discount,
+       COUNT(*) AS txn_count,
+       ROW_NUMBER() OVER (ORDER BY SUM(ss.ss_ext_sales_price) DESC) AS sales_rank,
+       (SELECT MAX(i2.i_current_price) FROM item i2 WHERE i2.i_item_id = i.i_item_id) AS max_price
+   FROM store_sales ss
+   JOIN item i ON ss.ss_item_sk = i.i_item_sk
+   JOIN customer_demographics cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
+   JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+   WHERE cd.cd_credit_rating = 'Low Risk'
+     AND hd.hd_income_band_sk IN (
+         SELECT ib_income_band_sk FROM income_band WHERE ib_lower_bound >= 50000
+     )
+     AND NOT EXISTS (
+         SELECT 1 FROM web_sales ws
+         WHERE ws.ws_item_sk = ss.ss_item_sk
+           AND ws.ws_sold_date_sk = ss.ss_sold_date_sk
+     )
+   GROUP BY i.i_item_id, i.i_product_name
+   HAVING SUM(ss.ss_ext_sales_price) > 10000
 ),
-ws_filtered AS (
-    SELECT
-        ws.web_site_sk,
-        ws.web_site_id,
-        ws.web_class,
-        ws.web_country,
-        ws.web_open_date_sk,
-        ws.web_close_date_sk
-    FROM web_site ws
-    WHERE ws.web_country = 'United States'
-      AND ws.web_mkt_class LIKE '%women%'
-      AND ws.web_open_date_sk IS NOT NULL
-      AND ws.web_close_date_sk IS NOT NULL
+
+web_agg AS (
+   SELECT
+       i.i_item_id,
+       i.i_product_name,
+       SUM(ws.ws_ext_sales_price) AS total_sales,
+       AVG(ws.ws_ext_discount_amt) AS avg_discount,
+       COUNT(*) AS txn_count,
+       ROW_NUMBER() OVER (ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank,
+       (SELECT MAX(i2.i_current_price) FROM item i2 WHERE i2.i_item_id = i.i_item_id) AS max_price
+   FROM web_sales ws
+   JOIN item i ON ws.ws_item_sk = i.i_item_sk
+   JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+   JOIN household_demographics hd ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+   WHERE cd.cd_education_status = 'College'
+     AND hd.hd_vehicle_count > 0
+     AND EXISTS (
+         SELECT 1 FROM store_sales ss
+         WHERE ss.ss_item_sk = ws.ws_item_sk
+           AND ss.ss_sold_date_sk = ws.ws_sold_date_sk
+     )
+   GROUP BY i.i_item_id, i.i_product_name
+   HAVING SUM(ws.ws_ext_sales_price) > 8000
 )
+
 SELECT
-    cc.cc_state,
-    ws.web_class,
-    d.d_quarter_name,
-    COUNT(DISTINCT cc.cc_call_center_id) AS distinct_cc_cnt,
-    SUM(cc.cc_employees) AS total_employees,
-    AVG(cc.cc_tax_percentage) AS avg_tax_pct,
-    MIN(d.d_dom) AS min_day_of_month,
-    MAX(d.d_dom) AS max_day_of_month
-FROM cc_filtered cc
-JOIN date_dim d ON cc.cc_closed_date_sk = d.d_date_sk
-JOIN ws_filtered ws ON ws.web_open_date_sk = d.d_date_sk
-WHERE d.d_year = 2000
-  AND d.d_dom IN (5, 12)
-  AND d.d_first_dom = 2415052
-  AND EXISTS (
-        SELECT 1
-        FROM call_center cc2
-        WHERE cc2.cc_employees > (SELECT AVG(cc3.cc_employees) FROM call_center cc3)
-          AND cc2.cc_state = cc.cc_state
-    )
-GROUP BY cc.cc_state, ws.web_class, d.d_quarter_name
-HAVING COUNT(DISTINCT cc.cc_call_center_id) > 5
-   AND SUM(cc.cc_employees) > 1000
-ORDER BY total_employees DESC
+    i_item_id,
+    i_product_name,
+    total_sales,
+    avg_discount,
+    txn_count,
+    sales_rank,
+    max_price
+FROM (
+    SELECT i_item_id, i_product_name, total_sales, avg_discount, txn_count, sales_rank, max_price
+    FROM store_agg
+    UNION ALL
+    SELECT i_item_id, i_product_name, total_sales, avg_discount, txn_count, sales_rank, max_price
+    FROM web_agg
+) combined
+ORDER BY total_sales DESC, sales_rank
 LIMIT 100

@@ -1,34 +1,72 @@
+WITH sales_agg AS (
+    SELECT
+        cp.cp_catalog_page_sk,
+        cp.cp_department,
+        cp.cp_catalog_number,
+        w.w_warehouse_sk,
+        w.w_state,
+        SUM(cs.cs_net_profit) AS total_profit,
+        SUM(cs.cs_ext_sales_price) AS total_sales
+    FROM catalog_sales cs
+    JOIN catalog_page cp
+        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN warehouse w
+        ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    JOIN item i
+        ON cs.cs_item_sk = i.i_item_sk
+    JOIN time_dim td
+        ON cs.cs_sold_time_sk = td.t_time_sk
+    JOIN customer c
+        ON cs.cs_bill_customer_sk = c.c_customer_sk
+    JOIN customer_address ca
+        ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN inventory inv
+        ON inv.inv_item_sk = cs.cs_item_sk
+        AND inv.inv_warehouse_sk = cs.cs_warehouse_sk
+    WHERE i.i_category = 'Electronics'
+      AND td.t_shift = 'first'
+      AND cp.cp_department = 'Sports'
+      AND ca.ca_state = 'CA'
+      AND inv.inv_quantity_on_hand > 0
+    GROUP BY cp.cp_catalog_page_sk, cp.cp_department, cp.cp_catalog_number, w.w_warehouse_sk, w.w_state
+),
+returns_agg AS (
+    SELECT
+        cp.cp_catalog_page_sk,
+        w.w_warehouse_sk,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        SUM(cr.cr_net_loss) AS total_net_loss
+    FROM catalog_returns cr
+    JOIN catalog_page cp
+        ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN warehouse w
+        ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    JOIN item i
+        ON cr.cr_item_sk = i.i_item_sk
+    JOIN time_dim td
+        ON cr.cr_returned_time_sk = td.t_time_sk
+    WHERE i.i_category = 'Electronics'
+      AND td.t_shift = 'first'
+    GROUP BY cp.cp_catalog_page_sk, w.w_warehouse_sk
+)
 SELECT
-    w.w_warehouse_name,
-    sm.sm_type,
-    d_sold.d_year,
-    SUM(cs.cs_net_profit) AS total_profit,
-    AVG(cs.cs_ext_discount_amt) AS avg_discount,
-    COUNT(DISTINCT p.p_promo_id) AS promo_cnt,
-    COUNT(DISTINCT wp.wp_web_page_id) AS distinct_pages
-FROM catalog_sales cs
-JOIN date_dim d_sold
-    ON cs.cs_sold_date_sk = d_sold.d_date_sk
-JOIN date_dim d_ship
-    ON cs.cs_ship_date_sk = d_ship.d_date_sk
-JOIN household_demographics hd_bill
-    ON cs.cs_bill_hdemo_sk = hd_bill.hd_demo_sk
-JOIN household_demographics hd_ship
-    ON cs.cs_ship_hdemo_sk = hd_ship.hd_demo_sk
-JOIN ship_mode sm
-    ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN warehouse w
-    ON cs.cs_warehouse_sk = w.w_warehouse_sk
-JOIN promotion p
-    ON cs.cs_promo_sk = p.p_promo_sk
-JOIN date_dim d_promo_start
-    ON p.p_start_date_sk = d_promo_start.d_date_sk
-JOIN date_dim d_promo_end
-    ON p.p_end_date_sk = d_promo_end.d_date_sk
-JOIN web_page wp
-    ON wp.wp_creation_date_sk = d_sold.d_date_sk
-GROUP BY w.w_warehouse_name, sm.sm_type, d_sold.d_year
-HAVING SUM(cs.cs_net_profit) > 10000
-   AND COUNT(DISTINCT p.p_promo_id) > 1
-ORDER BY total_profit DESC
+    sa.cp_catalog_page_sk,
+    sa.cp_department,
+    sa.cp_catalog_number,
+    sa.w_warehouse_sk,
+    sa.w_state,
+    sa.total_profit,
+    sa.total_sales,
+    COALESCE(ra.total_return_amount, 0) AS total_return_amount,
+    COALESCE(ra.total_net_loss, 0) AS total_net_loss,
+    (sa.total_profit - COALESCE(ra.total_return_amount, 0)) AS net_profit_after_returns,
+    RANK() OVER (
+        PARTITION BY sa.cp_catalog_page_sk
+        ORDER BY (sa.total_profit - COALESCE(ra.total_return_amount, 0)) DESC
+    ) AS profit_rank
+FROM sales_agg sa
+LEFT JOIN returns_agg ra
+    ON sa.cp_catalog_page_sk = ra.cp_catalog_page_sk
+    AND sa.w_warehouse_sk = ra.w_warehouse_sk
+ORDER BY sa.cp_catalog_page_sk, profit_rank
 LIMIT 100

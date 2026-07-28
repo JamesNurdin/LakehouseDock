@@ -1,58 +1,47 @@
-WITH joined_data AS (
-   SELECT
-       dd.d_year,
-       dd.d_month_seq,
-       w.w_warehouse_name,
-       w.w_state,
-       i.i_category,
-       i.i_class,
-       i.i_size,
-       i.i_brand,
-       p.p_promo_name,
-       r.r_reason_desc,
-       sr.sr_return_amt,
-       sr.sr_net_loss,
-       inv.inv_quantity_on_hand,
-       p.p_cost AS promo_cost
-   FROM store_returns sr
-   JOIN date_dim dd ON sr.sr_returned_date_sk = dd.d_date_sk
-   JOIN item i ON sr.sr_item_sk = i.i_item_sk
-   JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
-   JOIN inventory inv ON inv.inv_date_sk = dd.d_date_sk
-                     AND inv.inv_item_sk = i.i_item_sk
-   JOIN warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
-   LEFT JOIN promotion p ON p.p_item_sk = i.i_item_sk
-                         AND p.p_start_date_sk = dd.d_date_sk
-   WHERE dd.d_date BETWEEN DATE '2000-01-01' AND DATE '2000-12-31'
-     AND i.i_size IN ('small', 'large')
-     AND w.w_state = 'CA'
-),
-agg AS (
-   SELECT
-       d_year,
-       d_month_seq,
-       w_warehouse_name,
-       i_category,
-       i_class,
-       SUM(sr_return_amt) AS total_return_amt,
-       SUM(sr_net_loss) AS total_net_loss,
-       SUM(inv_quantity_on_hand) AS total_inventory,
-       SUM(promo_cost) AS total_promo_cost
-   FROM joined_data
-   GROUP BY d_year, d_month_seq, w_warehouse_name, i_category, i_class
-   HAVING SUM(sr_net_loss) > 1000
+WITH base_returns AS (
+    SELECT
+        wr.wr_return_amt,
+        wr.wr_return_quantity,
+        wr.wr_return_tax,
+        wr.wr_item_sk,
+        wr.wr_returned_time_sk,
+        wr.wr_web_page_sk,
+        wr.wr_refunded_customer_sk,
+        wr.wr_returned_date_sk
+    FROM web_returns wr
+    JOIN time_dim td ON wr.wr_returned_time_sk = td.t_time_sk
+    JOIN item i ON wr.wr_item_sk = i.i_item_sk
+    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    JOIN customer c ON wr.wr_refunded_customer_sk = c.c_customer_sk
+    WHERE wr.wr_return_tax > 0
+      AND c.c_preferred_cust_flag = 'Y'
+      AND wp.wp_autogen_flag = 'N'
 )
-SELECT
-   d_year,
-   d_month_seq,
-   w_warehouse_name,
-   i_category,
-   i_class,
-   total_return_amt,
-   total_net_loss,
-   total_inventory,
-   total_promo_cost,
-   RANK() OVER (PARTITION BY d_year ORDER BY total_net_loss DESC) AS net_loss_rank
-FROM agg
-ORDER BY d_year DESC, net_loss_rank
+SELECT *
+FROM (
+    SELECT
+        i.i_category AS category,
+        CAST(NULL AS VARCHAR) AS page_type,
+        td.t_hour AS hour,
+        SUM(br.wr_return_amt) AS total_return_amount,
+        COUNT(*) AS return_count
+    FROM base_returns br
+    JOIN item i ON br.wr_item_sk = i.i_item_sk
+    JOIN time_dim td ON br.wr_returned_time_sk = td.t_time_sk
+    GROUP BY ROLLUP (i.i_category, td.t_hour)
+
+    UNION ALL
+
+    SELECT
+        CAST(NULL AS VARCHAR) AS category,
+        wp.wp_type AS page_type,
+        td.t_hour AS hour,
+        SUM(br.wr_return_amt) AS total_return_amount,
+        COUNT(*) AS return_count
+    FROM base_returns br
+    JOIN web_page wp ON br.wr_web_page_sk = wp.wp_web_page_sk
+    JOIN time_dim td ON br.wr_returned_time_sk = td.t_time_sk
+    GROUP BY ROLLUP (wp.wp_type, td.t_hour)
+) AS combined
+ORDER BY total_return_amount DESC
 LIMIT 100

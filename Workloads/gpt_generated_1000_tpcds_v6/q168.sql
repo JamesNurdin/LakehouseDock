@@ -1,57 +1,66 @@
-WITH inv_agg AS (
-   SELECT inv_date_sk,
-          SUM(inv_quantity_on_hand) AS total_qty_on_hand
-   FROM inventory
-   WHERE inv_quantity_on_hand > 0
-   GROUP BY inv_date_sk
+/* Goal: Calculate total return amount per company and promotion for the year 2002, filtered by household income band, call‑center state, active promotions, business hours and high web‑return fees, then rank companies by their total return amount. */
+WITH sr_join AS (
+    SELECT
+        cc.cc_company_name        AS company_name,
+        p.p_promo_name            AS promo_name,
+        d_sr.d_year               AS year,
+        sr.sr_return_amt          AS return_amt,
+        t_sr.t_hour               AS hour
+    FROM store_returns sr
+    JOIN date_dim d_sr
+        ON sr.sr_returned_date_sk = d_sr.d_date_sk
+    JOIN time_dim t_sr
+        ON sr.sr_return_time_sk = t_sr.t_time_sk
+    JOIN household_demographics hd_sr
+        ON sr.sr_hdemo_sk = hd_sr.hd_demo_sk
+    JOIN call_center cc
+        ON cc.cc_closed_date_sk = d_sr.d_date_sk
+    JOIN promotion p
+        ON p.p_start_date_sk = d_sr.d_date_sk
+    WHERE d_sr.d_year = 2002
+      AND hd_sr.hd_income_band_sk IN (4, 10, 16)
+      AND cc.cc_state = 'CA'
+      AND p.p_discount_active = 'Y'
+      AND t_sr.t_hour BETWEEN 9 AND 17
 ),
-union_returns AS (
-   SELECT cr.cr_returned_date_sk,
-          cr.cr_return_quantity,
-          cr.cr_return_amount,
-          cr.cr_reason_sk,
-          cr.cr_catalog_page_sk,
-          cr.cr_refunded_customer_sk,
-          cr.cr_returning_customer_sk
-   FROM catalog_returns cr
-   JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-   WHERE d.d_year = 2001 AND d.d_month_seq = 1
-   UNION ALL
-   SELECT cr.cr_returned_date_sk,
-          cr.cr_return_quantity,
-          cr.cr_return_amount,
-          cr.cr_reason_sk,
-          cr.cr_catalog_page_sk,
-          cr.cr_refunded_customer_sk,
-          cr.cr_returning_customer_sk
-   FROM catalog_returns cr
-   JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-   WHERE d.d_year = 2002 AND d.d_month_seq = 12
+wr_join AS (
+    SELECT
+        cc.cc_company_name        AS company_name,
+        p.p_promo_name            AS promo_name,
+        d_wr.d_year               AS year,
+        wr.wr_return_amt          AS return_amt,
+        t_wr.t_hour               AS hour
+    FROM web_returns wr
+    JOIN date_dim d_wr
+        ON wr.wr_returned_date_sk = d_wr.d_date_sk
+    JOIN time_dim t_wr
+        ON wr.wr_returned_time_sk = t_wr.t_time_sk
+    JOIN household_demographics hd_wr
+        ON wr.wr_returning_hdemo_sk = hd_wr.hd_demo_sk
+    JOIN call_center cc
+        ON cc.cc_open_date_sk = d_wr.d_date_sk
+    JOIN promotion p
+        ON p.p_end_date_sk = d_wr.d_date_sk
+    WHERE d_wr.d_year = 2002
+      AND hd_wr.hd_income_band_sk IN (4, 10, 16)
+      AND cc.cc_state = 'CA'
+      AND p.p_discount_active = 'Y'
+      AND t_wr.t_hour BETWEEN 9 AND 17
+      AND wr.wr_fee > 50
+),
+combined AS (
+    SELECT company_name, promo_name, year, return_amt FROM sr_join
+    UNION ALL
+    SELECT company_name, promo_name, year, return_amt FROM wr_join
 )
 SELECT
-   d.d_year,
-   d.d_month_seq,
-   cp.cp_department,
-   r.r_reason_desc,
-   COUNT(DISTINCT u.cr_returning_customer_sk) AS distinct_returning_customers,
-   SUM(u.cr_return_quantity) AS total_return_qty,
-   SUM(u.cr_return_amount) AS total_return_amount,
-   SUM(CASE WHEN r.r_reason_desc LIKE '%color%' THEN u.cr_return_amount ELSE 0 END) AS color_related_return_amount,
-   SUM(i.total_qty_on_hand) AS total_inventory_on_hand,
-   COUNT(DISTINCT w.wp_web_page_sk) AS web_pages_touched
-FROM union_returns u
-JOIN date_dim d ON u.cr_returned_date_sk = d.d_date_sk
-JOIN catalog_page cp ON u.cr_catalog_page_sk = cp.cp_catalog_page_sk
-JOIN reason r ON u.cr_reason_sk = r.r_reason_sk
-JOIN inv_agg i ON i.inv_date_sk = d.d_date_sk
-JOIN customer c_refund ON u.cr_refunded_customer_sk = c_refund.c_customer_sk
-JOIN customer c_return ON u.cr_returning_customer_sk = c_return.c_customer_sk
-JOIN store s ON s.s_closed_date_sk = d.d_date_sk
-JOIN web_page w ON w.wp_customer_sk = c_return.c_customer_sk
-WHERE c_return.c_birth_country = 'United States'
-  AND cp.cp_type = 'Standard'
-  AND r.r_reason_id = 'AAAAAAAACBAAAAAA'
-  AND s.s_state = 'CA'
-GROUP BY d.d_year, d.d_month_seq, cp.cp_department, r.r_reason_desc
+    company_name,
+    promo_name,
+    year,
+    SUM(return_amt)                     AS total_return_amount,
+    COUNT(*)                            AS return_count,
+    ROW_NUMBER() OVER (PARTITION BY company_name ORDER BY SUM(return_amt) DESC) AS company_rank
+FROM combined
+GROUP BY company_name, promo_name, year
 ORDER BY total_return_amount DESC
 LIMIT 100

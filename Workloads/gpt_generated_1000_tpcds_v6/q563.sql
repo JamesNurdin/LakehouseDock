@@ -1,44 +1,70 @@
-WITH base AS (
+WITH sales AS (
     SELECT
-        cr.cr_warehouse_sk,
-        cr.cr_net_loss,
-        r.r_reason_desc,
-        w.w_warehouse_name,
-        w.w_county,
-        CASE
-            WHEN regexp_like(r.r_reason_desc, '(?i)product') THEN 'Product Issue'
-            WHEN regexp_like(r.r_reason_desc, '(?i)damaged') THEN 'Damaged Issue'
-            ELSE 'Other'
-        END AS reason_category
-    FROM catalog_returns cr
-    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
-    WHERE w.w_county LIKE '%County'
-      AND (regexp_like(r.r_reason_desc, '(?i)product')
-           OR regexp_like(r.r_reason_desc, '(?i)damaged'))
-),
-DamagedWarehouses AS (
-    SELECT DISTINCT cr_warehouse_sk
-    FROM base
-    WHERE reason_category = 'Damaged Issue'
+        cs.cs_item_sk,
+        cs.cs_call_center_sk,
+        cs.cs_sold_date_sk,
+        cs.cs_ship_date_sk,
+        cs.cs_bill_addr_sk,
+        cs.cs_ship_addr_sk,
+        cs.cs_catalog_page_sk,
+        cs.cs_net_paid,
+        cs.cs_net_profit,
+        cs.cs_order_number
+    FROM catalog_sales cs
 )
 SELECT
-    w.w_warehouse_name,
-    w.w_county,
-    CONCAT(w.w_warehouse_name, ' - ', w.w_county) AS full_location,
-    COUNT(*) AS total_returns,
-    SUM(b.cr_net_loss) AS total_net_loss,
-    AVG(b.cr_net_loss) AS avg_net_loss,
+    CASE WHEN GROUPING(i.i_item_id) = 0 THEN i.i_item_id ELSE 'ALL_ITEMS' END AS item_id,
+    CASE WHEN GROUPING(cc.cc_name) = 0 THEN cc.cc_name ELSE 'ALL_CALL_CENTERS' END AS call_center_name,
+    SUM(s.cs_net_paid) AS total_net_paid,
+    SUM(s.cs_net_profit) AS total_net_profit,
+    COUNT(DISTINCT s.cs_order_number) AS distinct_orders,
     CASE
-        WHEN SUM(b.cr_net_loss) > (SELECT AVG(cr_net_loss) FROM catalog_returns) THEN 'Above Avg Loss'
-        ELSE 'Below Avg Loss'
-    END AS loss_category
-FROM base b
-JOIN warehouse w ON b.cr_warehouse_sk = w.w_warehouse_sk
-WHERE b.cr_warehouse_sk IN (SELECT cr_warehouse_sk FROM DamagedWarehouses)
-GROUP BY
-    w.w_warehouse_name,
-    w.w_county,
-    CONCAT(w.w_warehouse_name, ' - ', w.w_county)
-ORDER BY total_net_loss DESC
+        WHEN SUM(s.cs_net_profit) > 10000 THEN 'HIGH'
+        WHEN SUM(s.cs_net_profit) > 0 THEN 'MEDIUM'
+        ELSE 'LOW'
+    END AS profit_bucket,
+    COUNT(DISTINCT i.i_category) AS distinct_categories,
+    MIN(d_sold.d_date) AS min_sold_date,
+    MAX(d_ship.d_date) AS max_ship_date
+FROM sales s
+JOIN item i
+    ON s.cs_item_sk = i.i_item_sk
+JOIN call_center cc
+    ON s.cs_call_center_sk = cc.cc_call_center_sk
+JOIN date_dim d_sold
+    ON s.cs_sold_date_sk = d_sold.d_date_sk
+JOIN date_dim d_ship
+    ON s.cs_ship_date_sk = d_ship.d_date_sk
+JOIN customer_address ca_bill
+    ON s.cs_bill_addr_sk = ca_bill.ca_address_sk
+JOIN customer_address ca_ship
+    ON s.cs_ship_addr_sk = ca_ship.ca_address_sk
+JOIN catalog_page cp
+    ON s.cs_catalog_page_sk = cp.cp_catalog_page_sk
+LEFT JOIN (
+    SELECT
+        wr.wr_item_sk,
+        wr.wr_returned_date_sk,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        COUNT(*) AS return_cnt
+    FROM web_returns wr
+    GROUP BY wr.wr_item_sk, wr.wr_returned_date_sk
+) wr
+    ON s.cs_item_sk = wr.wr_item_sk
+    AND s.cs_sold_date_sk = wr.wr_returned_date_sk
+JOIN date_dim d_cc_closed
+    ON cc.cc_closed_date_sk = d_cc_closed.d_date_sk
+JOIN date_dim d_cc_open
+    ON cc.cc_open_date_sk = d_cc_open.d_date_sk
+JOIN date_dim d_cp_start
+    ON cp.cp_start_date_sk = d_cp_start.d_date_sk
+JOIN date_dim d_cp_end
+    ON cp.cp_end_date_sk = d_cp_end.d_date_sk
+GROUP BY GROUPING SETS (
+    (i.i_item_id, cc.cc_name),
+    (i.i_item_id),
+    (cc.cc_name),
+    ()
+)
+ORDER BY total_net_profit DESC
 LIMIT 100

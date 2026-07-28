@@ -1,34 +1,35 @@
-WITH per_page_hour AS (
+WITH filtered_sales AS (
     SELECT
-        wp.wp_web_page_sk,
-        td.t_hour,
-        wp.wp_type,
-        SUM(wr.wr_return_amt) AS total_return_amt,
-        SUM(wr.wr_return_quantity) AS total_return_qty,
-        AVG(wr.wr_refunded_cash) AS avg_refunded_cash
-    FROM web_returns wr
-    JOIN time_dim td ON wr.wr_returned_time_sk = td.t_time_sk
-    JOIN web_page wp ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    WHERE td.t_hour IN (6, 12, 14)
-      AND wp.wp_creation_date_sk IN (2450800, 2450807)
-      AND wr.wr_return_amt > 100
-    GROUP BY wp.wp_web_page_sk, td.t_hour, wp.wp_type
-),
-type_summary AS (
-    SELECT
-        wp_type,
-        AVG(total_return_amt) AS avg_return_amt,
-        SUM(total_return_qty) AS sum_return_qty
-    FROM per_page_hour
-    GROUP BY wp_type
+        ws.ws_order_number,
+        ws.ws_net_profit,
+        ws.ws_quantity,
+        ws.ws_promo_sk,
+        ws.ws_web_page_sk,
+        ws.ws_sold_time_sk
+    FROM tpcds.web_sales ws
+    JOIN tpcds.promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    JOIN tpcds.web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    WHERE regexp_like(p.p_promo_name, '(?i)discount')
+      AND wp.wp_url LIKE '%example.com%'
 )
 SELECT
-    ts.wp_type,
-    ts.avg_return_amt,
-    ts.sum_return_qty
-FROM type_summary ts
-WHERE ts.avg_return_amt > (
-    SELECT AVG(total_return_amt) FROM per_page_hour
-)
-ORDER BY ts.avg_return_amt DESC
+    p.p_promo_id,
+    p.p_promo_name,
+    regexp_extract(p.p_promo_name, '(?i)(discount.*)', 1) AS promo_keyword,
+    concat(p.p_promo_name, ' - ', wp.wp_type) AS promo_page_type,
+    COUNT(DISTINCT ws.ws_order_number) AS order_count,
+    SUM(ws.ws_quantity) AS total_quantity,
+    SUM(ws.ws_net_profit) AS total_net_profit,
+    MIN(t.t_time) AS earliest_time,
+    MAX(t.t_time) AS latest_time
+FROM filtered_sales ws
+JOIN tpcds.promotion p ON ws.ws_promo_sk = p.p_promo_sk
+JOIN tpcds.web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+JOIN tpcds.time_dim t ON ws.ws_sold_time_sk = t.t_time_sk
+GROUP BY
+    p.p_promo_id,
+    p.p_promo_name,
+    regexp_extract(p.p_promo_name, '(?i)(discount.*)', 1),
+    concat(p.p_promo_name, ' - ', wp.wp_type)
+ORDER BY total_net_profit DESC
 LIMIT 100

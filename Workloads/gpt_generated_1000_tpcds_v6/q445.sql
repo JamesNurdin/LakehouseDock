@@ -1,35 +1,55 @@
-WITH agg AS (
-   SELECT
-       cp.cp_department,
-       cp.cp_catalog_number,
-       r.r_reason_desc,
-       SUM(cr.cr_return_amount) AS total_return_amount,
-       SUM(ws.ws_net_paid_inc_ship_tax) AS total_sales,
-       COUNT(DISTINCT cr.cr_order_number) AS return_orders,
-       COUNT(DISTINCT ws.ws_order_number) AS sales_orders
-   FROM catalog_returns cr
-   JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-   JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-   JOIN customer_demographics cd ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-   JOIN web_sales ws ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
-   WHERE cp.cp_department = 'Sports'
-     AND cp.cp_type = 'Promotional'
-     AND r.r_reason_desc LIKE '%damaged%'
-     AND cd.cd_gender = 'M'
-     AND cd.cd_education_status = 'College'
-     AND cr.cr_return_amount > 100
-     AND ws.ws_ext_tax > 50
-     AND ws.ws_quantity >= 2
-   GROUP BY cp.cp_department, cp.cp_catalog_number, r.r_reason_desc
-)
+WITH
+    store_cte AS (
+        SELECT
+            sr.sr_reason_sk AS reason_sk,
+            sr.sr_net_loss AS net_loss,
+            ca.ca_street_type AS street_type,
+            ca.ca_street_name AS street_name,
+            r.r_reason_desc AS reason_desc
+        FROM store_returns sr
+        JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
+        JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+        WHERE regexp_like(ca.ca_street_name, '^Elm')
+          AND ca.ca_city LIKE '%Ville%'
+          AND EXISTS (
+              SELECT 1 FROM reason r2
+              WHERE r2.r_reason_sk = sr.sr_reason_sk
+                AND regexp_like(r2.r_reason_desc, 'product')
+          )
+    ),
+    web_cte AS (
+        SELECT
+            wr.wr_reason_sk AS reason_sk,
+            wr.wr_net_loss AS net_loss,
+            ca_ref.ca_street_type AS street_type,
+            ca_ref.ca_street_name AS street_name,
+            r.r_reason_desc AS reason_desc
+        FROM web_returns wr
+        JOIN web_sales ws
+            ON wr.wr_order_number = ws.ws_order_number
+           AND wr.wr_item_sk = ws.ws_item_sk
+        JOIN customer_address ca_ref ON wr.wr_refunded_addr_sk = ca_ref.ca_address_sk
+        JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
+        WHERE regexp_like(ca_ref.ca_street_name, '^Elm')
+          AND ca_ref.ca_city LIKE '%Ville%'
+          AND EXISTS (
+              SELECT 1 FROM reason r2
+              WHERE r2.r_reason_sk = wr.wr_reason_sk
+                AND regexp_like(r2.r_reason_desc, 'product')
+          )
+    )
 SELECT
-    cp_department,
-    cp_catalog_number,
-    r_reason_desc,
-    total_return_amount,
-    total_sales,
-    return_orders,
-    sales_orders,
-    RANK() OVER (PARTITION BY cp_department ORDER BY total_return_amount DESC) AS dept_return_rank
-FROM agg
-ORDER BY dept_return_rank, cp_catalog_number
+    reason_desc,
+    street_type,
+    COUNT(*) AS return_count,
+    SUM(net_loss) AS total_net_loss,
+    CONCAT('Street ', street_type) AS street_type_label,
+    regexp_extract(street_name, '(\\w+)$') AS street_name_suffix
+FROM (
+    SELECT * FROM store_cte
+    UNION ALL
+    SELECT * FROM web_cte
+) combined
+GROUP BY reason_desc, street_type, street_name
+ORDER BY total_net_loss DESC
+LIMIT 100

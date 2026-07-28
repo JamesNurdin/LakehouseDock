@@ -1,61 +1,36 @@
-WITH income_ranges AS (
+WITH filtered AS (
     SELECT
-        ib_income_band_sk,
-        CAST(ib_lower_bound AS varchar) || '-' || CAST(ib_upper_bound AS varchar) AS income_range
-    FROM income_band
+        i.i_brand_id,
+        i.i_class,
+        i.i_category,
+        sr.sr_return_amt,
+        sr.sr_store_credit,
+        sr.sr_return_ship_cost,
+        sr.sr_reversed_charge,
+        sr.sr_return_quantity
+    FROM tpcds.item i
+    JOIN tpcds.store_returns sr
+        ON sr.sr_item_sk = i.i_item_sk
+    WHERE i.i_rec_start_date >= DATE '1999-01-01'
+      AND i.i_rec_start_date <= DATE '2000-12-31'
+      AND i.i_brand_id IN (5003002, 2004001)
+      AND i.i_class = 'furniture'
+      AND sr.sr_return_amt > 100
+      AND sr.sr_store_credit < 500
+      AND sr.sr_return_ship_cost BETWEEN 10 AND 200
+      AND sr.sr_reversed_charge > 50
 )
-SELECT DISTINCT
-    u.return_date_sk,
-    u.return_amount_inc_tax,
-    u.net_loss,
-    u.reason_desc,
-    u.income_range,
-    u.buy_potential
-FROM (
-    SELECT
-        cr.cr_returned_date_sk AS return_date_sk,
-        cr.cr_return_amt_inc_tax AS return_amount_inc_tax,
-        cr.cr_net_loss AS net_loss,
-        r.r_reason_desc AS reason_desc,
-        ir.income_range,
-        hd.hd_buy_potential AS buy_potential
-    FROM catalog_returns cr
-    JOIN catalog_sales cs
-        ON cr.cr_order_number = cs.cs_order_number
-        AND cr.cr_item_sk = cs.cs_item_sk
-    JOIN household_demographics hd
-        ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
-    JOIN reason r
-        ON cr.cr_reason_sk = r.r_reason_sk
-    JOIN income_ranges ir
-        ON hd.hd_income_band_sk = ir.ib_income_band_sk
-    WHERE cr.cr_net_loss > (
-        SELECT AVG(cr2.cr_net_loss)
-        FROM catalog_returns cr2
-        WHERE cr2.cr_reason_sk = cr.cr_reason_sk
-    )
-      AND cr.cr_return_amt_inc_tax > 1000
-    UNION ALL
-    SELECT
-        sr.sr_returned_date_sk AS return_date_sk,
-        sr.sr_return_amt_inc_tax AS return_amount_inc_tax,
-        sr.sr_net_loss AS net_loss,
-        r.r_reason_desc AS reason_desc,
-        ir.income_range,
-        hd.hd_buy_potential AS buy_potential
-    FROM store_returns sr
-    JOIN household_demographics hd
-        ON sr.sr_hdemo_sk = hd.hd_demo_sk
-    JOIN reason r
-        ON sr.sr_reason_sk = r.r_reason_sk
-    JOIN income_ranges ir
-        ON hd.hd_income_band_sk = ir.ib_income_band_sk
-    WHERE sr.sr_net_loss > (
-        SELECT AVG(sr2.sr_net_loss)
-        FROM store_returns sr2
-        WHERE sr2.sr_reason_sk = sr.sr_reason_sk
-    )
-      AND sr.sr_return_amt_inc_tax > 1000
-) u
-ORDER BY u.return_amount_inc_tax DESC
-LIMIT 100
+SELECT
+    f.i_brand_id,
+    f.i_class,
+    COUNT(*) AS total_returns,
+    SUM(f.sr_return_amt) AS total_return_amount,
+    AVG(f.sr_store_credit) AS avg_store_credit,
+    MIN(f.sr_return_ship_cost) AS min_ship_cost,
+    MAX(f.sr_return_ship_cost) AS max_ship_cost,
+    (SELECT AVG(sr2.sr_return_amt) FROM tpcds.store_returns sr2) AS overall_avg_return_amt
+FROM filtered f
+GROUP BY f.i_brand_id, f.i_class
+HAVING SUM(f.sr_return_amt) > 1000
+ORDER BY total_return_amount DESC
+LIMIT 10

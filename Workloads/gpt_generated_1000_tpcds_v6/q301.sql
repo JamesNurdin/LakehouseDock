@@ -1,10 +1,12 @@
 SELECT
-  sm.sm_ship_mode_id,
-  sm.sm_carrier,
-  sm.sm_type,
-  COUNT(*) AS mode_cnt
-FROM tpcds.ship_mode AS sm
-WHERE sm.sm_carrier IN ('USPS', 'DHL')
-  AND sm.sm_type = 'OVERNIGHT'
-GROUP BY sm.sm_ship_mode_id, sm.sm_carrier, sm.sm_type
+  cc_call_center_id,
+  cc_name,
+  cc_city,
+  cc_state,
+  cc_sq_ft
+FROM
+  call_center
+WHERE
+  cc_company = 4
+  AND cc_sq_ft > 0
 LIMIT 100

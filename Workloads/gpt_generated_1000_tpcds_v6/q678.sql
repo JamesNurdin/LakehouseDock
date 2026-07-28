@@ -1,51 +1,59 @@
-/* goal: Compare refund and return activity by time, loss status, and household characteristics using a UNION of two analytic sub‑queries */
-
-WITH refunded AS (
+WITH ss_agg AS (
     SELECT
-        wr.wr_returned_date_sk AS return_date_key,
-        td.t_hour AS hour_of_day,
-        CASE WHEN wr.wr_net_loss > 0 THEN 'Loss' ELSE 'NoLoss' END AS loss_category,
-        (
-            SELECT COUNT(DISTINCT ib_sub.ib_income_band_sk)
-            FROM household_demographics hd_sub
-            JOIN income_band ib_sub ON hd_sub.hd_income_band_sk = ib_sub.ib_income_band_sk
-            WHERE hd_sub.hd_demo_sk = c.c_current_hdemo_sk
-        ) AS household_income_band_cnt
-    FROM web_returns AS wr
-    JOIN time_dim AS td ON wr.wr_returned_time_sk = td.t_time_sk
-    JOIN customer AS c ON wr.wr_refunded_customer_sk = c.c_customer_sk
-    JOIN household_demographics AS hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
-    JOIN income_band AS ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    WHERE ib.ib_upper_bound > 100000
-),
-returning AS (
-    SELECT
-        wr.wr_returned_date_sk AS return_date_key,
-        td.t_hour AS hour_of_day,
-        CASE WHEN wr.wr_return_quantity > 1 THEN 'Multiple' ELSE 'Single' END AS quantity_flag,
-        (
-            SELECT COUNT(DISTINCT ib_sub.ib_income_band_sk)
-            FROM household_demographics hd_sub
-            JOIN income_band ib_sub ON hd_sub.hd_income_band_sk = ib_sub.ib_income_band_sk
-            WHERE hd_sub.hd_demo_sk = c_ret.c_current_hdemo_sk
-        ) AS household_income_band_cnt
-    FROM web_returns AS wr
-    JOIN time_dim AS td ON wr.wr_returned_time_sk = td.t_time_sk
-    JOIN customer AS c_ret ON wr.wr_returning_customer_sk = c_ret.c_customer_sk
-    JOIN household_demographics AS hd_ret ON c_ret.c_current_hdemo_sk = hd_ret.hd_demo_sk
-    WHERE hd_ret.hd_vehicle_count >= 2
+        ss.ss_item_sk,
+        ss.ss_sold_date_sk,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales,
+        SUM(ss.ss_net_profit) AS total_store_profit
+    FROM store_sales ss
+    GROUP BY ss.ss_item_sk, ss.ss_sold_date_sk
 )
-SELECT return_date_key,
-       hour_of_day,
-       loss_category AS metric,
-       household_income_band_cnt
-FROM refunded
-UNION ALL
-SELECT return_date_key,
-       hour_of_day,
-       quantity_flag AS metric,
-       household_income_band_cnt
-FROM returning
-ORDER BY return_date_key DESC,
-         metric
-LIMIT 100
+SELECT
+    d.d_year,
+    i.i_category,
+    i.i_brand,
+    SUM(sa.total_store_sales) AS store_sales,
+    SUM(cs.cs_ext_sales_price) AS catalog_sales,
+    SUM(ws.ws_ext_sales_price) AS web_sales,
+    COUNT(DISTINCT i.i_item_id) AS distinct_items_sold
+FROM ss_agg sa
+JOIN date_dim d
+  ON sa.ss_sold_date_sk = d.d_date_sk
+JOIN item i
+  ON sa.ss_item_sk = i.i_item_sk
+LEFT JOIN catalog_sales cs
+  ON cs.cs_item_sk = i.i_item_sk
+  AND cs.cs_sold_date_sk = d.d_date_sk
+LEFT JOIN web_sales ws
+  ON ws.ws_item_sk = i.i_item_sk
+  AND ws.ws_sold_date_sk = d.d_date_sk
+LEFT JOIN call_center cc
+  ON cs.cs_call_center_sk = cc.cc_call_center_sk
+LEFT JOIN catalog_page cp
+  ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+LEFT JOIN ship_mode sm
+  ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+LEFT JOIN web_site w
+  ON ws.ws_web_site_sk = w.web_site_sk
+LEFT JOIN customer_demographics cd
+  ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN household_demographics hd
+  ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+LEFT JOIN income_band ib
+  ON hd.hd_income_band_sk = ib.ib_income_band_sk
+LEFT JOIN date_dim d_cs
+  ON cs.cs_sold_date_sk = d_cs.d_date_sk
+WHERE EXISTS (
+    SELECT 1
+    FROM item i2
+    WHERE i2.i_brand = i.i_brand
+      AND i2.i_color = i.i_color
+      AND i2.i_item_sk <> i.i_item_sk
+)
+  AND d.d_year = 2002
+GROUP BY GROUPING SETS (
+    (d.d_year, i.i_category, i.i_brand),
+    (d.d_year, i.i_category),
+    (d.d_year)
+)
+HAVING SUM(sa.total_store_sales) > 10000
+ORDER BY d.d_year, i.i_category, i.i_brand

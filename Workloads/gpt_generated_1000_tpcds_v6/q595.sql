@@ -1,52 +1,37 @@
-WITH promo_sales AS (
+WITH agg_sales AS (
     SELECT
-        p.p_promo_sk,
-        p.p_promo_name,
-        cs.cs_bill_customer_sk AS cs_customer_sk,
-        cs.cs_ship_hdemo_sk,
-        cs.cs_ext_discount_amt,
-        cs.cs_net_profit AS cs_net_profit,
-        ws.ws_bill_customer_sk AS ws_customer_sk,
-        ws.ws_ship_customer_sk,
-        ws.ws_ext_ship_cost,
-        ws.ws_net_profit AS ws_net_profit
-    FROM
-        promotion p
-        JOIN catalog_sales cs ON cs.cs_promo_sk = p.p_promo_sk
-        JOIN web_sales ws ON ws.ws_promo_sk = p.p_promo_sk
-    WHERE
-        p.p_channel_tv = 'N'
-        AND p.p_purpose = 'Unknown'
-        AND cs.cs_ext_discount_amt > 1000
-        AND cs.cs_ship_hdemo_sk IN (4052, 5455)
-        AND ws.ws_ext_ship_cost > 200
-        AND ws.ws_ship_customer_sk BETWEEN 1000000 AND 12000000
-),
-agg AS (
-    SELECT
-        p_promo_sk,
-        p_promo_name,
-        cs_customer_sk,
-        ws_customer_sk,
-        SUM(cs_net_profit) AS catalog_profit,
-        SUM(ws_net_profit) AS web_profit,
-        SUM(cs_net_profit + ws_net_profit) AS total_profit
-    FROM promo_sales
-    GROUP BY GROUPING SETS (
-        (p_promo_sk, p_promo_name, cs_customer_sk, ws_customer_sk),
-        (p_promo_sk, p_promo_name)
-    )
+        ss_hdemo_sk,
+        SUM(ss_ext_sales_price) AS total_sales,
+        SUM(ss_net_profit) AS total_profit,
+        COUNT(*) AS txn_count,
+        AVG(ss_ext_sales_price) AS avg_sale
+    FROM store_sales
+    WHERE ss_ext_wholesale_cost > 500
+      AND ss_list_price BETWEEN 50 AND 150
+    GROUP BY ss_hdemo_sk
+    HAVING SUM(ss_ext_sales_price) > 10000
 )
 SELECT
-    p_promo_sk,
-    p_promo_name,
-    cs_customer_sk,
-    ws_customer_sk,
-    catalog_profit,
-    web_profit,
-    total_profit,
-    RANK() OVER (PARTITION BY p_promo_sk ORDER BY total_profit DESC) AS profit_rank,
-    (SELECT AVG(total_profit) FROM agg) AS avg_total_profit_all_promos
-FROM agg
-ORDER BY total_profit DESC
+    hd.hd_demo_sk,
+    ib.ib_income_band_sk,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    hd.hd_buy_potential,
+    hd.hd_vehicle_count,
+    agg.total_sales,
+    agg.total_profit,
+    CASE
+        WHEN agg.total_profit / NULLIF(agg.total_sales, 0) > 0.2 THEN 'High Margin'
+        WHEN agg.total_profit / NULLIF(agg.total_sales, 0) > 0.1 THEN 'Medium Margin'
+        ELSE 'Low Margin'
+    END AS profit_category,
+    RANK() OVER (PARTITION BY ib.ib_income_band_sk ORDER BY agg.total_sales DESC) AS sales_rank_income_band,
+    (SELECT AVG(total_sales) FROM agg_sales) AS overall_avg_sales
+FROM agg_sales agg
+JOIN household_demographics hd ON agg.ss_hdemo_sk = hd.hd_demo_sk
+JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+WHERE ib.ib_upper_bound <= 150000
+  AND hd.hd_vehicle_count >= 0
+  AND hd.hd_buy_potential <> 'Unknown'
+ORDER BY ib.ib_income_band_sk, sales_rank_income_band
 LIMIT 100

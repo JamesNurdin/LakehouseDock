@@ -1,57 +1,61 @@
-/*
-Goal: Identify each web page together with its author's name, creation and access dates, and character count. The query filters to pages created on non‑weekend days for customers born in selected months, only keeps customers that have at least one page larger than 5,000 characters, and then ranks the pages per customer by character count, creation date and recent access using window functions. A scalar subquery provides the total number of pages each customer owns.
-*/
-WITH page_info AS (
+WITH inventory_agg AS (
+    SELECT inv_item_sk,
+           SUM(inv_quantity_on_hand) AS total_quantity_on_hand
+    FROM inventory
+    GROUP BY inv_item_sk
+),
+item_sales AS (
     SELECT
-        wp.wp_web_page_id,
-        wp.wp_url,
-        wp.wp_type,
-        wp.wp_char_count,
-        wp.wp_creation_date_sk,
-        wp.wp_access_date_sk,
-        wp.wp_customer_sk,
-        c.c_first_name,
-        c.c_last_name,
-        c.c_birth_month,
-        d_cre.d_date          AS creation_date,
-        d_acc.d_date          AS access_date,
-        d_cre.d_weekend       AS creation_weekend,
-        d_acc.d_weekend       AS access_weekend
-    FROM web_page wp
-    JOIN customer c
-        ON wp.wp_customer_sk = c.c_customer_sk
-    JOIN date_dim d_cre
-        ON wp.wp_creation_date_sk = d_cre.d_date_sk
-    JOIN date_dim d_acc
-        ON wp.wp_access_date_sk = d_acc.d_date_sk
-    WHERE
-        wp.wp_type = 'Content'               -- predicate 1
-        AND c.c_birth_month IN (4, 10, 12)    -- predicate 2
-        AND d_cre.d_weekend = 'N'             -- predicate 3
+        i.i_item_id,
+        i.i_product_name,
+        s.s_store_name,
+        s.s_state,
+        SUM(ss.ss_ext_sales_price) AS total_store_sales,
+        SUM(ws.ws_ext_sales_price) AS total_web_sales,
+        MAX(ia.total_quantity_on_hand) AS total_inventory,
+        COUNT(DISTINCT c.c_customer_sk) AS distinct_customers,
+        AVG(p.p_cost) AS avg_promo_cost,
+        MIN(ib.ib_lower_bound) AS min_income_lower,
+        MAX(ib.ib_upper_bound) AS max_income_upper
+    FROM item i
+    JOIN inventory_agg ia ON i.i_item_sk = ia.inv_item_sk
+    JOIN promotion p ON p.p_item_sk = i.i_item_sk
+    JOIN store_sales ss ON ss.ss_item_sk = i.i_item_sk
+    JOIN store s ON s.s_store_sk = ss.ss_store_sk
+    JOIN store_returns sr ON sr.sr_item_sk = i.i_item_sk
+        AND sr.sr_ticket_number = ss.ss_ticket_number
+    JOIN catalog_returns cr ON cr.cr_item_sk = i.i_item_sk
+    JOIN web_sales ws ON ws.ws_item_sk = i.i_item_sk
+    JOIN web_page wp ON wp.wp_web_page_sk = ws.ws_web_page_sk
+    JOIN web_returns wr ON wr.wr_item_sk = i.i_item_sk
+        AND wr.wr_order_number = ws.ws_order_number
+    JOIN time_dim t ON t.t_time_sk = ss.ss_sold_time_sk
+    JOIN customer c ON c.c_customer_sk = ss.ss_customer_sk
+    JOIN customer_address ca ON ca.ca_address_sk = ss.ss_addr_sk
+    JOIN customer_demographics cd ON cd.cd_demo_sk = ss.ss_cdemo_sk
+    JOIN household_demographics hd ON hd.hd_demo_sk = ss.ss_hdemo_sk
+    JOIN income_band ib ON ib.ib_income_band_sk = hd.hd_income_band_sk
+    WHERE t.t_hour = 14
+      AND i.i_brand = 'Brand#12'
+      AND p.p_response_target = 1
+      AND s.s_state = 'CA'
+      AND wp.wp_max_ad_count = 0
+    GROUP BY i.i_item_id, i.i_product_name, s.s_store_name, s.s_state
+    HAVING SUM(ss.ss_ext_sales_price) > 10000
 )
 SELECT
-    pi.wp_web_page_id,
-    pi.wp_url,
-    pi.c_first_name,
-    pi.c_last_name,
-    pi.creation_date,
-    pi.access_date,
-    pi.wp_char_count,
-    (
-        SELECT COUNT(*)
-        FROM web_page wp2
-        WHERE wp2.wp_customer_sk = pi.wp_customer_sk
-    ) AS pages_per_customer,
-    RANK() OVER (PARTITION BY pi.wp_customer_sk ORDER BY pi.wp_char_count DESC) AS char_count_rank,
-    DENSE_RANK() OVER (PARTITION BY pi.wp_customer_sk ORDER BY pi.creation_date) AS creation_date_dense_rank,
-    ROW_NUMBER() OVER (PARTITION BY pi.wp_customer_sk ORDER BY pi.access_date DESC) AS recent_access_rownum
-FROM page_info pi
-WHERE EXISTS (
-    SELECT 1
-    FROM web_page wp3
-    WHERE wp3.wp_customer_sk = pi.wp_customer_sk
-      AND wp3.wp_char_count > 5000
-)
-ORDER BY
-    pi.c_last_name,
-    char_count_rank
+    i_item_id,
+    i_product_name,
+    s_store_name,
+    s_state,
+    total_store_sales,
+    total_web_sales,
+    total_inventory,
+    distinct_customers,
+    avg_promo_cost,
+    min_income_lower,
+    max_income_upper,
+    RANK() OVER (ORDER BY total_store_sales DESC) AS sales_rank
+FROM item_sales
+ORDER BY total_store_sales DESC
+LIMIT 100

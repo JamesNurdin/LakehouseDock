@@ -1,57 +1,78 @@
-WITH wr_base AS (
+WITH sales_data AS (
     SELECT
-        wr.wr_returned_date_sk,
-        wr.wr_returned_time_sk,
-        wr.wr_return_quantity,
+        d.d_year,
+        t.t_am_pm,
+        i.i_brand,
+        i.i_item_id,
+        ca.ca_state,
+        sm.sm_carrier,
+        p.p_promo_name,
+        cs.cs_order_number,
+        cs.cs_quantity,
+        cs.cs_net_paid,
+        ws.ws_net_paid,
+        cr.cr_return_amount,
         wr.wr_return_amt,
-        wr.wr_account_credit,
-        wr.wr_refunded_hdemo_sk,
-        wr.wr_returning_hdemo_sk,
-        wr.wr_returning_addr_sk
-    FROM web_returns wr
-    WHERE wr.wr_return_quantity > 1
-      AND wr.wr_return_amt BETWEEN 10 AND 500
-      AND wr.wr_account_credit < 500
+        sr.sr_return_amt,
+        c.c_customer_sk
+    FROM tpcds.date_dim d
+    JOIN tpcds.store_returns sr
+        ON d.d_date_sk = sr.sr_returned_date_sk
+    JOIN tpcds.time_dim t
+        ON sr.sr_return_time_sk = t.t_time_sk
+    JOIN tpcds.item i
+        ON sr.sr_item_sk = i.i_item_sk
+    JOIN tpcds.customer c
+        ON sr.sr_customer_sk = c.c_customer_sk
+    JOIN tpcds.customer_demographics cd
+        ON sr.sr_cdemo_sk = cd.cd_demo_sk
+    JOIN tpcds.customer_address ca
+        ON sr.sr_addr_sk = ca.ca_address_sk
+    JOIN tpcds.catalog_returns cr
+        ON i.i_item_sk = cr.cr_item_sk
+    JOIN tpcds.catalog_sales cs
+        ON cr.cr_order_number = cs.cs_order_number
+    JOIN tpcds.promotion p
+        ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN tpcds.inventory inv
+        ON i.i_item_sk = inv.inv_item_sk
+    JOIN tpcds.catalog_page cp
+        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN tpcds.ship_mode sm
+        ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN tpcds.web_page wp
+        ON wp.wp_customer_sk = c.c_customer_sk
+    JOIN tpcds.web_sales ws
+        ON wp.wp_web_page_sk = ws.ws_web_page_sk
+    JOIN tpcds.web_returns wr
+        ON wp.wp_web_page_sk = wr.wr_web_page_sk
+    WHERE
+        d.d_year = 2001
+        AND t.t_am_pm = 'PM'
+        AND i.i_brand = 'Brand#45'
+        AND ca.ca_state = 'CA'
+        AND sm.sm_carrier = 'USPS'
+        AND p.p_discount_active = 'Y'
+        AND cs.cs_quantity > 10
+        AND EXISTS (
+            SELECT 1
+            FROM tpcds.web_returns wr2
+            WHERE wr2.wr_refunded_customer_sk = c.c_customer_sk
+              AND wr2.wr_return_amt > 100
+        )
 )
 SELECT
-    wr.wr_returned_date_sk AS return_date_sk,
-    t.t_hour,
-    t.t_meal_time,
-    hd_refunded.hd_demo_sk AS refunded_demo_sk,
-    hd_refunded.hd_dep_count,
-    hd_refunded.hd_vehicle_count,
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    wr.wr_return_quantity,
-    wr.wr_return_amt,
-    CASE
-        WHEN wr.wr_return_amt >= 200 THEN 'High'
-        WHEN wr.wr_return_amt >= 50  THEN 'Medium'
-        ELSE 'Low'
-    END AS return_amount_category,
-    ROW_NUMBER() OVER (PARTITION BY ib.ib_income_band_sk ORDER BY wr.wr_return_amt DESC) AS rn_income_band
-FROM wr_base wr
-JOIN time_dim t
-  ON wr.wr_returned_time_sk = t.t_time_sk
-JOIN household_demographics hd_refunded
-  ON wr.wr_refunded_hdemo_sk = hd_refunded.hd_demo_sk
-JOIN household_demographics hd_returning
-  ON wr.wr_returning_hdemo_sk = hd_returning.hd_demo_sk
-JOIN income_band ib
-  ON hd_refunded.hd_income_band_sk = ib.ib_income_band_sk
-WHERE
-    hd_refunded.hd_dep_count BETWEEN 1 AND 8
-    AND hd_refunded.hd_vehicle_count >= 0
-    AND ib.ib_lower_bound >= 40000
-    AND ib.ib_upper_bound <= 180000
-    AND t.t_hour BETWEEN 9 AND 17
-    AND t.t_meal_time = 'Lunch'
-    AND wr.wr_return_amt > 20
-    AND EXISTS (
-        SELECT 1
-        FROM income_band ib2
-        WHERE ib2.ib_income_band_sk = hd_returning.hd_income_band_sk
-          AND ib2.ib_upper_bound > 150000
-    )
-ORDER BY rn_income_band
+    d_year,
+    i_brand,
+    sm_carrier,
+    SUM(cs_net_paid) AS total_catalog_sales,
+    SUM(ws_net_paid) AS total_web_sales,
+    SUM(cr_return_amount) AS total_catalog_returns,
+    SUM(wr_return_amt) AS total_web_returns,
+    SUM(sr_return_amt) AS total_store_returns,
+    COUNT(DISTINCT cs_order_number) AS distinct_orders
+FROM sales_data
+GROUP BY ROLLUP (d_year, i_brand, sm_carrier)
+HAVING SUM(cs_net_paid) + SUM(ws_net_paid) > 10000
+ORDER BY d_year, i_brand, sm_carrier
 LIMIT 100

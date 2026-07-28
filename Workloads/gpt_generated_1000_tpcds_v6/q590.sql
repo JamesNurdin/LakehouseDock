@@ -1,56 +1,50 @@
-/* goal: Compare total sales and profit performance of quarterly vs monthly catalog pages, enriched with average wholesale cost per warehouse, using a CTE, a scalar subquery, CASE logic, and a UNION ALL set operation. */
-WITH sales_by_page AS (
+/*
+Goal: Compare store and web sales performance per item for a specific brand and promotional channel in fiscal year 2001, identify which channel generated higher revenue per item, rank items within each brand by store sales, and return the top 100 records.
+*/
+WITH combined_sales AS (
     SELECT
-        cp.cp_catalog_page_sk,
-        cp.cp_type,
-        cp.cp_catalog_page_number,
-        cs.cs_warehouse_sk,
-        SUM(cs.cs_ext_sales_price) AS total_sales,
-        SUM(cs.cs_net_profit) AS total_profit,
-        COUNT(*) AS sales_cnt
-    FROM tpcds.catalog_sales cs
-    JOIN tpcds.catalog_page cp
-        ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-    WHERE cs.cs_sold_date_sk BETWEEN 2450000 AND 2459999
-    GROUP BY
-        cp.cp_catalog_page_sk,
-        cp.cp_type,
-        cp.cp_catalog_page_number,
-        cs.cs_warehouse_sk
+        i.i_item_sk,
+        i.i_brand,
+        i.i_manufact,
+        d_ss.d_year AS d_year,
+        SUM(ss.ss_ext_sales_price) AS store_sales,
+        SUM(ws.ws_ext_sales_price) AS web_sales,
+        CASE
+            WHEN SUM(ss.ss_ext_sales_price) > SUM(ws.ws_ext_sales_price) THEN 'StoreHigher'
+            ELSE 'WebHigher'
+        END AS higher_channel
+    FROM store_sales ss
+    JOIN date_dim d_ss
+        ON ss.ss_sold_date_sk = d_ss.d_date_sk
+    JOIN item i
+        ON ss.ss_item_sk = i.i_item_sk
+    JOIN promotion p
+        ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN date_dim d_promo_start
+        ON p.p_start_date_sk = d_promo_start.d_date_sk
+    JOIN date_dim d_promo_end
+        ON p.p_end_date_sk = d_promo_end.d_date_sk
+    JOIN web_sales ws
+        ON ws.ws_item_sk = i.i_item_sk
+        AND ws.ws_promo_sk = p.p_promo_sk
+    JOIN date_dim d_ws
+        ON ws.ws_sold_date_sk = d_ws.d_date_sk
+    WHERE d_ss.d_year = 2001                                   -- fiscal year filter
+      AND d_ss.d_month_seq BETWEEN 1210 AND 1220               -- month‑sequence range filter
+      AND d_ss.d_weekend = 'N'                                 -- exclude weekends
+      AND i.i_brand = 'Brand#12'                               -- focus on a specific brand
+      AND p.p_channel_dmail = 'Y'                              -- promotions sent by dmail
+    GROUP BY i.i_item_sk, i.i_brand, i.i_manufact, d_ss.d_year
 )
 SELECT
-    s.cp_type,
-    s.cp_catalog_page_number,
-    s.cs_warehouse_sk,
-    s.total_sales,
-    s.total_profit,
-    CASE WHEN s.total_profit > 10000 THEN 'HIGH' ELSE 'LOW' END AS profit_category,
-    (
-        SELECT AVG(cs2.cs_wholesale_cost)
-        FROM tpcds.catalog_sales cs2
-        WHERE cs2.cs_warehouse_sk = s.cs_warehouse_sk
-    ) AS avg_wholesale_cost_warehouse
-FROM sales_by_page s
-WHERE s.cp_type = 'quarterly'
-  AND s.total_sales > 10000
-
-UNION ALL
-
-SELECT
-    s.cp_type,
-    s.cp_catalog_page_number,
-    s.cs_warehouse_sk,
-    s.total_sales,
-    s.total_profit,
-    CASE WHEN s.total_profit > 8000 THEN 'HIGH' ELSE 'LOW' END AS profit_category,
-    (
-        SELECT AVG(cs2.cs_wholesale_cost)
-        FROM tpcds.catalog_sales cs2
-        WHERE cs2.cs_warehouse_sk = s.cs_warehouse_sk
-    ) AS avg_wholesale_cost_warehouse
-FROM sales_by_page s
-WHERE s.cp_type = 'monthly'
-  AND s.total_sales > 8000
-
-ORDER BY total_sales DESC
+    i_item_sk,
+    i_brand,
+    i_manufact,
+    d_year,
+    store_sales,
+    web_sales,
+    higher_channel,
+    ROW_NUMBER() OVER (PARTITION BY i_brand ORDER BY store_sales DESC) AS brand_store_sales_rank
+FROM combined_sales
+ORDER BY store_sales DESC
 LIMIT 100

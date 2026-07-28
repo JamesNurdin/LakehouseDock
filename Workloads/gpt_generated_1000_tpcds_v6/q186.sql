@@ -1,57 +1,66 @@
-WITH sales_agg AS (
-  SELECT
-    cs.cs_order_number,
-    cs.cs_sold_date_sk,
-    cc.cc_name,
-    cp.cp_department,
-    sm.sm_type,
-    w.w_warehouse_name,
-    hd.hd_vehicle_count,
-    ca.ca_state,
-    SUM(cs.cs_sales_price) AS total_sales,
-    SUM(cs.cs_net_profit) AS total_profit,
-    SUM(CASE WHEN sr.sr_return_quantity IS NOT NULL THEN sr.sr_return_quantity ELSE 0 END) AS total_store_returns,
-    SUM(CASE WHEN wr.wr_return_quantity IS NOT NULL THEN wr.wr_return_quantity ELSE 0 END) AS total_web_returns
-  FROM catalog_sales cs
-  JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
-  JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-  JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-  JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
-  JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-  JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
-  LEFT JOIN store_returns sr ON sr.sr_hdemo_sk = hd.hd_demo_sk AND sr.sr_addr_sk = ca.ca_address_sk
-  LEFT JOIN web_returns wr ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk AND wr.wr_refunded_addr_sk = ca.ca_address_sk
-  WHERE cc.cc_state = 'CA'
-    AND cp.cp_department = 'Books'
-    AND sm.sm_type = 'AIR'
-    AND cs.cs_quantity > 5
-  GROUP BY
-    cs.cs_order_number,
-    cs.cs_sold_date_sk,
-    cc.cc_name,
-    cp.cp_department,
-    sm.sm_type,
-    w.w_warehouse_name,
-    hd.hd_vehicle_count,
-    ca.ca_state
-  HAVING SUM(cs.cs_sales_price) > 1000
+WITH avg_sales AS (
+    SELECT
+        hd_buy_potential,
+        AVG(total_sales) AS avg_total_sales
+    FROM (
+        SELECT
+            hd.hd_buy_potential,
+            ws.ws_order_number,
+            SUM(ws.ws_ext_sales_price) AS total_sales
+        FROM web_sales ws
+        JOIN household_demographics hd
+            ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+        GROUP BY hd.hd_buy_potential, ws.ws_order_number
+    ) t
+    GROUP BY hd_buy_potential
+),
+sales_rank AS (
+    SELECT
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        hd.hd_buy_potential,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY hd.hd_buy_potential ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank_in_potential
+    FROM web_sales ws
+    JOIN household_demographics hd
+        ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+    WHERE ws.ws_wholesale_cost > 30
+    GROUP BY ws.ws_order_number, ws.ws_sold_date_sk, hd.hd_buy_potential
 )
+
 SELECT
-  cs_order_number,
-  cs_sold_date_sk,
-  cc_name,
-  cp_department,
-  sm_type,
-  w_warehouse_name,
-  hd_vehicle_count,
-  ca_state,
-  total_sales,
-  total_profit,
-  total_store_returns,
-  total_web_returns,
-  RANK() OVER (PARTITION BY cp_department ORDER BY total_sales DESC) AS dept_sales_rank,
-  ROW_NUMBER() OVER (ORDER BY total_profit DESC) AS overall_profit_rank,
-  CASE WHEN total_store_returns > total_web_returns THEN 'Store' ELSE 'Web' END AS higher_return_source
-FROM sales_agg
-ORDER BY total_profit DESC
+    sr.ws_order_number AS order_number,
+    sr.ws_sold_date_sk AS sold_date_sk,
+    sr.hd_buy_potential AS buy_potential,
+    sr.total_sales,
+    sr.total_profit,
+    sr.rank_in_potential
+FROM sales_rank sr
+JOIN avg_sales a
+    ON sr.hd_buy_potential = a.hd_buy_potential
+WHERE sr.hd_buy_potential = '501-1000'
+  AND sr.total_sales > a.avg_total_sales
+
+UNION ALL
+
+SELECT
+    ws.ws_order_number AS order_number,
+    ws.ws_sold_date_sk AS sold_date_sk,
+    hd.hd_buy_potential AS buy_potential,
+    SUM(ws.ws_ext_sales_price) AS total_sales,
+    SUM(ws.ws_net_profit) AS total_profit,
+    ROW_NUMBER() OVER (PARTITION BY hd.hd_buy_potential ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank_in_potential
+FROM web_sales ws
+JOIN household_demographics hd
+    ON ws.ws_ship_hdemo_sk = hd.hd_demo_sk
+WHERE hd.hd_buy_potential = '>10000'
+  AND EXISTS (
+        SELECT 1
+        FROM web_returns wr
+        WHERE wr.wr_order_number = ws.ws_order_number
+          AND wr.wr_return_amt > 100
+    )
+GROUP BY ws.ws_order_number, ws.ws_sold_date_sk, hd.hd_buy_potential
+ORDER BY total_sales DESC
 LIMIT 100

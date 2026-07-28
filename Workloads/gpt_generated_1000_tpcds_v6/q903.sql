@@ -1,25 +1,24 @@
-WITH filtered_sales AS (
-    SELECT
-        cs.cs_bill_hdemo_sk,
-        cs.cs_net_profit,
-        cs.cs_coupon_amt,
-        cs.cs_order_number,
-        hd.hd_buy_potential
-    FROM catalog_sales cs
-    JOIN household_demographics hd
-        ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-    WHERE regexp_like(hd.hd_buy_potential, '^M.*')
-      AND cs.cs_coupon_amt > 100
-)
+-- Goal: Analyze monthly sales performance of promotions whose channel details contain the word "fees" and that were active on days when a web page URL contains "example.com".
+-- The query demonstrates string processing (REGEXP_LIKE, REGEXP_EXTRACT, LIKE, CONCAT), uses DISTINCT via COUNT(DISTINCT), joins across the allowed tables, groups, orders, and limits the result.
+
 SELECT
-    CONCAT('Potential:', hd_buy_potential) AS potential_label,
-    regexp_extract(hd_buy_potential, '(\\d+)', 1) AS potential_number,
-    COUNT(DISTINCT cs_order_number) AS distinct_orders,
-    SUM(cs_net_profit) AS total_net_profit,
-    AVG(cs_coupon_amt) AS avg_coupon_amt
-FROM filtered_sales
+    d.d_year,
+    d.d_month_seq,
+    p.p_promo_id,
+    CONCAT(p.p_promo_id, ':', p.p_promo_name) AS promo_label,
+    MIN(REGEXP_EXTRACT(wp.wp_url, 'https?://([^/]+)/', 1)) AS domain,
+    SUM(ss.ss_ext_sales_price) AS total_sales,
+    COUNT(DISTINCT ss.ss_ticket_number) AS distinct_tickets
+FROM store_sales ss
+JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+JOIN web_page wp ON wp.wp_creation_date_sk = d.d_date_sk
+WHERE REGEXP_LIKE(p.p_channel_details, '(?i)fees')
+  AND wp.wp_url LIKE '%example.com%'
 GROUP BY
-    CONCAT('Potential:', hd_buy_potential),
-    regexp_extract(hd_buy_potential, '(\\d+)', 1)
-ORDER BY total_net_profit DESC
-LIMIT 10
+    d.d_year,
+    d.d_month_seq,
+    p.p_promo_id,
+    p.p_promo_name
+ORDER BY total_sales DESC
+LIMIT 100

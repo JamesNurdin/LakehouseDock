@@ -1,60 +1,40 @@
-WITH filtered_returns AS (
+WITH sales_agg AS (
     SELECT
-        cr.cr_returned_date_sk,
-        cr.cr_returned_time_sk,
-        cr.cr_item_sk,
-        cr.cr_refunded_customer_sk,
-        cr.cr_refunded_cdemo_sk,
-        cr.cr_refunded_hdemo_sk,
-        cr.cr_refunded_addr_sk,
-        cr.cr_returning_customer_sk,
-        cr.cr_returning_cdemo_sk,
-        cr.cr_returning_hdemo_sk,
-        cr.cr_returning_addr_sk,
-        cr.cr_call_center_sk,
-        cr.cr_catalog_page_sk,
-        cr.cr_ship_mode_sk,
-        cr.cr_warehouse_sk,
-        cr.cr_reason_sk,
-        cr.cr_order_number,
-        cr.cr_return_quantity,
-        cr.cr_return_amount,
-        cr.cr_return_tax,
-        cr.cr_return_amt_inc_tax,
-        cr.cr_fee,
-        cr.cr_return_ship_cost,
-        cr.cr_refunded_cash,
-        cr.cr_reversed_charge,
-        cr.cr_store_credit,
-        cr.cr_net_loss,
-        d.d_date,
-        d.d_fy_week_seq,
-        r.r_reason_desc
-    FROM catalog_returns cr
-    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-    WHERE cr.cr_call_center_sk IN (7, 14, 20)
-      AND cr.cr_fee BETWEEN 20 AND 80
-      AND d.d_fy_week_seq BETWEEN 10 AND 20
-      AND d.d_current_day = 'N'
-      AND r.r_reason_desc LIKE '%product%'
-      AND EXISTS (
-          SELECT 1
-          FROM catalog_returns cr2
-          WHERE cr2.cr_reason_sk = cr.cr_reason_sk
-            AND cr2.cr_net_loss > cr.cr_net_loss
-      )
+        cs.cs_sold_date_sk,
+        cs.cs_warehouse_sk,
+        SUM(cs.cs_net_paid) AS total_sales_net_paid,
+        COUNT(*) AS sales_cnt
+    FROM catalog_sales cs
+    JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2022
+    GROUP BY cs.cs_sold_date_sk, cs.cs_warehouse_sk
 )
 SELECT
-    r_reason_desc,
-    d_fy_week_seq,
-    SUM(cr_net_loss) AS total_net_loss,
-    AVG(cr_return_amount) AS avg_return_amount,
-    COUNT(*) AS returns_cnt,
-    MIN(d_date) AS first_return_date,
-    MAX(d_date) AS last_return_date
-FROM filtered_returns
-GROUP BY r_reason_desc, d_fy_week_seq
-HAVING SUM(cr_net_loss) > 1000
-   AND COUNT(*) >= 10
-ORDER BY total_net_loss DESC
+    d.d_date,
+    w.w_warehouse_name,
+    s.total_sales_net_paid,
+    s.sales_cnt,
+    SUM(r.sr_net_loss) AS total_return_loss,
+    COUNT(r.sr_ticket_number) AS return_cnt,
+    AVG(r.sr_store_credit) AS avg_store_credit
+FROM sales_agg s
+JOIN date_dim d ON s.cs_sold_date_sk = d.d_date_sk
+JOIN warehouse w ON s.cs_warehouse_sk = w.w_warehouse_sk
+JOIN store_returns r ON r.sr_returned_date_sk = d.d_date_sk
+JOIN time_dim t ON r.sr_return_time_sk = t.t_time_sk
+JOIN customer_address ca ON r.sr_addr_sk = ca.ca_address_sk
+WHERE
+    w.w_city = 'Fairview'
+    AND t.t_hour BETWEEN 9 AND 17
+    AND r.sr_store_credit > 20
+GROUP BY
+    d.d_date,
+    w.w_warehouse_name,
+    s.total_sales_net_paid,
+    s.sales_cnt
+HAVING
+    SUM(r.sr_net_loss) > 100
+ORDER BY
+    d.d_date DESC,
+    w.w_warehouse_name
+LIMIT 100

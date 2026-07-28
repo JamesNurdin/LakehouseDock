@@ -1,49 +1,43 @@
-WITH item_returns AS (
-    SELECT
-        i.i_item_sk,
-        i.i_item_id,
-        i.i_category,
-        i.i_class,
-        sr.sr_returned_date_sk,
-        sr.sr_return_amt,
-        ca.ca_state,
-        ROW_NUMBER() OVER (PARTITION BY i.i_item_sk ORDER BY sr.sr_return_amt DESC) AS rn
-    FROM store_returns sr
-    JOIN item i ON sr.sr_item_sk = i.i_item_sk
-    JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
-    WHERE i.i_rec_end_date >= DATE '2000-01-01'
+WITH filtered_items AS (
+    SELECT i_item_sk,
+           i_category,
+           i_class,
+           i_rec_start_date
+    FROM   item
+    WHERE  i_rec_start_date BETWEEN DATE '2001-01-01' AND DATE '2001-12-31'
 )
-SELECT
-    ir.i_item_id,
-    ir.i_category,
-    ir.i_class,
-    ir.sr_return_amt,
-    ir.ca_state,
-    ir.rn,
-    (
-        SELECT AVG(sr2.sr_return_amt)
-        FROM store_returns sr2
-        WHERE sr2.sr_item_sk = ir.i_item_sk
-    ) AS avg_return_amt_for_item
-FROM item_returns ir
-WHERE ir.i_category = 'accessories' AND ir.rn = 1
+SELECT return_source,
+       i_category,
+       i_class,
+       total_net_loss
+FROM (
+    SELECT 'store' AS return_source,
+           fi.i_category,
+           fi.i_class,
+           SUM(sr.sr_net_loss) AS total_net_loss
+    FROM   store_returns sr
+    JOIN   filtered_items fi
+           ON sr.sr_item_sk = fi.i_item_sk
+    JOIN   store_sales ss
+           ON sr.sr_ticket_number = ss.ss_ticket_number
+    JOIN   time_dim td
+           ON sr.sr_return_time_sk = td.t_time_sk
+    GROUP  BY fi.i_category, fi.i_class
 
-UNION ALL
+    UNION ALL
 
-SELECT
-    ir.i_item_id,
-    ir.i_category,
-    ir.i_class,
-    ir.sr_return_amt,
-    ir.ca_state,
-    ir.rn,
-    (
-        SELECT AVG(sr2.sr_return_amt)
-        FROM store_returns sr2
-        WHERE sr2.sr_item_sk = ir.i_item_sk
-    ) AS avg_return_amt_for_item
-FROM item_returns ir
-WHERE ir.i_class = 'maternity' AND ir.rn = 1
-
-ORDER BY i_category, sr_return_amt DESC
+    SELECT 'catalog' AS return_source,
+           fi.i_category,
+           fi.i_class,
+           SUM(cr.cr_net_loss) AS total_net_loss
+    FROM   catalog_returns cr
+    JOIN   filtered_items fi
+           ON cr.cr_item_sk = fi.i_item_sk
+    JOIN   time_dim td
+           ON cr.cr_returned_time_sk = td.t_time_sk
+    JOIN   call_center cc
+           ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    GROUP  BY fi.i_category, fi.i_class
+) AS combined
+ORDER BY total_net_loss DESC
 LIMIT 100

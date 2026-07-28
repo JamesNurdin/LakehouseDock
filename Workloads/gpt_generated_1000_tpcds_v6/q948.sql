@@ -1,57 +1,91 @@
-WITH store_month AS (
+WITH sales_agg AS (
     SELECT
-        s.s_store_id,
-        s.s_store_name,
-        s.s_city,
-        s.s_state,
-        d.d_year,
-        d.d_month_seq,
-        SUM(ss.ss_ext_sales_price) AS total_sales,
-        SUM(ss.ss_net_profit) AS total_profit,
-        CASE WHEN SUM(ss.ss_net_profit) > 0 THEN 'POS' ELSE 'NEG' END AS profit_flag,
-        (
-            SELECT COUNT(*)
-            FROM web_sales ws
-            JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
-            JOIN date_dim dw ON ws.ws_sold_date_sk = dw.d_date_sk
-            WHERE dw.d_year = d.d_year
-              AND dw.d_month_seq = d.d_month_seq
-              AND regexp_like(wp.wp_url, '(?i)product')
-        ) AS web_product_cnt
-    FROM store_sales ss
-    JOIN store s ON ss.ss_store_sk = s.s_store_sk
-    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
-    WHERE s.s_city LIKE 'San%'
-      AND regexp_like(s.s_store_name, '^.*Store.*$')
+        cs.cs_order_number,
+        cs.cs_sold_date_sk,
+        cs.cs_ship_date_sk,
+        cs.cs_bill_customer_sk,
+        cs.cs_ship_customer_sk,
+        cs.cs_bill_addr_sk,
+        cs.cs_ship_addr_sk,
+        cs.cs_bill_cdemo_sk,
+        cs.cs_ship_cdemo_sk,
+        cs.cs_item_sk,
+        cs.cs_promo_sk,
+        cs.cs_ship_mode_sk,
+        cs.cs_warehouse_sk,
+        cs.cs_catalog_page_sk,
+        SUM(cs.cs_net_profit)          AS order_net_profit,
+        SUM(cs.cs_ext_sales_price)    AS order_sales,
+        SUM(cs.cs_quantity)           AS order_qty
+    FROM catalog_sales cs
     GROUP BY
-        s.s_store_id,
-        s.s_store_name,
-        s.s_city,
-        s.s_state,
-        d.d_year,
-        d.d_month_seq
-    HAVING SUM(ss.ss_net_profit) > 1000
+        cs.cs_order_number,
+        cs.cs_sold_date_sk,
+        cs.cs_ship_date_sk,
+        cs.cs_bill_customer_sk,
+        cs.cs_ship_customer_sk,
+        cs.cs_bill_addr_sk,
+        cs.cs_ship_addr_sk,
+        cs.cs_bill_cdemo_sk,
+        cs.cs_ship_cdemo_sk,
+        cs.cs_item_sk,
+        cs.cs_promo_sk,
+        cs.cs_ship_mode_sk,
+        cs.cs_warehouse_sk,
+        cs.cs_catalog_page_sk
 )
 SELECT
-    sm.s_store_id,
-    sm.s_store_name,
-    sm.d_year,
-    sm.d_month_seq,
-    sm.total_sales,
-    sm.total_profit,
-    sm.profit_flag,
-    sm.web_product_cnt,
-    RANK() OVER (PARTITION BY sm.d_year ORDER BY sm.total_profit DESC) AS profit_rank_year,
-    CONCAT(sm.s_city, ', ', sm.s_state) AS store_location
-FROM store_month sm
-WHERE EXISTS (
-    SELECT 1
-    FROM web_sales ws
-    JOIN date_dim dw ON ws.ws_sold_date_sk = dw.d_date_sk
-    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
-    WHERE dw.d_year = sm.d_year
-      AND dw.d_month_seq = sm.d_month_seq
-      AND regexp_like(wp.wp_url, '^https?://.*sale.*$')
+    s.s_store_name,
+    d_sold.d_year,
+    d_sold.d_month_seq,
+    i.i_brand,
+    CASE WHEN SUM(sa.order_net_profit) > 0 THEN 'Profit' ELSE 'Loss' END AS profit_status,
+    SUM(sa.order_net_profit) AS total_net_profit,
+    SUM(sa.order_sales)      AS total_sales,
+    COUNT(DISTINCT sa.cs_order_number) AS orders_cnt,
+    (SELECT AVG(inner_sa.order_net_profit) FROM sales_agg inner_sa) AS avg_order_profit_all
+FROM sales_agg sa
+JOIN catalog_page cp
+    ON sa.cs_catalog_page_sk = cp.cp_catalog_page_sk
+JOIN customer bill_cust
+    ON sa.cs_bill_customer_sk = bill_cust.c_customer_sk
+JOIN customer ship_cust
+    ON sa.cs_ship_customer_sk = ship_cust.c_customer_sk
+JOIN customer_address bill_addr
+    ON sa.cs_bill_addr_sk = bill_addr.ca_address_sk
+JOIN customer_address ship_addr
+    ON sa.cs_ship_addr_sk = ship_addr.ca_address_sk
+JOIN customer_demographics bill_demo
+    ON sa.cs_bill_cdemo_sk = bill_demo.cd_demo_sk
+JOIN customer_demographics ship_demo
+    ON sa.cs_ship_cdemo_sk = ship_demo.cd_demo_sk
+JOIN date_dim d_sold
+    ON sa.cs_sold_date_sk = d_sold.d_date_sk
+JOIN date_dim d_ship
+    ON sa.cs_ship_date_sk = d_ship.d_date_sk
+JOIN item i
+    ON sa.cs_item_sk = i.i_item_sk
+LEFT JOIN promotion p
+    ON sa.cs_promo_sk = p.p_promo_sk
+JOIN ship_mode sm
+    ON sa.cs_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN warehouse w
+    ON sa.cs_warehouse_sk = w.w_warehouse_sk
+JOIN store s
+    ON s.s_closed_date_sk = d_sold.d_date_sk
+JOIN date_dim d_store_closed
+    ON s.s_closed_date_sk = d_store_closed.d_date_sk
+JOIN date_dim d_web_open
+    ON d_web_open.d_date_sk = d_sold.d_date_sk
+JOIN web_site ws
+    ON ws.web_open_date_sk = d_web_open.d_date_sk
+GROUP BY GROUPING SETS (
+    (s.s_store_name, d_sold.d_year, d_sold.d_month_seq, i.i_brand),
+    (s.s_store_name, i.i_brand),
+    (d_sold.d_year, d_sold.d_month_seq, i.i_brand),
+    (i.i_brand),
+    ()
 )
-ORDER BY sm.total_profit DESC
+HAVING SUM(sa.order_net_profit) > 1000
+ORDER BY total_net_profit DESC
 LIMIT 100

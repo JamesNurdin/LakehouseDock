@@ -1,76 +1,46 @@
-WITH base AS (
+WITH filtered AS (
     SELECT
-        i.i_brand,
-        i.i_category,
-        sm.sm_ship_mode_id,
-        w.w_state,
-        cp.cp_department,
-        cr.cr_return_amount,
-        cr.cr_return_quantity,
-        ws.ws_ext_sales_price,
-        ws.ws_net_profit,
-        CASE WHEN cr.cr_return_amount > 0 THEN 1 ELSE 0 END AS has_refund
+        cc.cc_call_center_id,
+        concat(cc.cc_state, '-', cc.cc_city) AS location,
+        td.t_hour,
+        cr.cr_net_loss,
+        hd.hd_income_band_sk,
+        cp.cp_description,
+        cp.cp_type,
+        cc.cc_name,
+        cc.cc_zip
     FROM catalog_returns cr
-    JOIN item i ON cr.cr_item_sk = i.i_item_sk
-    JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-    JOIN warehouse w ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    JOIN catalog_sales cs ON cr.cr_order_number = cs.cs_order_number
+    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
     JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
-    JOIN customer_address ca_refund ON cr.cr_refunded_addr_sk = ca_refund.ca_address_sk
-    JOIN customer_address ca_return ON cr.cr_returning_addr_sk = ca_return.ca_address_sk
-    JOIN web_sales ws ON ws.ws_item_sk = i.i_item_sk
-                     AND ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-                     AND ws.ws_warehouse_sk = w.w_warehouse_sk
-    WHERE sm.sm_ship_mode_id IN ('AAAAAAAAIAAAAAAA','AAAAAAAABBAAAAAA')
-      AND cp.cp_department = 'Electronics'
-      AND i.i_brand = 'Brand#12'
-      AND w.w_state = 'CA'
-      AND ws.ws_sold_date_sk BETWEEN 2450905 AND 2451085
-),
-agg AS (
-    SELECT
-        i_brand,
-        sm_ship_mode_id,
-        w_state,
-        cp_department,
-        SUM(cr_return_amount)            AS total_return_amount,
-        SUM(cr_return_quantity)          AS total_return_qty,
-        SUM(ws_ext_sales_price)          AS total_sales,
-        SUM(ws_net_profit)               AS total_profit,
-        SUM(has_refund)                  AS refund_count
-    FROM base
-    GROUP BY GROUPING SETS (
-        (i_brand, sm_ship_mode_id, w_state, cp_department),
-        (i_brand, sm_ship_mode_id, w_state),
-        (i_brand, sm_ship_mode_id),
-        (i_brand, w_state),
-        (sm_ship_mode_id, w_state),
-        (i_brand),
-        (sm_ship_mode_id),
-        (w_state),
-        ()
-    )
+    JOIN time_dim td ON cr.cr_returned_time_sk = td.t_time_sk
+    JOIN household_demographics hd ON cr.cr_refunded_hdemo_sk = hd.hd_demo_sk
+    WHERE regexp_like(cp.cp_description, '(?i)electronics')
+      AND cc.cc_name LIKE 'A%'
 )
 SELECT
-    i_brand,
-    sm_ship_mode_id,
-    w_state,
-    cp_department,
-    total_return_amount,
-    total_return_qty,
-    total_sales,
-    total_profit,
-    refund_count,
-    CASE WHEN total_return_qty = 0 THEN 0 ELSE total_return_amount / total_return_qty END AS avg_return_per_qty,
-    total_profit / NULLIF(total_sales, 0) AS profit_margin
-FROM agg
-WHERE (total_sales > 1000 OR total_profit > 100)
-  AND (refund_count > 0 OR total_return_qty > 5)
-  AND (CASE WHEN total_return_qty = 0 THEN 0 ELSE total_return_amount / total_return_qty END) > 10
-  AND EXISTS (
-        SELECT 1
-        FROM ship_mode sm2
-        WHERE sm2.sm_ship_mode_id = agg.sm_ship_mode_id
-          AND sm2.sm_contract LIKE 'uukTktPY%'
-    )
-ORDER BY total_profit DESC
+    f.cc_call_center_id,
+    f.location,
+    f.t_hour,
+    SUM(f.cr_net_loss) AS total_net_loss,
+    COUNT(*) AS returns_cnt,
+    CASE WHEN SUM(f.cr_net_loss) > 1000 THEN 'HIGH' ELSE 'LOW' END AS loss_category,
+    (
+        SELECT avg(cr2.cr_net_loss)
+        FROM catalog_returns cr2
+        JOIN household_demographics hd2 ON cr2.cr_refunded_hdemo_sk = hd2.hd_demo_sk
+        WHERE hd2.hd_income_band_sk = f.hd_income_band_sk
+    ) AS avg_income_band_net_loss,
+    regexp_extract(f.cp_type, '(\\d+)', 1) AS type_number,
+    CASE WHEN substring(f.cc_zip, 1, 2) = '94' THEN 'West' ELSE 'Other' END AS region
+FROM filtered f
+GROUP BY
+    f.cc_call_center_id,
+    f.location,
+    f.t_hour,
+    f.hd_income_band_sk,
+    f.cp_type,
+    f.cc_zip
+HAVING SUM(f.cr_net_loss) > 0
+ORDER BY total_net_loss DESC
 LIMIT 100

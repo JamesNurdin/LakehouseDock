@@ -1,48 +1,44 @@
-WITH cc_open AS (
-    SELECT
-        cc.cc_call_center_sk,
-        cc.cc_name,
-        cc.cc_city,
-        cc.cc_state,
-        d.d_date AS open_date
-    FROM call_center cc
-    JOIN date_dim d
-        ON cc.cc_open_date_sk = d.d_date_sk
-    WHERE regexp_like(cc.cc_city, '^San')
+WITH web_summary AS (
+  SELECT
+    td.t_hour,
+    'Web' AS source,
+    SUM(ws.ws_net_profit) AS total_profit,
+    COUNT(*) AS sales_cnt
+  FROM web_sales ws
+  JOIN time_dim td ON ws.ws_sold_time_sk = td.t_time_sk
+  JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+  JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+  JOIN customer_address ca ON ws.ws_bill_addr_sk = ca.ca_address_sk
+  WHERE sm.sm_carrier = 'FEDEX'
+    AND wp.wp_autogen_flag = 'N'
+    AND td.t_hour BETWEEN 8 AND 20
+  GROUP BY td.t_hour
 ),
-ws_filtered AS (
-    SELECT
-        ws.ws_order_number,
-        ws.ws_net_profit,
-        d.d_date AS sold_date,
-        ws.ws_warehouse_sk,
-        hd.hd_income_band_sk,
-        ib.ib_upper_bound
-    FROM web_sales ws
-    JOIN date_dim d
-        ON ws.ws_sold_date_sk = d.d_date_sk
-    JOIN household_demographics hd
-        ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-    JOIN income_band ib
-        ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    WHERE ib.ib_upper_bound > 50000
+store_summary AS (
+  SELECT
+    td.t_hour,
+    'Store' AS source,
+    SUM(ss.ss_net_profit) AS total_profit,
+    COUNT(*) AS sales_cnt
+  FROM store_sales ss
+  JOIN time_dim td ON ss.ss_sold_time_sk = td.t_time_sk
+  JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
+  WHERE ca.ca_state = 'CA'
+    AND td.t_hour BETWEEN 8 AND 20
+  GROUP BY td.t_hour
+),
+combined AS (
+  SELECT * FROM web_summary
+  UNION ALL
+  SELECT * FROM store_summary
 )
 SELECT
-    cc.cc_name,
-    cc.cc_city,
-    cc.cc_state,
-    concat(cc.cc_city, ', ', cc.cc_state) AS location_label,
-    sum(ws.ws_net_profit) AS total_profit
-FROM cc_open cc
-JOIN ws_filtered ws
-    ON cc.open_date = ws.sold_date
-JOIN warehouse w
-    ON ws.ws_warehouse_sk = w.w_warehouse_sk
-WHERE w.w_zip LIKE '7%'
-GROUP BY
-    cc.cc_name,
-    cc.cc_city,
-    cc.cc_state,
-    concat(cc.cc_city, ', ', cc.cc_state)
-ORDER BY total_profit DESC
+  c.t_hour,
+  c.source,
+  c.total_profit,
+  c.sales_cnt,
+  CASE WHEN c.total_profit > (SELECT avg(ws_net_profit) FROM web_sales) THEN 'High' ELSE 'Low' END AS profit_category,
+  ROW_NUMBER() OVER (PARTITION BY c.source ORDER BY c.total_profit DESC) AS profit_rank
+FROM combined c
+ORDER BY c.total_profit DESC
 LIMIT 100

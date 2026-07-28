@@ -1,56 +1,37 @@
-WITH sales_data AS (
-  SELECT
-    ss.ss_item_sk,
-    ss.ss_customer_sk,
-    ss.ss_hdemo_sk,
-    ss.ss_promo_sk,
-    ss.ss_sales_price,
-    ss.ss_net_paid,
-    ss.ss_quantity,
-    ss.ss_ext_discount_amt,
-    ss.ss_net_profit,
-    i.i_category,
-    i.i_units,
-    i.i_item_id,
-    c.c_preferred_cust_flag,
-    c.c_birth_year,
-    hd.hd_income_band_sk,
-    hd.hd_buy_potential,
-    p.p_promo_id,
-    p.p_discount_active
-  FROM store_sales ss
-  INNER JOIN item i
-    ON ss.ss_item_sk = i.i_item_sk
-  INNER JOIN customer c
-    ON ss.ss_customer_sk = c.c_customer_sk
-  INNER JOIN household_demographics hd
-    ON ss.ss_hdemo_sk = hd.hd_demo_sk
-  LEFT JOIN promotion p
-    ON ss.ss_promo_sk = p.p_promo_sk
-    AND p.p_discount_active = 'Y'
-  WHERE ss.ss_sales_price > 30
-    AND i.i_units = 'Each'
-    AND c.c_birth_year BETWEEN 1970 AND 1990
-    AND hd.hd_income_band_sk IN (1, 2, 3)
-)
+WITH promo_item AS (
+        SELECT p.p_promo_sk, p.p_promo_name, p.p_channel_radio, p.p_item_sk
+        FROM promotion p
+    )
 SELECT
-  i_category,
-  c_preferred_cust_flag,
-  hd_buy_potential,
-  CASE WHEN ss_net_profit > 0 THEN 'Profit' ELSE 'Loss' END AS profit_status,
-  COALESCE(p_promo_id, 'NoPromo') AS promo_id,
-  SUM(ss_net_paid) AS total_net_paid,
-  AVG(ss_sales_price) AS avg_sales_price,
-  SUM(ss_quantity) AS total_quantity,
-  MIN(ss_sales_price) AS min_sales_price,
-  MAX(ss_sales_price) AS max_sales_price,
-  COUNT(*) AS transaction_cnt
-FROM sales_data
+    cp.cp_description,
+    p_ws.p_promo_name,
+    i_ss.i_category,
+    SUM(ss.ss_net_profit) AS store_net_profit,
+    SUM(ws.ws_net_profit) AS web_net_profit,
+    SUM(cr.cr_net_loss) AS catalog_return_loss,
+    SUM(wr.wr_net_loss) AS web_return_loss,
+    array_agg(DISTINCT p_ss.p_channel_radio) AS radio_channels
+FROM store_sales ss
+JOIN item i_ss
+    ON ss.ss_item_sk = i_ss.i_item_sk
+JOIN promotion p_ss
+    ON ss.ss_promo_sk = p_ss.p_promo_sk
+JOIN catalog_returns cr
+    ON cr.cr_item_sk = i_ss.i_item_sk
+JOIN catalog_page cp
+    ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+JOIN web_sales ws
+    ON ws.ws_item_sk = i_ss.i_item_sk
+JOIN promotion p_ws
+    ON ws.ws_promo_sk = p_ws.p_promo_sk
+JOIN web_returns wr
+    ON wr.wr_item_sk = i_ss.i_item_sk
+   AND wr.wr_order_number = ws.ws_order_number
+JOIN promotion p_item
+    ON p_item.p_item_sk = i_ss.i_item_sk
 GROUP BY
-  i_category,
-  c_preferred_cust_flag,
-  hd_buy_potential,
-  CASE WHEN ss_net_profit > 0 THEN 'Profit' ELSE 'Loss' END,
-  COALESCE(p_promo_id, 'NoPromo')
-ORDER BY total_net_paid DESC
+    cp.cp_description,
+    p_ws.p_promo_name,
+    i_ss.i_category
+ORDER BY store_net_profit DESC
 LIMIT 100

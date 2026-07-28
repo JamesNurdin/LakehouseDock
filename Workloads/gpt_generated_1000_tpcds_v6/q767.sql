@@ -1,48 +1,40 @@
-WITH date_info AS (
-    SELECT d_date_sk, d_year, d_quarter_name
+WITH recent_dates AS (
+    SELECT d_date_sk
     FROM date_dim
-    WHERE d_year BETWEEN 2000 AND 2002
+    WHERE d_year = 2001
+),
+max_year_scalar AS (
+    SELECT MAX(d_year) AS max_year FROM date_dim
 )
-SELECT
-    t.year,
-    t.quarter,
-    t.metric_type,
-    t.amount,
-    t.cnt,
-    (
-        SELECT AVG(cs.cs_sales_price)
-        FROM catalog_sales cs
-        JOIN item i ON cs.cs_item_sk = i.i_item_sk
-        WHERE i.i_brand = 'ableanti'
-    ) AS avg_item_price
+SELECT DISTINCT
+    state,
+    CASE WHEN source = 'catalog' THEN 'Catalog Sales' ELSE 'Web Sales' END AS source_type,
+    total_net_paid,
+    total_profit,
+    max_year
 FROM (
     SELECT
-        di.d_year AS year,
-        di.d_quarter_name AS quarter,
-        'sales' AS metric_type,
-        SUM(cs.cs_net_paid) AS amount,
-        COUNT(DISTINCT cs.cs_order_number) AS cnt
+        ca.ca_state AS state,
+        'catalog' AS source,
+        SUM(cs.cs_net_paid) AS total_net_paid,
+        SUM(cs.cs_net_profit) AS total_profit,
+        (SELECT max_year FROM max_year_scalar) AS max_year
     FROM catalog_sales cs
-    JOIN date_info di ON cs.cs_sold_date_sk = di.d_date_sk
-    JOIN item i ON cs.cs_item_sk = i.i_item_sk
-    JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
-    WHERE i.i_brand = 'ableanti'
-    GROUP BY di.d_year, di.d_quarter_name
-
+    JOIN recent_dates rd ON cs.cs_sold_date_sk = rd.d_date_sk
+    JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
+    GROUP BY ca.ca_state
     UNION ALL
-
     SELECT
-        di.d_year AS year,
-        di.d_quarter_name AS quarter,
-        'returns' AS metric_type,
-        SUM(sr.sr_return_amt) AS amount,
-        COUNT(DISTINCT sr.sr_ticket_number) AS cnt
-    FROM store_returns sr
-    JOIN date_info di ON sr.sr_returned_date_sk = di.d_date_sk
-    JOIN item i ON sr.sr_item_sk = i.i_item_sk
-    JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
-    WHERE i.i_brand = 'ableanti'
-    GROUP BY di.d_year, di.d_quarter_name
-) t
-ORDER BY t.year DESC, t.quarter, t.metric_type
+        ca.ca_state AS state,
+        'web' AS source,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        SUM(ws.ws_net_profit) AS total_profit,
+        (SELECT max_year FROM max_year_scalar) AS max_year
+    FROM web_sales ws
+    JOIN recent_dates rd ON ws.ws_sold_date_sk = rd.d_date_sk
+    JOIN customer_address ca ON ws.ws_bill_addr_sk = ca.ca_address_sk
+    GROUP BY ca.ca_state
+) AS combined
+WHERE total_net_paid > 10000
+ORDER BY total_net_paid DESC
 LIMIT 100

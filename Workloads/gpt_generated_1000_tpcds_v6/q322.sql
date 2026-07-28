@@ -1,40 +1,50 @@
-WITH filtered_sales AS (
+WITH refunded AS (
     SELECT
-        ws.ws_web_site_sk,
-        ws.ws_sold_date_sk,
-        ws.ws_net_profit,
-        d.d_year,
-        ws.ws_bill_customer_sk,
-        ws.ws_order_number,
-        c.c_last_name,
-        c.c_email_address,
-        web_site.web_name
-    FROM web_sales ws
-    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
-    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
-    JOIN web_site ON ws.ws_web_site_sk = web_site.web_site_sk
-    WHERE d.d_year = 2002
-      AND web_site.web_name LIKE '%Online%'
-      AND regexp_like(c.c_email_address, '@example\\.com$')
+        r.r_reason_desc AS reason_desc,
+        hd.hd_income_band_sk AS income_band,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        COUNT(*) AS return_cnt,
+        (SELECT AVG(wr2.wr_fee)
+         FROM web_returns wr2
+         WHERE wr2.wr_reason_sk = r.r_reason_sk) AS avg_fee
+    FROM web_returns wr
+    JOIN reason r
+        ON wr.wr_reason_sk = r.r_reason_sk
+    JOIN household_demographics hd
+        ON wr.wr_refunded_hdemo_sk = hd.hd_demo_sk
+    WHERE r.r_reason_id LIKE 'AAAAAAA%'
+      AND hd.hd_vehicle_count >= 0
+    GROUP BY r.r_reason_desc, hd.hd_income_band_sk, r.r_reason_sk
+),
+returning AS (
+    SELECT
+        r.r_reason_desc AS reason_desc,
+        hd.hd_income_band_sk AS income_band,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        COUNT(*) AS return_cnt,
+        (SELECT AVG(wr2.wr_fee)
+         FROM web_returns wr2
+         WHERE wr2.wr_reason_sk = r.r_reason_sk) AS avg_fee
+    FROM web_returns wr
+    JOIN reason r
+        ON wr.wr_reason_sk = r.r_reason_sk
+    JOIN household_demographics hd
+        ON wr.wr_returning_hdemo_sk = hd.hd_demo_sk
+    WHERE r.r_reason_desc LIKE '%product%'
+      AND hd.hd_income_band_sk BETWEEN 5 AND 15
+    GROUP BY r.r_reason_desc, hd.hd_income_band_sk, r.r_reason_sk
+),
+combined AS (
+    SELECT reason_desc, income_band, total_return_amt, return_cnt, avg_fee FROM refunded
+    UNION ALL
+    SELECT reason_desc, income_band, total_return_amt, return_cnt, avg_fee FROM returning
 )
-SELECT
-    ws_web_site_sk,
-    ws_sold_date_sk,
-    d_year,
-    web_name,
-    CASE WHEN regexp_like(c_last_name, '^A') THEN 'A-Name' ELSE 'Other' END AS last_name_group,
-    regexp_extract(web_name, '([A-Za-z]+)\\s+Online', 1) AS extracted_word,
-    concat('Site-', web_name) AS site_label,
-    SUM(ws_net_profit) AS total_profit,
-    COUNT(*) AS order_count
-FROM filtered_sales
-GROUP BY
-    ws_web_site_sk,
-    ws_sold_date_sk,
-    d_year,
-    web_name,
-    CASE WHEN regexp_like(c_last_name, '^A') THEN 'A-Name' ELSE 'Other' END,
-    regexp_extract(web_name, '([A-Za-z]+)\\s+Online', 1),
-    concat('Site-', web_name)
-ORDER BY total_profit DESC
-LIMIT 10
+SELECT DISTINCT
+    reason_desc,
+    income_band,
+    total_return_amt,
+    return_cnt,
+    avg_fee
+FROM combined
+ORDER BY total_return_amt DESC
+LIMIT 100

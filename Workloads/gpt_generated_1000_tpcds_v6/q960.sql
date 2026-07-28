@@ -1,94 +1,56 @@
-WITH
-  store_sales_agg AS (
+WITH ws_base AS (
     SELECT
-      ss_sold_date_sk,
-      ss_sold_time_sk,
-      ss_hdemo_sk,
-      ss_promo_sk,
-      SUM(ss_net_profit) AS total_store_profit,
-      SUM(ss_quantity)   AS total_store_qty
-    FROM store_sales
-    GROUP BY ss_sold_date_sk, ss_sold_time_sk, ss_hdemo_sk, ss_promo_sk
-  ),
-  catalog_sales_agg AS (
-    SELECT
-      cs_sold_date_sk,
-      cs_sold_time_sk,
-      cs_promo_sk,
-      cs_call_center_sk,
-      cs_ship_mode_sk,
-      cs_warehouse_sk,
-      cs_catalog_page_sk,
-      SUM(cs_net_profit) AS total_catalog_profit,
-      SUM(cs_quantity)   AS total_catalog_qty
-    FROM catalog_sales
-    GROUP BY cs_sold_date_sk, cs_sold_time_sk, cs_promo_sk, cs_call_center_sk, cs_ship_mode_sk, cs_warehouse_sk, cs_catalog_page_sk
-  ),
-  web_sales_agg AS (
-    SELECT
-      ws_sold_date_sk,
-      ws_sold_time_sk,
-      ws_promo_sk,
-      ws_ship_mode_sk,
-      ws_warehouse_sk,
-      SUM(ws_net_profit) AS total_web_profit,
-      SUM(ws_quantity)   AS total_web_qty
-    FROM web_sales
-    GROUP BY ws_sold_date_sk, ws_sold_time_sk, ws_promo_sk, ws_ship_mode_sk, ws_warehouse_sk
-  ),
-  store_returns_agg AS (
-    SELECT
-      sr_returned_date_sk,
-      sr_reason_sk,
-      SUM(sr_net_loss)      AS total_return_loss,
-      SUM(sr_return_quantity) AS total_return_qty
-    FROM store_returns
-    GROUP BY sr_returned_date_sk, sr_reason_sk
-  )
+        ws.ws_order_number,
+        ws.ws_sold_date_sk,
+        ws.ws_sold_time_sk,
+        ws.ws_item_sk,
+        ws.ws_net_profit,
+        ws.ws_quantity,
+        ws.ws_web_page_sk,
+        ws.ws_ship_mode_sk
+    FROM web_sales ws
+    WHERE ws.ws_quantity > 0
+)
 SELECT
-  d_sold.d_year,
-  d_sold.d_month_seq,
-  p.p_promo_name,
-  hd.hd_buy_potential,
-  cc.cc_name               AS call_center_name,
-  cp.cp_description        AS catalog_page_desc,
-  sm_cs.sm_type            AS catalog_ship_type,
-  sm_ws.sm_type            AS web_ship_type,
-  r.r_reason_desc,
-  ss.total_store_profit,
-  cs.total_catalog_profit,
-  ws.total_web_profit,
-  sr.total_return_loss
-FROM store_sales_agg ss
-JOIN catalog_sales_agg cs
-  ON ss.ss_sold_date_sk = cs.cs_sold_date_sk
- AND ss.ss_promo_sk    = cs.cs_promo_sk
-JOIN web_sales_agg ws
-  ON ss.ss_sold_date_sk = ws.ws_sold_date_sk
- AND ss.ss_promo_sk    = ws.ws_promo_sk
-JOIN store_returns_agg sr
-  ON ss.ss_sold_date_sk = sr.sr_returned_date_sk
-JOIN date_dim d_sold
-  ON ss.ss_sold_date_sk = d_sold.d_date_sk
-JOIN time_dim t_ss
-  ON ss.ss_sold_time_sk = t_ss.t_time_sk
-JOIN household_demographics hd
-  ON ss.ss_hdemo_sk = hd.hd_demo_sk
-JOIN promotion p
-  ON ss.ss_promo_sk = p.p_promo_sk
-JOIN call_center cc
-  ON cs.cs_call_center_sk = cc.cc_call_center_sk
-JOIN ship_mode sm_cs
-  ON cs.cs_ship_mode_sk = sm_cs.sm_ship_mode_sk
-JOIN ship_mode sm_ws
-  ON ws.ws_ship_mode_sk = sm_ws.sm_ship_mode_sk
-JOIN warehouse w_cs
-  ON cs.cs_warehouse_sk = w_cs.w_warehouse_sk
-JOIN warehouse w_ws
-  ON ws.ws_warehouse_sk = w_ws.w_warehouse_sk
-JOIN catalog_page cp
-  ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-JOIN reason r
-  ON sr.sr_reason_sk = r.r_reason_sk
-ORDER BY d_sold.d_year DESC, d_sold.d_month_seq, p.p_promo_name
+    d_ret.d_date AS return_date,
+    s.s_store_name,
+    i.i_product_name,
+    SUM(sr.sr_net_loss) AS total_return_loss,
+    COALESCE(SUM(ws_base.ws_net_profit), 0) AS total_web_profit,
+    CASE
+        WHEN SUM(sr.sr_net_loss) > 1000 THEN 'High Loss'
+        WHEN SUM(sr.sr_net_loss) BETWEEN 100 AND 1000 THEN 'Medium Loss'
+        ELSE 'Low Loss'
+    END AS loss_category,
+    CASE WHEN COALESCE(SUM(ws_base.ws_quantity), 0) > 5 THEN 'Bulk' ELSE 'Regular' END AS purchase_category,
+    RANK() OVER (PARTITION BY d_ret.d_year ORDER BY SUM(sr.sr_net_loss) DESC) AS loss_rank_by_year,
+    (SELECT MAX(ib.ib_upper_bound) FROM income_band ib) AS max_income_upper_bound
+FROM store_returns sr
+JOIN date_dim d_ret ON sr.sr_returned_date_sk = d_ret.d_date_sk
+JOIN store s ON sr.sr_store_sk = s.s_store_sk
+JOIN item i ON sr.sr_item_sk = i.i_item_sk
+JOIN customer_demographics cd ON sr.sr_cdemo_sk = cd.cd_demo_sk
+JOIN household_demographics hd ON sr.sr_hdemo_sk = hd.hd_demo_sk
+LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
+LEFT JOIN call_center cc ON cc.cc_closed_date_sk = d_ret.d_date_sk
+LEFT JOIN catalog_page cp ON cp.cp_start_date_sk = d_ret.d_date_sk
+JOIN time_dim t_ret ON sr.sr_return_time_sk = t_ret.t_time_sk
+LEFT JOIN ws_base ws_base
+    ON ws_base.ws_sold_date_sk = d_ret.d_date_sk
+   AND ws_base.ws_item_sk = i.i_item_sk
+LEFT JOIN web_page wp ON ws_base.ws_web_page_sk = wp.wp_web_page_sk
+LEFT JOIN ship_mode sm ON ws_base.ws_ship_mode_sk = sm.sm_ship_mode_sk
+WHERE d_ret.d_year = 2001
+  AND s.s_state = 'CA'
+  AND i.i_brand = 'Brand#12'
+  AND (sm.sm_type = 'AIR' OR sm.sm_type IS NULL)
+  AND (cp.cp_type = 'PROMO' OR cp.cp_type IS NULL)
+  AND (cc.cc_market_manager = 'Mike' OR cc.cc_market_manager IS NULL)
+GROUP BY
+    d_ret.d_date,
+    d_ret.d_year,
+    s.s_store_name,
+    i.i_product_name
+ORDER BY total_return_loss DESC
 LIMIT 100

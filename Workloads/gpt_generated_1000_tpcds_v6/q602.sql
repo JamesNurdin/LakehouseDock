@@ -1,30 +1,35 @@
-WITH sales_by_year AS (
-  SELECT d.d_year AS year,
-         'sales' AS metric_type,
-         SUM(ws.ws_ext_sales_price) AS metric_value
-  FROM web_sales ws
-  JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
-  WHERE d.d_year = 2001
-  GROUP BY d.d_year
-  HAVING SUM(ws.ws_ext_sales_price) > 1000000
+WITH store_closed AS (
+    SELECT
+        d.d_year AS year,
+        'store_closed' AS entity_type,
+        COUNT(DISTINCT s.s_store_sk) AS cnt
+    FROM store s
+    JOIN date_dim d ON s.s_closed_date_sk = d.d_date_sk
+    WHERE d.d_year = 2000
+      AND s.s_zip LIKE '339%'
+      AND EXISTS (
+          SELECT 1
+          FROM store s2
+          WHERE s2.s_city = s.s_city
+            AND s2.s_number_employees > 150
+      )
+    GROUP BY d.d_year
 ),
-call_centers_by_year AS (
-  SELECT d.d_year AS year,
-         'calls' AS metric_type,
-         CAST(COUNT(cc.cc_call_center_sk) AS double) AS metric_value
-  FROM call_center cc
-  JOIN date_dim d ON cc.cc_closed_date_sk = d.d_date_sk
-  WHERE d.d_year = 2001
-  GROUP BY d.d_year
-  HAVING COUNT(cc.cc_call_center_sk) > 5
+web_created AS (
+    SELECT
+        d.d_year AS year,
+        'web_page_created' AS entity_type,
+        COUNT(DISTINCT wp.wp_web_page_sk) AS cnt
+    FROM web_page wp
+    JOIN date_dim d ON wp.wp_creation_date_sk = d.d_date_sk
+    WHERE d.d_year = 2000
+      AND wp.wp_link_count > 10
+    GROUP BY d.d_year
 )
-SELECT year,
-       metric_type,
-       metric_value
-FROM sales_by_year
+SELECT year, entity_type, cnt
+FROM store_closed
 UNION ALL
-SELECT year,
-       metric_type,
-       metric_value
-FROM call_centers_by_year
-ORDER BY year, metric_type
+SELECT year, entity_type, cnt
+FROM web_created
+ORDER BY year DESC, entity_type
+LIMIT 100

@@ -1,45 +1,43 @@
-WITH promo_sales AS (
+WITH ws_agg AS (
     SELECT
-        p.p_promo_sk,
-        p.p_promo_name,
-        d_sales.d_year,
-        d_sales.d_qoy,
-        SUM(ss.ss_net_paid_inc_tax) AS total_net_paid,
-        SUM(ss.ss_ext_sales_price) AS total_ext_sales,
-        COUNT(*) AS txn_count,
-        ROW_NUMBER() OVER (PARTITION BY d_sales.d_year, d_sales.d_qoy ORDER BY SUM(ss.ss_net_paid_inc_tax) DESC) AS rnk_year_qoy
-    FROM store_sales ss
-    JOIN date_dim d_sales
-        ON ss.ss_sold_date_sk = d_sales.d_date_sk
-    JOIN promotion p
-        ON ss.ss_promo_sk = p.p_promo_sk
-    JOIN date_dim d_start
-        ON p.p_start_date_sk = d_start.d_date_sk
-    JOIN date_dim d_end
-        ON p.p_end_date_sk = d_end.d_date_sk
-    WHERE d_sales.d_holiday = 'N'
-      AND d_sales.d_qoy IN (1, 2, 3, 4)
-      AND p.p_channel_radio = 'N'
-      AND p.p_discount_active = 'Y'
-      AND EXISTS (
-          SELECT 1
-          FROM promotion p2
-          WHERE p2.p_promo_sk = ss.ss_promo_sk
-            AND p2.p_channel_event = 'Y'
-            AND p2.p_response_target > 10
-      )
-    GROUP BY p.p_promo_sk, p.p_promo_name, d_sales.d_year, d_sales.d_qoy
+        w.w_warehouse_sk,
+        w.w_warehouse_id,
+        w.w_warehouse_name,
+        w.w_city,
+        w.w_state,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        AVG(ws.ws_ext_discount_amt) AS avg_discount,
+        COUNT(*) AS order_count
+    FROM web_sales ws
+    JOIN warehouse w
+        ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE w.w_country = 'United States'
+      AND w.w_street_type IN ('Rd', 'Avenue')
+      AND ws.ws_list_price > 50
+      AND ws.ws_ext_tax < 500
+    GROUP BY
+        w.w_warehouse_sk,
+        w.w_warehouse_id,
+        w.w_warehouse_name,
+        w.w_city,
+        w.w_state
 )
 SELECT
-    p_promo_sk,
-    p_promo_name,
-    d_year,
-    d_qoy,
-    total_net_paid,
-    total_ext_sales,
-    txn_count,
-    rnk_year_qoy
-FROM promo_sales
-WHERE rnk_year_qoy <= 10
-ORDER BY d_year DESC, d_qoy, rnk_year_qoy
+    w_agg.w_warehouse_id,
+    w_agg.w_warehouse_name,
+    w_agg.w_city,
+    w_agg.w_state,
+    w_agg.total_net_profit,
+    w_agg.total_sales,
+    w_agg.avg_discount,
+    w_agg.order_count,
+    RANK() OVER (ORDER BY w_agg.total_net_profit DESC) AS profit_rank,
+    CASE WHEN w_agg.total_net_profit > 100000 THEN 'High' ELSE 'Medium' END AS profit_category,
+    SUM(w_agg.total_net_profit) OVER (
+        ORDER BY w_agg.total_net_profit DESC
+        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+    ) AS profit_running_sum_3
+FROM ws_agg w_agg
+ORDER BY profit_rank
 LIMIT 100

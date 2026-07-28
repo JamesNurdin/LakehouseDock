@@ -1,49 +1,78 @@
-/*
-Goal: Compare high‑profit stores with active customers by aggregating store net profit and web page view counts, categorizing each entity, filtering out low‑performing groups, and returning the top entities.
-*/
-WITH store_agg AS (
-    SELECT
-        'Store' AS entity_type,
-        s.s_store_id AS entity_id,
-        'TotalProfit' AS metric_name,
-        SUM(ss.ss_net_profit) AS metric_value,
-        CASE WHEN SUM(ss.ss_net_profit) > 1000 THEN 'High' ELSE 'Low' END AS category
-    FROM store_sales ss
-    JOIN store s ON ss.ss_store_sk = s.s_store_sk
-    JOIN time_dim td ON ss.ss_sold_time_sk = td.t_time_sk
-    WHERE s.s_rec_start_date >= DATE '2000-01-01'
-      AND s.s_rec_start_date < DATE '2001-01-01'
-    GROUP BY s.s_store_id
-    HAVING SUM(ss.ss_net_profit) > 500
+WITH catalog_data AS (
+   SELECT
+       d.d_year AS year,
+       i.i_category AS category,
+       sm.sm_type AS ship_type,
+       cd.cd_gender AS gender,
+       cs.cs_ext_sales_price AS sales,
+       cs.cs_ext_discount_amt AS discount,
+       cs.cs_order_number AS order_num,
+       sr.sr_return_quantity AS return_qty
+   FROM catalog_sales cs
+   JOIN date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+   JOIN time_dim t ON cs.cs_sold_time_sk = t.t_time_sk
+   JOIN item i ON cs.cs_item_sk = i.i_item_sk
+   JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+   JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+   JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+   LEFT JOIN store_returns sr
+       ON sr.sr_item_sk = i.i_item_sk
+      AND sr.sr_returned_date_sk = d.d_date_sk
+   WHERE d.d_year = 2001
+     AND i.i_brand = 'Brand#12'
+     AND sm.sm_carrier = 'UPS'
+     AND cp.cp_type = 'PROMO'
+     AND cd.cd_gender = 'M'
+     AND t.t_hour BETWEEN 9 AND 17
 ),
-customer_agg AS (
-    SELECT
-        'Customer' AS entity_type,
-        c.c_customer_id AS entity_id,
-        'PageViews' AS metric_name,
-        COUNT(wp.wp_web_page_sk) AS metric_value,
-        CASE WHEN COUNT(wp.wp_web_page_sk) > 10 THEN 'Heavy' ELSE 'Light' END AS category
-    FROM web_page wp
-    JOIN customer c ON wp.wp_customer_sk = c.c_customer_sk
-    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
-    WHERE wp.wp_access_date_sk IN (2452565, 2452639, 2452580)
-    GROUP BY c.c_customer_id
-    HAVING COUNT(wp.wp_web_page_sk) >= 5
+web_data AS (
+   SELECT
+       d.d_year AS year,
+       i.i_category AS category,
+       sm.sm_type AS ship_type,
+       cd.cd_gender AS gender,
+       ws.ws_ext_sales_price AS sales,
+       ws.ws_ext_discount_amt AS discount,
+       ws.ws_order_number AS order_num,
+       sr.sr_return_quantity AS return_qty
+   FROM web_sales ws
+   JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+   JOIN time_dim t ON ws.ws_sold_time_sk = t.t_time_sk
+   JOIN item i ON ws.ws_item_sk = i.i_item_sk
+   JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+   JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+   JOIN customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+   LEFT JOIN store_returns sr
+       ON sr.sr_item_sk = i.i_item_sk
+      AND sr.sr_returned_date_sk = d.d_date_sk
+   WHERE d.d_year = 2001
+     AND i.i_brand = 'Brand#19'
+     AND sm.sm_carrier = 'FedEx'
+     AND wp.wp_type = 'CONTENT'
+     AND cd.cd_gender = 'F'
+     AND t.t_hour BETWEEN 10 AND 18
+),
+combined AS (
+   SELECT * FROM catalog_data
+   UNION ALL
+   SELECT * FROM web_data
 )
 SELECT
-    entity_type,
-    entity_id,
-    metric_name,
-    metric_value,
-    category
-FROM store_agg
-UNION ALL
-SELECT
-    entity_type,
-    entity_id,
-    metric_name,
-    metric_value,
-    category
-FROM customer_agg
-ORDER BY metric_value DESC
+   year,
+   category,
+   ship_type,
+   gender,
+   SUM(sales) AS total_sales,
+   SUM(return_qty) AS total_returns,
+   COUNT(DISTINCT order_num) AS order_cnt,
+   AVG(discount) AS avg_discount
+FROM combined
+GROUP BY GROUPING SETS (
+   (year, category, ship_type, gender),
+   (year, category, ship_type),
+   (year, category),
+   (year),
+   ()
+)
+ORDER BY total_sales DESC
 LIMIT 100

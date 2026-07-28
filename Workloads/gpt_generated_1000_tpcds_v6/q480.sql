@@ -1,56 +1,69 @@
-WITH base_sales AS (
-  SELECT
-    d.d_year,
-    cc.cc_name,
-    cp.cp_catalog_page_number,
-    t.t_hour,
-    ss.ss_net_paid,
-    ss.ss_net_profit,
-    ws.ws_net_paid,
-    ws.ws_net_profit,
-    COALESCE(sr.sr_net_loss, 0) AS return_loss,
-    (ss.ss_net_profit + ws.ws_net_profit - COALESCE(sr.sr_net_loss, 0)) AS profit_amount
-  FROM store_sales ss
-  JOIN date_dim d
-    ON ss.ss_sold_date_sk = d.d_date_sk
-  JOIN time_dim t
-    ON ss.ss_sold_time_sk = t.t_time_sk
-  JOIN call_center cc
-    ON cc.cc_open_date_sk = d.d_date_sk
-  LEFT JOIN catalog_page cp
-    ON cp.cp_start_date_sk = d.d_date_sk
-  LEFT JOIN store_returns sr
-    ON sr.sr_item_sk = ss.ss_item_sk
-   AND sr.sr_ticket_number = ss.ss_ticket_number
-  JOIN web_sales ws
-    ON ws.ws_sold_date_sk = d.d_date_sk
-   AND ws.ws_sold_time_sk = t.t_time_sk
-  WHERE d.d_date BETWEEN DATE '2001-01-01' AND DATE '2001-12-31'
-    AND cc.cc_tax_percentage > 0.05
-    AND cp.cp_catalog_page_number IN (6, 14, 21)
-    AND t.t_hour BETWEEN 9 AND 17
-    AND ss.ss_quantity > 0
-    AND ws.ws_quantity > 0
+WITH base AS (
+    SELECT
+        i.i_item_sk,
+        i.i_brand,
+        i.i_manager_id,
+        i.i_rec_end_date,
+        p.p_promo_name,
+        cd_s.cd_gender AS store_gender,
+        sr.sr_return_quantity AS store_return_qty,
+        sr.sr_return_amt AS store_return_amt,
+        sr.sr_reversed_charge AS store_rev_charge,
+        wr.wr_return_quantity AS web_return_qty,
+        wr.wr_return_amt AS web_return_amt,
+        wr.wr_reversed_charge AS web_rev_charge,
+        wp.wp_type AS web_page_type,
+        cd_r.cd_gender AS web_refunded_gender,
+        cd_t.cd_gender AS web_returning_gender
+    FROM store_returns sr
+    JOIN item i
+        ON sr.sr_item_sk = i.i_item_sk
+    JOIN promotion p
+        ON p.p_item_sk = i.i_item_sk
+    JOIN customer_demographics cd_s
+        ON sr.sr_cdemo_sk = cd_s.cd_demo_sk
+    JOIN web_returns wr
+        ON wr.wr_item_sk = i.i_item_sk
+    JOIN web_page wp
+        ON wr.wr_web_page_sk = wp.wp_web_page_sk
+    JOIN customer_demographics cd_r
+        ON wr.wr_refunded_cdemo_sk = cd_r.cd_demo_sk
+    JOIN customer_demographics cd_t
+        ON wr.wr_returning_cdemo_sk = cd_t.cd_demo_sk
+    WHERE i.i_manager_id = 63
+      AND i.i_rec_end_date = DATE '2000-10-26'
+      AND sr.sr_return_amt > 100
+),
+agg AS (
+    SELECT
+        i_brand,
+        store_gender,
+        p_promo_name,
+        COUNT(*) AS num_transactions,
+        SUM(store_return_amt) AS total_store_return,
+        SUM(web_return_amt) AS total_web_return,
+        AVG(store_return_qty) AS avg_store_qty,
+        AVG(web_return_qty) AS avg_web_qty,
+        MIN(store_rev_charge) AS min_store_rev,
+        MAX(web_rev_charge) AS max_web_rev
+    FROM base
+    GROUP BY ROLLUP (i_brand, store_gender, p_promo_name)
 )
 SELECT
-  d_year,
-  CASE
-    WHEN profit_amount > 10000 THEN 'HIGH'
-    WHEN profit_amount BETWEEN 0 AND 10000 THEN 'MEDIUM'
-    ELSE 'LOW'
-  END AS profit_category,
-  COUNT(*) AS cnt_transactions,
-  SUM(ss_net_paid) AS total_store_paid,
-  SUM(ws_net_paid) AS total_web_paid,
-  SUM(profit_amount) AS total_net_profit,
-  AVG(profit_amount) AS avg_net_profit_per_txn
-FROM base_sales
-GROUP BY
-  d_year,
-  CASE
-    WHEN profit_amount > 10000 THEN 'HIGH'
-    WHEN profit_amount BETWEEN 0 AND 10000 THEN 'MEDIUM'
-    ELSE 'LOW'
-  END
-HAVING SUM(profit_amount) > 50000
-ORDER BY d_year, profit_category
+    i_brand,
+    store_gender,
+    p_promo_name,
+    num_transactions,
+    total_store_return,
+    total_web_return,
+    avg_store_qty,
+    avg_web_qty,
+    min_store_rev,
+    max_web_rev,
+    SUM(total_store_return) OVER (PARTITION BY i_brand) AS brand_total_store_return,
+    RANK() OVER (ORDER BY total_store_return DESC) AS brand_store_return_rank
+FROM agg
+ORDER BY i_brand NULLS LAST,
+         store_gender NULLS LAST,
+         p_promo_name NULLS LAST
+LIMIT 100

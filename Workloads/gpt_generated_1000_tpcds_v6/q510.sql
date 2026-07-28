@@ -1,37 +1,55 @@
-WITH sales_agg AS (
+WITH joined_data AS (
     SELECT
-        cs_warehouse_sk,
-        cs_bill_addr_sk,
-        cs_ship_addr_sk,
-        cs_sold_time_sk,
-        SUM(cs_net_profit) AS total_net_profit,
-        AVG(cs_ext_discount_amt) AS avg_discount,
-        COUNT(*) AS order_cnt
-    FROM catalog_sales
-    WHERE cs_wholesale_cost > 20
-      AND cs_ext_ship_cost < 5000
-      AND cs_quantity >= 1
-    GROUP BY cs_warehouse_sk, cs_bill_addr_sk, cs_ship_addr_sk, cs_sold_time_sk
+        cr.cr_order_number,
+        cr.cr_return_amount,
+        cr.cr_return_quantity,
+        cr.cr_returned_date_sk,
+        i.i_item_sk,
+        i.i_brand AS i_brand,
+        i.i_current_price,
+        cd.cd_gender,
+        cd.cd_dep_employed_count,
+        inv.inv_quantity_on_hand,
+        ws.ws_sales_price,
+        ws.ws_list_price,
+        ws.ws_ext_ship_cost,
+        wp.wp_type,
+        wp.wp_image_count,
+        CASE 
+            WHEN cr.cr_return_amount < 20 THEN 'Low'
+            WHEN cr.cr_return_amount < 100 THEN 'Medium'
+            ELSE 'High'
+        END AS return_amount_bucket
+    FROM catalog_returns cr
+    JOIN item i ON cr.cr_item_sk = i.i_item_sk
+    JOIN customer_demographics cd ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
+    JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    WHERE i.i_current_price > 20
+      AND inv.inv_quantity_on_hand BETWEEN 100 AND 1000
+      AND cd.cd_gender = 'M'
+      AND wp.wp_image_count >= 3
+      AND ws.ws_ext_ship_cost < 1000
+      AND cr.cr_return_quantity > 1
+      AND cr.cr_return_amount > 10
+      AND cd.cd_dep_employed_count >= 2
 )
 SELECT
-    w.w_warehouse_name,
-    t.t_sub_shift,
-    SUM(sa.total_net_profit) AS sum_net_profit,
-    AVG(sa.avg_discount) AS avg_discount,
-    SUM(sa.order_cnt) AS total_orders
-FROM sales_agg sa
-JOIN time_dim t
-    ON sa.cs_sold_time_sk = t.t_time_sk
-JOIN warehouse w
-    ON sa.cs_warehouse_sk = w.w_warehouse_sk
-JOIN customer_address ca_bill
-    ON sa.cs_bill_addr_sk = ca_bill.ca_address_sk
-JOIN customer_address ca_ship
-    ON sa.cs_ship_addr_sk = ca_ship.ca_address_sk
-WHERE t.t_sub_shift = 'morning'
-  AND t.t_hour BETWEEN 8 AND 12
-  AND ca_bill.ca_state = 'TX'
-  AND ca_ship.ca_state = 'CA'
-GROUP BY w.w_warehouse_name, t.t_sub_shift
-ORDER BY sum_net_profit DESC
+    i_brand,
+    cd_gender,
+    wp_type,
+    return_amount_bucket,
+    COUNT(DISTINCT cr_order_number) AS distinct_returns,
+    SUM(cr_return_amount) AS total_return_amount,
+    AVG(ws_sales_price) AS avg_sales_price,
+    MIN(i_current_price) AS min_item_price,
+    MAX(inv_quantity_on_hand) AS max_inventory_qty
+FROM joined_data
+GROUP BY
+    i_brand,
+    cd_gender,
+    wp_type,
+    return_amount_bucket
+ORDER BY total_return_amount DESC
 LIMIT 100

@@ -1,79 +1,62 @@
-WITH cs_agg AS (
+WITH sales_returns AS (
     SELECT
-        cs.cs_item_sk,
-        cs.cs_promo_sk,
-        cs.cs_ship_mode_sk,
-        cs.cs_sold_time_sk,
-        SUM(cs.cs_quantity) AS cs_total_qty,
-        SUM(cs.cs_net_paid) AS cs_total_paid
-    FROM catalog_sales cs
-    WHERE cs.cs_quantity > 5
-      AND cs.cs_net_paid > 100
-    GROUP BY cs.cs_item_sk, cs.cs_promo_sk, cs.cs_ship_mode_sk, cs.cs_sold_time_sk
-),
-ws_agg AS (
-    SELECT
-        ws.ws_item_sk,
-        ws.ws_promo_sk,
-        ws.ws_ship_mode_sk,
-        ws.ws_sold_time_sk,
-        SUM(ws.ws_quantity) AS ws_total_qty,
-        SUM(ws.ws_net_paid) AS ws_total_paid
-    FROM web_sales ws
-    WHERE ws.ws_quantity > 0
-      AND ws.ws_net_paid > 50
-    GROUP BY ws.ws_item_sk, ws.ws_promo_sk, ws.ws_ship_mode_sk, ws.ws_sold_time_sk
-),
-joined AS (
-    SELECT
-        cs.cs_item_sk,
-        cs.cs_promo_sk,
-        cs.cs_ship_mode_sk,
-        cs.cs_sold_time_sk,
-        cs.cs_total_qty,
-        cs.cs_total_paid,
-        ws.ws_total_qty,
-        ws.ws_total_paid
-    FROM cs_agg cs
-    JOIN ws_agg ws
-        ON cs.cs_item_sk = ws.ws_item_sk
-       AND cs.cs_promo_sk = ws.ws_promo_sk
-       AND cs.cs_ship_mode_sk = ws.ws_ship_mode_sk
-       AND cs.cs_sold_time_sk = ws.ws_sold_time_sk
+        s.s_store_id AS store_id,
+        i.i_brand AS brand,
+        d.d_year AS year,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        SUM(cr.cr_return_amount) AS total_returns,
+        COUNT(DISTINCT ss.ss_ticket_number) AS order_cnt,
+        COUNT(DISTINCT cr.cr_order_number) AS return_cnt
+    FROM store_sales ss
+    JOIN date_dim d
+        ON ss.ss_sold_date_sk = d.d_date_sk
+    JOIN time_dim t
+        ON ss.ss_sold_time_sk = t.t_time_sk
+    JOIN item i
+        ON ss.ss_item_sk = i.i_item_sk
+    JOIN customer c
+        ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN household_demographics hd
+        ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN customer_address ca
+        ON ss.ss_addr_sk = ca.ca_address_sk
+    JOIN store s
+        ON ss.ss_store_sk = s.s_store_sk
+    JOIN promotion p
+        ON ss.ss_promo_sk = p.p_promo_sk
+    JOIN catalog_returns cr
+        ON ss.ss_item_sk = cr.cr_item_sk
+        AND ss.ss_sold_date_sk = cr.cr_returned_date_sk
+    JOIN call_center cc
+        ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    JOIN catalog_page cp
+        ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN ship_mode sm
+        ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN inventory inv
+        ON ss.ss_item_sk = inv.inv_item_sk
+        AND ss.ss_sold_date_sk = inv.inv_date_sk
+    JOIN income_band ib
+        ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE d.d_year = 2001
+      AND i.i_brand = 'Brand1'
+      AND s.s_state = 'CA'
+      AND c.c_birth_year BETWEEN 1965 AND 1975
+      AND ib.ib_upper_bound <= 50000
+    GROUP BY s.s_store_id, i.i_brand, d.d_year
 )
 SELECT
-    i.i_category,
-    i.i_brand,
-    p.p_channel_email,
-    sm.sm_type,
-    td.t_sub_shift,
-    j.cs_total_qty,
-    j.ws_total_qty,
-    (j.cs_total_qty + j.ws_total_qty) AS total_qty,
-    (j.cs_total_paid + j.ws_total_paid) AS total_paid,
-    SUM(j.cs_total_paid + j.ws_total_paid) OVER (
-        PARTITION BY i.i_category
-        ORDER BY (j.cs_total_paid + j.ws_total_paid) DESC
-    ) AS category_paid_rank
-FROM joined j
-JOIN item i
-    ON j.cs_item_sk = i.i_item_sk
-JOIN promotion p
-    ON j.cs_promo_sk = p.p_promo_sk
-JOIN ship_mode sm
-    ON j.cs_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN time_dim td
-    ON j.cs_sold_time_sk = td.t_time_sk
-WHERE sm.sm_type = 'OVERNIGHT'
-  AND p.p_channel_email = 'Y'
-  AND td.t_sub_shift = 'morning'
-  AND i.i_category IN (
-        SELECT DISTINCT i2.i_category
-        FROM item i2
-        WHERE i2.i_brand = 'BrandX'
-      )
-GROUP BY i.i_category, i.i_brand, p.p_channel_email, sm.sm_type, td.t_sub_shift,
-         j.cs_total_qty, j.ws_total_qty, j.cs_total_paid, j.ws_total_paid
-HAVING SUM(j.cs_total_paid + j.ws_total_paid) > 1000
-ORDER BY total_paid DESC
+    store_id,
+    brand,
+    year,
+    total_sales,
+    total_returns,
+    order_cnt,
+    return_cnt,
+    (total_sales - total_returns) AS net_sales,
+    ROW_NUMBER() OVER (ORDER BY (total_sales - total_returns) DESC) AS sales_rank,
+    AVG(total_sales) OVER (PARTITION BY brand) AS avg_sales_by_brand
+FROM sales_returns
+WHERE (total_sales - total_returns) > 0
+ORDER BY net_sales DESC
 LIMIT 100

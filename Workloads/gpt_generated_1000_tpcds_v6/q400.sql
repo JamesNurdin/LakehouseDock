@@ -1,42 +1,79 @@
-WITH sales_agg AS (
+WITH
+  store_data AS (
     SELECT
-        s.s_store_id AS store_id,
-        d1.d_year AS year,
-        SUM(ws.ws_ext_sales_price) AS total_sales,
-        SUM(ws.ws_net_profit) AS total_profit,
-        COUNT(*) AS sales_cnt
+      s.s_store_id                     AS channel_id,
+      'Store'                          AS channel_type,
+      i.i_item_id                      AS i_item_id,
+      SUM(ss.ss_ext_sales_price)      AS sales_amount,
+      SUM(ss.ss_net_profit)           AS profit_amount,
+      CASE
+        WHEN SUM(ss.ss_net_profit) > 10000 THEN 'High'
+        WHEN SUM(ss.ss_net_profit) > 1000  THEN 'Medium'
+        ELSE 'Low'
+      END                             AS profit_category
+    FROM store_sales ss
+      JOIN item i               ON ss.ss_item_sk = i.i_item_sk
+      JOIN store s              ON ss.ss_store_sk = s.s_store_sk
+      JOIN promotion p          ON ss.ss_promo_sk = p.p_promo_sk
+      JOIN customer_address ca  ON ss.ss_addr_sk = ca.ca_address_sk
+      LEFT JOIN store_returns sr
+        ON ss.ss_ticket_number = sr.sr_ticket_number
+        AND sr.sr_item_sk = i.i_item_sk
+      LEFT JOIN reason r
+        ON sr.sr_reason_sk = r.r_reason_sk
+      JOIN inventory inv        ON i.i_item_sk = inv.inv_item_sk
+      JOIN warehouse w          ON inv.inv_warehouse_sk = w.w_warehouse_sk
+    WHERE s.s_country = 'United States'
+      AND ss.ss_net_paid > 1000
+      AND i.i_current_price BETWEEN 5 AND 50
+      AND p.p_discount_active = 'Y'
+      AND r.r_reason_desc = 'Damaged'
+    GROUP BY s.s_store_id, i.i_item_id
+  ),
+  web_data AS (
+    SELECT
+      wsit.web_site_id                AS channel_id,
+      'Web'                           AS channel_type,
+      i.i_item_id                     AS i_item_id,
+      SUM(ws.ws_ext_sales_price)      AS sales_amount,
+      SUM(ws.ws_net_profit)           AS profit_amount,
+      CASE
+        WHEN SUM(ws.ws_net_profit) > 10000 THEN 'High'
+        WHEN SUM(ws.ws_net_profit) > 1000  THEN 'Medium'
+        ELSE 'Low'
+      END                             AS profit_category
     FROM web_sales ws
-    JOIN date_dim d1 ON ws.ws_sold_date_sk = d1.d_date_sk
-    JOIN item i ON ws.ws_item_sk = i.i_item_sk
-    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
-    JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk AND inv.inv_date_sk = d1.d_date_sk
-    JOIN store s ON s.s_closed_date_sk = d1.d_date_sk
-    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
-    JOIN household_demographics hd ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
-    WHERE d1.d_current_year = 'Y'
-      AND d1.d_same_day_ly BETWEEN 2414650 AND 2414680
-      AND p.p_channel_tv = 'N'
-      AND c.c_preferred_cust_flag = 'Y'
-      AND ib.ib_upper_bound > 50000
-    GROUP BY s.s_store_id, d1.d_year
-)
+      JOIN item i               ON ws.ws_item_sk = i.i_item_sk
+      JOIN web_site wsit        ON ws.ws_web_site_sk = wsit.web_site_sk
+      JOIN promotion p          ON ws.ws_promo_sk = p.p_promo_sk
+      JOIN customer_address ca_bill ON ws.ws_bill_addr_sk = ca_bill.ca_address_sk
+      JOIN customer_address ca_ship ON ws.ws_ship_addr_sk = ca_ship.ca_address_sk
+      LEFT JOIN web_returns wr
+        ON ws.ws_order_number = wr.wr_order_number
+        AND wr.wr_item_sk = i.i_item_sk
+      LEFT JOIN reason r
+        ON wr.wr_reason_sk = r.r_reason_sk
+      JOIN ship_mode sm         ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+      JOIN warehouse w          ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE wsit.web_state = 'CA'
+      AND ws.ws_net_paid > 1500
+      AND i.i_current_price BETWEEN 10 AND 60
+      AND p.p_discount_active = 'Y'
+      AND r.r_reason_desc = 'Customer Return'
+    GROUP BY wsit.web_site_id, i.i_item_id
+  ),
+  combined AS (
+    SELECT * FROM store_data
+    UNION ALL
+    SELECT * FROM web_data
+  )
 SELECT
-    store_id,
-    year,
-    total_sales,
-    total_profit,
-    sales_cnt,
-    CASE
-        WHEN total_profit / NULLIF(total_sales, 0) > 0.20 THEN 'Profitable'
-        ELSE 'LowMargin'
-    END AS profit_category,
-    (SELECT AVG(total_sales) FROM sales_agg) AS avg_total_sales_all_stores,
-    CASE
-        WHEN total_sales > (SELECT AVG(total_sales) FROM sales_agg) THEN 'AboveAvg'
-        ELSE 'BelowAvg'
-    END AS sales_relative_category
-FROM sales_agg
-WHERE total_sales > (SELECT AVG(total_sales) FROM sales_agg)
-ORDER BY total_profit DESC
-LIMIT 100
+  channel_type,
+  channel_id,
+  i_item_id,
+  sales_amount,
+  profit_amount,
+  profit_category,
+  ROW_NUMBER() OVER (PARTITION BY channel_type ORDER BY sales_amount DESC) AS sales_rank
+FROM combined
+ORDER BY channel_type, sales_rank

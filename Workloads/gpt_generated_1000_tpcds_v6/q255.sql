@@ -1,75 +1,81 @@
-WITH
-  sales_agg AS (
+/* goal: Identify top‑selling items (by item id) across catalog sales, returns and inventory, broken down by promotion, call center and ship mode, after applying several business filters. The query joins all eight TPC‑DS tables, aggregates in two CTEs with slightly different filter sets, unions the results, and then re‑aggregates to produce a ranked list of items.
+*/
+WITH base AS (
     SELECT
-      s.s_store_sk AS s_store_sk,
-      d1.d_year AS year,
-      SUM(cs.cs_net_profit) AS sales_profit,
-      COUNT(*) AS sales_cnt
-    FROM catalog_sales cs
-    JOIN date_dim d1 ON cs.cs_sold_date_sk = d1.d_date_sk
-    JOIN household_demographics hd1 ON cs.cs_bill_hdemo_sk = hd1.hd_demo_sk
-    JOIN store_returns sr ON sr.sr_hdemo_sk = hd1.hd_demo_sk
-    JOIN store s ON sr.sr_store_sk = s.s_store_sk
-    JOIN web_site ws ON ws.web_open_date_sk = d1.d_date_sk
-    WHERE d1.d_year = 2001
-      AND hd1.hd_income_band_sk IN (10, 15, 20)
-      AND ws.web_state = 'CA'
-    GROUP BY s.s_store_sk, d1.d_year
-  ),
-  returns_agg AS (
+        i.i_item_id,
+        i.i_manager_id,
+        i.i_class_id,
+        i.i_formulation,
+        p.p_promo_name,
+        p.p_end_date_sk,
+        cc.cc_name,
+        cc.cc_state,
+        sm.sm_type,
+        cs.cs_ext_sales_price,
+        cs.cs_net_profit,
+        sr.sr_return_amt,
+        wr.wr_return_amt,
+        inv.inv_quantity_on_hand,
+        sr.sr_refunded_cash,
+        wr.wr_refunded_cash
+    FROM tpcds.item i
+    JOIN tpcds.catalog_sales cs ON cs.cs_item_sk = i.i_item_sk
+    JOIN tpcds.call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN tpcds.ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN tpcds.promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN tpcds.inventory inv ON inv.inv_item_sk = i.i_item_sk
+    JOIN tpcds.store_returns sr ON sr.sr_item_sk = i.i_item_sk
+    JOIN tpcds.web_returns wr ON wr.wr_item_sk = i.i_item_sk
+    WHERE i.i_manager_id IN (3, 64)
+      AND i.i_class_id = 14
+      AND p.p_end_date_sk BETWEEN 2450300 AND 2450400
+      AND cc.cc_state = 'CA'
+      AND sm.sm_type = 'AIR'
+      AND inv.inv_quantity_on_hand > 0
+      AND sr.sr_refunded_cash > 50
+      AND wr.wr_refunded_cash > 30
+),
+agg1 AS (
     SELECT
-      s.s_store_sk AS s_store_sk,
-      d2.d_year AS year,
-      SUM(sr.sr_net_loss) AS returns_loss,
-      COUNT(*) AS returns_cnt
-    FROM store_returns sr
-    JOIN date_dim d2 ON sr.sr_returned_date_sk = d2.d_date_sk
-    JOIN household_demographics hd2 ON sr.sr_hdemo_sk = hd2.hd_demo_sk
-    JOIN store s ON sr.sr_store_sk = s.s_store_sk
-    JOIN web_site ws ON ws.web_open_date_sk = d2.d_date_sk
-    WHERE d2.d_year = 2001
-      AND hd2.hd_income_band_sk IN (10, 15, 20)
-      AND ws.web_state = 'CA'
-    GROUP BY s.s_store_sk, d2.d_year
-  ),
-  combined AS (
+        i_item_id,
+        p_promo_name,
+        cc_name,
+        sm_type,
+        SUM(cs_ext_sales_price) AS total_sales,
+        SUM(cs_net_profit) AS total_profit,
+        SUM(sr_return_amt) AS total_store_return,
+        SUM(wr_return_amt) AS total_web_return,
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM base
+    GROUP BY i_item_id, p_promo_name, cc_name, sm_type
+),
+agg2 AS (
     SELECT
-      s_store_sk,
-      year,
-      sales_profit,
-      0.0 AS returns_loss,
-      sales_cnt AS trans_cnt
-    FROM sales_agg
-    UNION ALL
-    SELECT
-      s_store_sk,
-      year,
-      0.0 AS sales_profit,
-      returns_loss,
-      returns_cnt AS trans_cnt
-    FROM returns_agg
-  ),
-  final_agg AS (
-    SELECT
-      s_store_sk,
-      year,
-      SUM(sales_profit) AS total_sales_profit,
-      SUM(returns_loss) AS total_returns_loss,
-      SUM(trans_cnt) AS total_transactions,
-      (SUM(sales_profit) - SUM(returns_loss)) AS net_amount,
-      AVG(SUM(sales_profit) - SUM(returns_loss)) OVER (PARTITION BY year) AS avg_net_amount_year
-    FROM combined
-    GROUP BY s_store_sk, year
-  )
+        i_item_id,
+        p_promo_name,
+        cc_name,
+        sm_type,
+        SUM(cs_ext_sales_price) * 0.9 AS total_sales,
+        SUM(cs_net_profit) * 0.9 AS total_profit,
+        SUM(sr_return_amt) * 0.9 AS total_store_return,
+        SUM(wr_return_amt) * 0.9 AS total_web_return,
+        SUM(inv_quantity_on_hand) AS total_inventory
+    FROM base
+    WHERE i_manager_id = 26
+    GROUP BY i_item_id, p_promo_name, cc_name, sm_type
+)
 SELECT
-  s_store_sk,
-  year,
-  total_sales_profit,
-  total_returns_loss,
-  net_amount,
-  avg_net_amount_year,
-  RANK() OVER (ORDER BY net_amount DESC) AS profit_rank
-FROM final_agg
-WHERE net_amount > (SELECT AVG(net_amount) FROM final_agg)
-ORDER BY net_amount DESC
+    u.i_item_id,
+    SUM(u.total_sales) AS sum_sales,
+    AVG(u.total_profit) AS avg_profit,
+    SUM(u.total_store_return + u.total_web_return) AS sum_returns,
+    SUM(u.total_inventory) AS sum_inventory
+FROM (
+    SELECT * FROM agg1
+    UNION ALL
+    SELECT * FROM agg2
+) u
+GROUP BY u.i_item_id
+HAVING SUM(u.total_sales) > 1000
+ORDER BY sum_sales DESC
 LIMIT 100

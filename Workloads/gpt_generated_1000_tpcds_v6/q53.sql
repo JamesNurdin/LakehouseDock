@@ -1,33 +1,41 @@
-WITH sales_returns AS (
+WITH filtered_returns AS (
     SELECT
-        ws.ws_web_site_sk AS site_sk,
-        ws.ws_net_profit,
-        wr.wr_return_amt,
-        hd.hd_buy_potential,
-        wsit.web_name
-    FROM tpcds.web_sales ws
-    JOIN tpcds.web_site wsit
-        ON ws.ws_web_site_sk = wsit.web_site_sk
-    JOIN tpcds.household_demographics hd
-        ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-    LEFT JOIN tpcds.web_returns wr
-        ON ws.ws_item_sk = wr.wr_item_sk
-        AND ws.ws_order_number = wr.wr_order_number
-    WHERE wsit.web_name LIKE '%Web%'
-      AND regexp_like(wsit.web_name, '^.*[A-Z]{2,}.*$')
+        cr.cr_return_amount,
+        cp.cp_department,
+        cp.cp_type,
+        d.d_year,
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        c.c_email_address,
+        cp.cp_description
+    FROM catalog_returns cr
+    JOIN catalog_page cp ON cr.cr_catalog_page_sk = cp.cp_catalog_page_sk
+    JOIN date_dim d ON cp.cp_start_date_sk = d.d_date_sk
+    JOIN customer c ON cr.cr_returning_customer_sk = c.c_customer_sk
+    WHERE regexp_like(cp.cp_description, '\\d{3,}')
+      AND c.c_email_address LIKE '%@example.com'
+      AND substring(c.c_first_name, 1, 1) = 'A'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM web_returns wr
+          WHERE wr.wr_returning_customer_sk = c.c_customer_sk
+      )
 )
 SELECT
-    sr.site_sk,
-    CONCAT(sr.web_name, '-', CAST(sr.site_sk AS VARCHAR)) AS site_label,
-    regexp_extract(sr.web_name, '([A-Za-z]+)', 1) AS name_prefix,
-    sr.hd_buy_potential,
-    SUM(sr.ws_net_profit) AS total_net_profit,
-    SUM(COALESCE(sr.wr_return_amt, 0)) AS total_return_amount,
-    CASE
-        WHEN SUM(sr.ws_net_profit) > 0 THEN 'PROFIT'
-        ELSE 'LOSS'
-    END AS profit_flag
-FROM sales_returns sr
-GROUP BY sr.site_sk, sr.web_name, sr.hd_buy_potential
-ORDER BY total_net_profit DESC
+    fr.cp_department,
+    fr.d_year,
+    fr.cp_type,
+    SUM(fr.cr_return_amount) AS total_return_amount,
+    COUNT(*) AS return_count,
+    MIN(regexp_extract(fr.cp_description, '(\\d{3,})', 1)) AS sample_code,
+    CONCAT(fr.c_first_name, ' ', fr.c_last_name) AS full_name
+FROM filtered_returns fr
+GROUP BY
+    fr.cp_department,
+    fr.d_year,
+    fr.cp_type,
+    fr.c_first_name,
+    fr.c_last_name
+ORDER BY total_return_amount DESC
 LIMIT 100

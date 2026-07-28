@@ -1,44 +1,35 @@
-WITH filtered_sales AS (
-    SELECT
-        ss.ss_sold_time_sk,
-        ss.ss_wholesale_cost,
-        ss.ss_ext_wholesale_cost,
-        ss.ss_net_paid_inc_tax,
-        ss.ss_quantity,
-        ss.ss_item_sk,
-        ss.ss_store_sk
-    FROM store_sales ss
-    WHERE ss.ss_wholesale_cost > 50
-      AND ss.ss_ext_wholesale_cost BETWEEN 1000 AND 3000
-      AND ss.ss_quantity >= 1
+WITH filtered_items AS (
+    SELECT i_item_sk,
+           i_item_desc,
+           i_formulation,
+           i_units
+    FROM item
+    WHERE regexp_like(i_formulation, '^[0-9]+[a-z]+[0-9]+$')
 )
 SELECT
-    cc.cc_name,
-    td.t_hour,
-    td.t_minute,
-    COUNT(DISTINCT fs.ss_item_sk) AS distinct_items_sold,
-    SUM(fs.ss_ext_wholesale_cost) AS total_wholesale_cost,
-    AVG(cs.cs_ext_sales_price) AS avg_catalog_sales_price,
-    SUM(CASE WHEN cs.cs_net_profit > 0 THEN cs.cs_net_profit ELSE 0 END) AS total_positive_profit,
-    MAX(td.t_second) AS max_second
-FROM filtered_sales fs
-JOIN time_dim td
-    ON fs.ss_sold_time_sk = td.t_time_sk
-JOIN catalog_sales cs
-    ON cs.cs_sold_time_sk = td.t_time_sk
-JOIN call_center cc
-    ON cs.cs_call_center_sk = cc.cc_call_center_sk
-WHERE td.t_second IN (7, 15)
-  AND td.t_minute >= 2
-  AND cs.cs_ship_customer_sk IN (4706359, 4098294)
-  AND cs.cs_ext_wholesale_cost > 500
-  AND cc.cc_state = 'CA'
-  AND EXISTS (
-        SELECT 1
-        FROM catalog_sales cs2
-        WHERE cs2.cs_order_number = cs.cs_order_number
-          AND cs2.cs_quantity > 5
-    )
-GROUP BY cc.cc_name, td.t_hour, td.t_minute
-ORDER BY total_wholesale_cost DESC
+    w.w_warehouse_name,
+    sm.sm_code,
+    concat(w.w_warehouse_name, ' - ', sm.sm_code) AS warehouse_ship,
+    sum(cs.cs_net_paid) AS total_net_paid,
+    count(DISTINCT cs.cs_order_number) AS distinct_orders,
+    avg(cs.cs_net_profit) AS avg_net_profit,
+    (SELECT avg(cs2.cs_net_profit) FROM catalog_sales cs2) AS overall_avg_profit,
+    regexp_extract(fi.i_formulation, '(\\d+)$') AS formulation_suffix
+FROM catalog_sales cs
+JOIN filtered_items fi ON cs.cs_item_sk = fi.i_item_sk
+JOIN ship_mode sm ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
+JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+WHERE sm.sm_code LIKE 'A%'
+  AND td.t_hour BETWEEN 8 AND 17
+  AND fi.i_units LIKE '%Bundle%'
+GROUP BY
+    w.w_warehouse_name,
+    sm.sm_code,
+    concat(w.w_warehouse_name, ' - ', sm.sm_code),
+    fi.i_formulation
+HAVING avg(cs.cs_net_profit) > (SELECT avg(cs3.cs_net_profit) FROM catalog_sales cs3)
+ORDER BY total_net_paid DESC
 LIMIT 100

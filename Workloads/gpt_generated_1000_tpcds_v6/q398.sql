@@ -1,57 +1,73 @@
-WITH
-  sales_agg AS (
+WITH cs AS (
     SELECT
-      d.d_year,
-      p.p_promo_name,
-      MAX(COALESCE(wp.wp_type, 'none')) AS wp_type_used,
-      SUM(ss.ss_ext_sales_price) AS total_sales,
-      COUNT(*) AS sales_cnt
-    FROM store_sales ss
-    JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
-    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
-    JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-    LEFT JOIN web_page wp ON wp.wp_creation_date_sk = d.d_date_sk
-    WHERE d.d_year BETWEEN 1999 AND 2001
-      AND d.d_month_seq >= 1200
-      AND ss.ss_ext_list_price > 2000
-      AND hd.hd_vehicle_count >= 0
-      AND p.p_discount_active = 'Y'
-      AND wp.wp_type IN ('ad', 'welcome')
-      AND hd.hd_income_band_sk IS NOT NULL
-    GROUP BY d.d_year, p.p_promo_name
-  ),
-  page_agg AS (
+        cs.cs_warehouse_sk,
+        cs.cs_promo_sk,
+        cs.cs_net_profit,
+        cs.cs_sold_time_sk,
+        cs.cs_call_center_sk
+    FROM catalog_sales cs
+    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN time_dim t1 ON cs.cs_sold_time_sk = t1.t_time_sk
+    JOIN promotion p1 ON cs.cs_promo_sk = p1.p_promo_sk
+    JOIN warehouse wh1 ON cs.cs_warehouse_sk = wh1.w_warehouse_sk
+),
+ws AS (
     SELECT
-      d.d_year,
-      wp.wp_type,
-      COUNT(DISTINCT wp.wp_web_page_id) AS page_cnt
-    FROM web_page wp
-    JOIN date_dim d ON wp.wp_creation_date_sk = d.d_date_sk
-    WHERE d.d_year BETWEEN 1999 AND 2001
-      AND wp.wp_type IS NOT NULL
-      AND wp.wp_char_count > 1000
-      AND wp.wp_image_count >= 0
-      AND wp.wp_max_ad_count > 0
-    GROUP BY d.d_year, wp.wp_type
-  )
+        ws.ws_warehouse_sk,
+        ws.ws_promo_sk,
+        ws.ws_net_profit,
+        ws.ws_sold_time_sk,
+        ws.ws_web_site_sk
+    FROM web_sales ws
+    JOIN web_site ws_site ON ws.ws_web_site_sk = ws_site.web_site_sk
+    JOIN time_dim t2 ON ws.ws_sold_time_sk = t2.t_time_sk
+    JOIN promotion p2 ON ws.ws_promo_sk = p2.p_promo_sk
+    JOIN warehouse wh2 ON ws.ws_warehouse_sk = wh2.w_warehouse_sk
+),
+union_sales AS (
+    SELECT
+        'catalog' AS src,
+        cs_warehouse_sk AS warehouse_sk,
+        cs_promo_sk AS promo_sk,
+        SUM(cs_net_profit) AS net_profit
+    FROM cs
+    GROUP BY cs_warehouse_sk, cs_promo_sk
+    UNION ALL
+    SELECT
+        'web' AS src,
+        ws_warehouse_sk AS warehouse_sk,
+        ws_promo_sk AS promo_sk,
+        SUM(ws_net_profit) AS net_profit
+    FROM ws
+    GROUP BY ws_warehouse_sk, ws_promo_sk
+),
+inventory_agg AS (
+    SELECT
+        inv_warehouse_sk,
+        SUM(inv_quantity_on_hand) AS total_on_hand
+    FROM inventory
+    GROUP BY inv_warehouse_sk
+),
+promo_details AS (
+    SELECT
+        p_promo_sk,
+        CASE WHEN p_discount_active = 'Y' THEN 'Active' ELSE 'Inactive' END AS promo_status
+    FROM promotion
+)
 SELECT
-  u.year,
-  AVG(u.metric) AS avg_metric
-FROM (
-  SELECT
-    sa.d_year AS year,
-    sa.p_promo_name AS category,
-    sa.total_sales AS metric
-  FROM sales_agg sa
-
-  UNION ALL
-
-  SELECT
-    pa.d_year AS year,
-    pa.wp_type AS category,
-    CAST(pa.page_cnt AS decimal(12,2)) AS metric
-  FROM page_agg pa
-) u
-GROUP BY u.year
-ORDER BY avg_metric DESC
+    u.src,
+    wh.w_warehouse_name,
+    pd.promo_status,
+    u.net_profit,
+    CASE WHEN u.net_profit > (SELECT AVG(net_profit) FROM union_sales) THEN 'Above Avg' ELSE 'Below Avg' END AS profit_category,
+    inv.total_on_hand,
+    ROW_NUMBER() OVER (PARTITION BY wh.w_warehouse_sk ORDER BY u.net_profit DESC) AS profit_rank
+FROM union_sales u
+JOIN warehouse wh ON u.warehouse_sk = wh.w_warehouse_sk
+JOIN promo_details pd ON u.promo_sk = pd.p_promo_sk
+JOIN inventory_agg inv ON wh.w_warehouse_sk = inv.inv_warehouse_sk
+WHERE EXISTS (
+    SELECT 1 FROM inventory i WHERE i.inv_warehouse_sk = wh.w_warehouse_sk AND i.inv_quantity_on_hand > 0
+)
+ORDER BY u.net_profit DESC
 LIMIT 100

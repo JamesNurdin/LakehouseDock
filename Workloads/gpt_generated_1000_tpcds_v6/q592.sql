@@ -1,36 +1,31 @@
-WITH filtered AS (
-    SELECT
-        sr.sr_return_amt,
-        hd.hd_income_band_sk,
-        hd.hd_buy_potential,
-        t.t_meal_time
+WITH web_agg AS (
+    SELECT d.d_year AS year,
+           'Web' AS source,
+           SUM(ws.ws_net_paid) AS total_amount
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE p.p_channel_email = 'N'
+    GROUP BY d.d_year, 'Web'
+),
+store_agg AS (
+    SELECT d.d_year AS year,
+           'Store' AS source,
+           SUM(sr.sr_return_amt) AS total_amount
     FROM store_returns sr
-    INNER JOIN household_demographics hd
-        ON sr.sr_hdemo_sk = hd.hd_demo_sk
-    INNER JOIN time_dim t
-        ON sr.sr_return_time_sk = t.t_time_sk
-    LEFT JOIN reason r
-        ON sr.sr_reason_sk = r.r_reason_sk
-    WHERE hd.hd_income_band_sk IN (6, 14, 20)
-      AND hd.hd_buy_potential = '5001-10000'
-      AND t.t_meal_time = 'lunch'
-      AND (r.r_reason_desc = 'duplicate purchase' OR r.r_reason_desc IS NULL)
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM reason r
+        WHERE r.r_reason_sk = sr.sr_reason_sk
+          AND r.r_reason_desc = 'Damaged Goods'
+    )
+    GROUP BY d.d_year, 'Store'
 )
-SELECT
-    hd_income_band_sk,
-    hd_buy_potential,
-    t_meal_time,
-    COUNT(*) AS return_cnt,
-    SUM(sr_return_amt) AS total_return_amt,
-    AVG(sr_return_amt) AS avg_return_amt,
-    MIN(sr_return_amt) AS min_return_amt,
-    MAX(sr_return_amt) AS max_return_amt,
-    SUM(SUM(sr_return_amt)) OVER (
-        PARTITION BY hd_income_band_sk
-        ORDER BY hd_buy_potential
-        ROWS UNBOUNDED PRECEDING
-    ) AS cum_return_by_income
-FROM filtered
-GROUP BY hd_income_band_sk, hd_buy_potential, t_meal_time
-ORDER BY total_return_amt DESC
+SELECT year, source, total_amount
+FROM web_agg
+UNION ALL
+SELECT year, source, total_amount
+FROM store_agg
+ORDER BY year DESC, total_amount DESC
 LIMIT 100

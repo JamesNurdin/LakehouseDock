@@ -1,39 +1,50 @@
-WITH returns_low_hdemo AS (
+WITH cust_page_agg AS (
     SELECT
-        r.r_reason_desc,
-        SUM(cr.cr_return_amt_inc_tax) AS total_return_amount,
-        AVG(cr.cr_return_quantity) AS avg_return_qty,
-        'HDemo_0_2000' AS segment
-    FROM catalog_returns cr
-    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-    WHERE cr.cr_returning_hdemo_sk BETWEEN 0 AND 2000
-    GROUP BY r.r_reason_desc
-    HAVING SUM(cr.cr_return_amt_inc_tax) > 5000
-),
-returns_mid_hdemo AS (
-    SELECT
-        r.r_reason_desc,
-        SUM(cr.cr_return_amt_inc_tax) AS total_return_amount,
-        AVG(cr.cr_return_quantity) AS avg_return_qty,
-        'HDemo_2001_4000' AS segment
-    FROM catalog_returns cr
-    JOIN reason r ON cr.cr_reason_sk = r.r_reason_sk
-    WHERE cr.cr_returning_hdemo_sk BETWEEN 2001 AND 4000
-    GROUP BY r.r_reason_desc
-    HAVING SUM(cr.cr_return_amt_inc_tax) > 5000
+        c.c_customer_sk,
+        c.c_customer_id,
+        d_cust.d_year AS first_sales_year,
+        SUM(i.inv_quantity_on_hand) AS total_quantity,
+        COUNT(DISTINCT w.wp_web_page_sk) AS distinct_pages,
+        AVG(w.wp_image_count) AS avg_image_count,
+        SUM(w.wp_max_ad_count) AS total_max_ad
+    FROM customer c
+    JOIN date_dim d_cust
+        ON c.c_first_sales_date_sk = d_cust.d_date_sk
+    JOIN web_page w
+        ON w.wp_customer_sk = c.c_customer_sk
+    JOIN date_dim d_wp
+        ON w.wp_creation_date_sk = d_wp.d_date_sk
+    JOIN inventory i
+        ON i.inv_date_sk = d_wp.d_date_sk
+    WHERE
+        c.c_preferred_cust_flag = 'Y'
+        AND c.c_birth_year BETWEEN 1950 AND 1990
+        AND d_cust.d_year = 2002
+        AND i.inv_warehouse_sk IN (12, 13, 19)
+        AND i.inv_quantity_on_hand > 0
+        AND w.wp_autogen_flag = 'N'
+        AND w.wp_image_count >= 2
+    GROUP BY
+        c.c_customer_sk,
+        c.c_customer_id,
+        d_cust.d_year
 )
-SELECT
-    r_reason_desc,
-    total_return_amount,
-    avg_return_qty,
-    segment
-FROM returns_low_hdemo
-UNION ALL
-SELECT
-    r_reason_desc,
-    total_return_amount,
-    avg_return_qty,
-    segment
-FROM returns_mid_hdemo
-ORDER BY total_return_amount DESC
+SELECT DISTINCT
+    ca.c_customer_id,
+    ca.first_sales_year,
+    ca.total_quantity,
+    ca.distinct_pages,
+    ca.avg_image_count,
+    ca.total_max_ad,
+    RANK() OVER (ORDER BY ca.total_quantity DESC) AS qty_rank,
+    SUM(ca.total_quantity) OVER (PARTITION BY ca.first_sales_year) AS yearly_quantity_total,
+    ca.total_quantity / NULLIF(ca.distinct_pages, 0) AS avg_qty_per_page
+FROM cust_page_agg ca
+WHERE EXISTS (
+    SELECT 1
+    FROM web_page wp_sub
+    WHERE wp_sub.wp_customer_sk = ca.c_customer_sk
+      AND wp_sub.wp_max_ad_count > 3
+)
+ORDER BY ca.total_quantity DESC
 LIMIT 100

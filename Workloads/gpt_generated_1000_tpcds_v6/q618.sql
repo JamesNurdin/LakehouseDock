@@ -1,45 +1,43 @@
-WITH filtered_sales AS (
-    SELECT ws_sold_time_sk,
-           ws_ship_mode_sk,
-           ws_bill_addr_sk,
-           ws_ext_sales_price,
-           ws_sales_price,
-           ws_quantity,
-           ws_sold_date_sk,
-           ws_order_number
-    FROM web_sales
-    WHERE ws_ext_sales_price > 1000
-      AND ws_quantity >= 2
+WITH sales_agg AS (
+    SELECT
+        ss.ss_store_sk,
+        SUM(ss.ss_ext_sales_price) AS store_sales,
+        SUM(ss.ss_net_profit) AS store_profit,
+        COUNT(*) AS txn_count,
+        AVG(ss.ss_coupon_amt) AS avg_coupon,
+        MAX(ss.ss_ext_discount_amt) AS max_discount
+    FROM store_sales ss
+    WHERE ss.ss_ext_tax > 20.00
+      AND ss.ss_coupon_amt < 1000.00
+      AND ss.ss_quantity > 0
+    GROUP BY ss.ss_store_sk
 )
 SELECT
-    sm.sm_type,
-    ca.ca_state,
-    td.t_hour,
-    COUNT(*) AS order_count,
-    SUM(ws.ws_ext_sales_price) AS total_sales,
-    AVG(ws.ws_sales_price) AS avg_sales_price,
-    MIN(ws.ws_ext_sales_price) AS min_sales,
-    MAX(ws.ws_ext_sales_price) AS max_sales
-FROM filtered_sales ws
-JOIN time_dim td
-  ON ws.ws_sold_time_sk = td.t_time_sk
-JOIN ship_mode sm
-  ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN customer_address ca
-  ON ws.ws_bill_addr_sk = ca.ca_address_sk
-WHERE sm.sm_contract = 'Xjy3ZPuiDjzHlRx14Z3'
-  AND ca.ca_suite_number = 'Suite 200'
-  AND ca.ca_state = 'CA'
-  AND td.t_hour BETWEEN 9 AND 17
-  AND td.t_am_pm = 'PM'
-  AND EXISTS (
+    s.s_manager,
+    s.s_state,
+    s.s_tax_percentage,
+    COUNT(DISTINCT s.s_store_id) AS stores_count,
+    SUM(sa.store_sales) AS total_sales,
+    SUM(sa.store_profit) AS total_profit,
+    AVG(sa.avg_coupon) AS avg_store_coupon,
+    MAX(sa.max_discount) AS max_store_discount,
+    SUM(sa.txn_count) AS total_transactions
+FROM store s
+LEFT JOIN sales_agg sa
+    ON s.s_store_sk = sa.ss_store_sk
+WHERE s.s_manager = 'David Thomas'
+  AND s.s_tax_percentage = 0.08
+  AND s.s_state = 'CA'
+  AND NOT EXISTS (
         SELECT 1
-        FROM web_sales ws2
-        WHERE ws2.ws_bill_addr_sk = ws.ws_bill_addr_sk
-          AND ws2.ws_ext_sales_price > 2000
-        LIMIT 1
-    )
-GROUP BY sm.sm_type, ca.ca_state, td.t_hour
-HAVING SUM(ws.ws_ext_sales_price) > 5000
-ORDER BY total_sales DESC
+        FROM store_sales ss2
+        WHERE ss2.ss_store_sk = s.s_store_sk
+          AND ss2.ss_coupon_amt > 5000.00
+      )
+GROUP BY
+    s.s_manager,
+    s.s_state,
+    s.s_tax_percentage
+HAVING SUM(sa.store_sales) > 100000
+ORDER BY total_profit DESC
 LIMIT 100

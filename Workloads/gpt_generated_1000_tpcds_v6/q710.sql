@@ -1,39 +1,39 @@
-WITH cust_email AS (
+WITH sales_agg AS (
     SELECT
-        c.c_customer_sk,
-        c.c_first_name,
-        c.c_email_address,
-        c.c_current_cdemo_sk,
-        c.c_first_sales_date_sk,
-        regexp_extract(c.c_email_address, '@([^@]+)$', 1) AS email_domain
-    FROM tpcds.customer c
-    WHERE regexp_like(c.c_email_address, '@[a-z0-9]+\\.(com|net|org)$')
+        ws.ws_item_sk,
+        ws.ws_web_site_sk,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        COUNT(*) AS sales_cnt,
+        MIN(ws.ws_sold_date_sk) AS first_sold_date_sk
+    FROM web_sales ws
+    JOIN web_site wsite
+        ON ws.ws_web_site_sk = wsite.web_site_sk
+    WHERE wsite.web_name LIKE '%Online%'
+    GROUP BY ws.ws_item_sk, ws.ws_web_site_sk
 )
 SELECT
-    s.s_division_name,
-    s.s_market_desc,
-    COUNT(DISTINCT ce.c_customer_sk) AS total_customers,
-    COUNT(DISTINCT CASE WHEN ce.email_domain = 'example.com' THEN ce.c_customer_sk END) AS example_com_customers,
-    ARRAY_AGG(DISTINCT ce.email_domain) FILTER (WHERE ce.email_domain IS NOT NULL) AS distinct_domains
-FROM tpcds.store s
-JOIN tpcds.date_dim d_closed
-    ON s.s_closed_date_sk = d_closed.d_date_sk
-JOIN cust_email ce
-    ON ce.c_first_sales_date_sk = d_closed.d_date_sk
-JOIN tpcds.customer_demographics cd
-    ON ce.c_current_cdemo_sk = cd.cd_demo_sk
-WHERE
-    d_closed.d_year = 2002
-    AND d_closed.d_holiday = 'N'
-    AND regexp_like(s.s_market_desc, '^[A-Z].*')
-    AND s.s_market_desc LIKE '%the%'
-    AND substring(ce.c_first_name, 1, 1) = 'A'
-    AND cd.cd_gender = 'M'
-GROUP BY
-    s.s_division_name,
-    s.s_market_desc
-HAVING
-    COUNT(DISTINCT ce.c_customer_sk) > 10
-ORDER BY
-    total_customers DESC
+    w.web_name,
+    i.i_item_id,
+    i.i_product_name,
+    CONCAT(i.i_brand, ' ', i.i_product_name) AS brand_product,
+    SUBSTRING(i.i_item_desc FROM 1 FOR 15) AS short_desc,
+    REGEXP_EXTRACT(i.i_item_desc, '(\\d{3})', 1) AS extracted_code,
+    s.total_net_paid,
+    s.sales_cnt,
+    ROW_NUMBER() OVER (PARTITION BY w.web_name ORDER BY s.total_net_paid DESC) AS rn
+FROM sales_agg s
+JOIN item i
+    ON s.ws_item_sk = i.i_item_sk
+JOIN web_site w
+    ON s.ws_web_site_sk = w.web_site_sk
+WHERE REGEXP_LIKE(i.i_item_desc, '[A-Z]{2}[0-9]{3}')
+  AND EXISTS (
+        SELECT 1
+        FROM web_returns wr
+        JOIN web_sales ws2
+            ON wr.wr_order_number = ws2.ws_order_number
+        WHERE ws2.ws_item_sk = s.ws_item_sk
+          AND ws2.ws_web_site_sk = s.ws_web_site_sk
+    )
+ORDER BY s.total_net_paid DESC
 LIMIT 100

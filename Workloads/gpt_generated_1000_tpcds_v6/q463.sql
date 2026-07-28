@@ -1,58 +1,49 @@
-WITH filtered_returns AS (
+WITH sales_filtered AS (
     SELECT
-        wr.wr_returned_date_sk,
-        wr.wr_returned_time_sk,
-        wr.wr_refunded_addr_sk,
-        wr.wr_refunded_cdemo_sk,
-        wr.wr_web_page_sk,
-        wr.wr_return_amt,
-        wr.wr_return_tax,
-        wr.wr_return_quantity,
-        wp.wp_url,
-        wp.wp_type,
-        ca.ca_city,
-        ca.ca_state,
-        ca.ca_street_type,
-        cd.cd_gender,
-        d.d_year,
-        d.d_month_seq,
-        t.t_hour,
-        t.t_sub_shift,
-        regexp_extract(wp.wp_url, '/product/([0-9]+)', 1) AS product_id
-    FROM tpcds.web_returns wr
-    JOIN tpcds.date_dim d
-        ON wr.wr_returned_date_sk = d.d_date_sk
-    JOIN tpcds.time_dim t
-        ON wr.wr_returned_time_sk = t.t_time_sk
-    JOIN tpcds.web_page wp
-        ON wr.wr_web_page_sk = wp.wp_web_page_sk
-    JOIN tpcds.customer_address ca
-        ON wr.wr_refunded_addr_sk = ca.ca_address_sk
-    JOIN tpcds.customer_demographics cd
-        ON wr.wr_refunded_cdemo_sk = cd.cd_demo_sk
-    WHERE cd.cd_gender = 'F'
-      AND ca.ca_street_type LIKE '%Ave%'
-      AND regexp_like(wp.wp_url, '^/product/[0-9]+')
+        cs.cs_call_center_sk,
+        cs.cs_ext_sales_price,
+        cs.cs_net_profit,
+        ca.ca_zip,
+        hd.hd_vehicle_count,
+        cc.cc_name,
+        cc.cc_call_center_id,
+        cc.cc_gmt_offset
+    FROM catalog_sales cs
+    JOIN call_center cc
+        ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN customer_address ca
+        ON cs.cs_bill_addr_sk = ca.ca_address_sk
+    JOIN household_demographics hd
+        ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
+    WHERE regexp_like(cc.cc_name, '^A.*Center$')
+      AND ca.ca_zip LIKE '48%'
+      AND hd.hd_vehicle_count > 0
 )
 SELECT
-    fr.d_year,
-    fr.d_month_seq,
-    fr.wp_type,
-    CONCAT(fr.ca_city, ', ', fr.ca_state) AS location,
-    fr.product_id,
-    SUM(fr.wr_return_amt) AS total_return_amount,
-    COUNT(*) AS return_count,
-    AVG(fr.wr_return_tax) AS avg_return_tax,
-    MIN(fr.wr_return_quantity) AS min_quantity,
-    SUBSTRING(fr.wp_url, 1, 30) AS url_prefix
-FROM filtered_returns fr
+    cc.cc_call_center_id,
+    cc.cc_name,
+    SUM(sf.cs_net_profit) AS total_net_profit,
+    COUNT(*) AS sales_count,
+    AVG(sf.cs_net_profit) AS avg_profit_per_center,
+    (
+        SELECT AVG(cs2.cs_net_profit)
+        FROM catalog_sales cs2
+        WHERE cs2.cs_call_center_sk = cc.cc_call_center_sk
+    ) AS center_avg_profit,
+    SUBSTRING(cc.cc_name, 1, 3) AS name_prefix,
+    REGEXP_EXTRACT(cc.cc_name, '(.*)Center$', 1) AS name_without_center
+FROM sales_filtered sf
+JOIN call_center cc
+    ON sf.cs_call_center_sk = cc.cc_call_center_sk
+WHERE sf.cs_ext_sales_price > (
+    SELECT AVG(cs3.cs_ext_sales_price)
+    FROM catalog_sales cs3
+    WHERE cs3.cs_call_center_sk = cc.cc_call_center_sk
+)
 GROUP BY
-    fr.d_year,
-    fr.d_month_seq,
-    fr.wp_type,
-    fr.ca_city,
-    fr.ca_state,
-    fr.product_id,
-    fr.wp_url
-ORDER BY total_return_amount DESC, fr.d_year ASC
+    cc.cc_call_center_id,
+    cc.cc_name,
+    cc.cc_call_center_sk
+HAVING SUM(sf.cs_net_profit) > 0
+ORDER BY total_net_profit DESC
 LIMIT 100

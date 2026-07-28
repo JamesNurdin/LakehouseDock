@@ -1,68 +1,60 @@
-WITH sales AS (
-  SELECT
-    cs.cs_order_number,
-    cs.cs_net_paid,
-    cs.cs_item_sk,
-    cs.cs_quantity,
-    cs.cs_sold_time_sk,
-    cs.cs_bill_hdemo_sk,
-    cs.cs_call_center_sk,
-    cs.cs_catalog_page_sk,
-    cc.cc_name,
-    cc.cc_mkt_id,
-    cc.cc_employees,
-    cp.cp_department,
-    hd.hd_buy_potential,
-    hd.hd_income_band_sk,
-    ib.ib_income_band_sk,
-    ib.ib_lower_bound,
-    td.t_hour AS sold_hour
-  FROM catalog_sales cs
-  JOIN call_center cc
-    ON cs.cs_call_center_sk = cc.cc_call_center_sk
-  JOIN catalog_page cp
-    ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
-  JOIN household_demographics hd
-    ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-  JOIN income_band ib
-    ON hd.hd_income_band_sk = ib.ib_income_band_sk
-  JOIN time_dim td
-    ON cs.cs_sold_time_sk = td.t_time_sk
+WITH ss_hd_ib AS (
+    SELECT
+        ss.ss_sold_date_sk,
+        ss.ss_quantity,
+        ss.ss_ext_sales_price,
+        ss.ss_net_profit,
+        hd.hd_demo_sk,
+        hd.hd_vehicle_count,
+        hd.hd_dep_count,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM store_sales ss
+    JOIN household_demographics hd
+        ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib
+        ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE ss.ss_quantity >= 50
+      AND ss.ss_wholesale_cost BETWEEN 20 AND 80
+      AND ib.ib_upper_bound <= 150000
 )
+
 SELECT
-  sales.cc_name,
-  sales.cp_department,
-  sales.ib_income_band_sk,
-  SUM(sales.cs_net_paid) AS total_catalog_sales,
-  SUM(cr.cr_net_loss) AS total_return_loss,
-  SUM(ws.ws_net_paid) AS total_web_sales,
-  COUNT(DISTINCT sales.cs_order_number) AS distinct_catalog_orders,
-  COUNT(DISTINCT ws.ws_order_number) AS distinct_web_orders
-FROM sales
-JOIN catalog_returns cr
-  ON cr.cr_order_number = sales.cs_order_number
- AND cr.cr_item_sk = sales.cs_item_sk
-JOIN reason r
-  ON cr.cr_reason_sk = r.r_reason_sk
-JOIN time_dim td_ret
-  ON cr.cr_returned_time_sk = td_ret.t_time_sk
-JOIN web_sales ws
-  ON ws.ws_sold_time_sk = sales.cs_sold_time_sk
- AND ws.ws_bill_hdemo_sk = sales.cs_bill_hdemo_sk
-JOIN time_dim td_web
-  ON ws.ws_sold_time_sk = td_web.t_time_sk
-WHERE
-  sales.cc_mkt_id = 5
-  AND sales.cc_employees > 1000000
-  AND sales.cp_department = 'Sports'
-  AND sales.hd_buy_potential = '5001-10000'
-  AND sales.ib_lower_bound >= 50000
-  AND r.r_reason_desc LIKE '%damaged%'
-  AND sales.sold_hour BETWEEN 9 AND 17
-  AND ws.ws_quantity > 5
-  AND sales.cs_quantity > 2
+    ss_hd_ib.ib_lower_bound,
+    ss_hd_ib.ib_upper_bound,
+    COUNT(DISTINCT ss_hd_ib.hd_demo_sk) AS household_cnt,
+    SUM(ss_hd_ib.ss_ext_sales_price) AS total_store_sales,
+    AVG(ss_hd_ib.ss_net_profit) AS avg_store_profit,
+    CASE
+        WHEN SUM(ss_hd_ib.ss_ext_sales_price) > 1000000 THEN 'High'
+        ELSE 'Medium'
+    END AS sales_category,
+    SUM(ws_agg.web_sales_cnt) AS total_web_sales,
+    ws_site.web_name
+FROM ss_hd_ib
+LEFT JOIN (
+    SELECT
+        ws.ws_bill_hdemo_sk,
+        ws.ws_web_site_sk,
+        COUNT(*) AS web_sales_cnt
+    FROM web_sales ws
+    GROUP BY ws.ws_bill_hdemo_sk, ws.ws_web_site_sk
+) ws_agg
+    ON ws_agg.ws_bill_hdemo_sk = ss_hd_ib.hd_demo_sk
+JOIN web_site ws_site
+    ON ws_agg.ws_web_site_sk = ws_site.web_site_sk
+WHERE EXISTS (
+    SELECT 1
+    FROM web_sales ws2
+    JOIN web_site ws2_site
+        ON ws2.ws_web_site_sk = ws2_site.web_site_sk
+    WHERE ws2.ws_bill_hdemo_sk = ss_hd_ib.hd_demo_sk
+      AND ws2.ws_ext_sales_price > 5000
+      AND ws2_site.web_state = 'CA'
+)
 GROUP BY
-  ROLLUP (sales.cc_name, sales.cp_department, sales.ib_income_band_sk)
-HAVING
-  SUM(sales.cs_net_paid) > 10000
+    ss_hd_ib.ib_lower_bound,
+    ss_hd_ib.ib_upper_bound,
+    ws_site.web_name
+ORDER BY total_store_sales DESC
 LIMIT 100

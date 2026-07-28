@@ -1,12 +1,10 @@
-SELECT i.inv_item_sk,
-       i.inv_quantity_on_hand,
-       w.w_warehouse_name,
-       w.w_city,
-       w.w_zip
-FROM   inventory i
-JOIN   warehouse w
-     ON i.inv_warehouse_sk = w.w_warehouse_sk
-WHERE  i.inv_warehouse_sk = 10
-  AND  w.w_zip = '59275'
-ORDER BY i.inv_quantity_on_hand DESC
+SELECT
+  hd_income_band_sk,
+  hd_buy_potential,
+  COUNT(*) AS household_cnt
+FROM tpcds.household_demographics
+WHERE hd_dep_count >= 2
+  AND hd_buy_potential <> 'Unknown'
+GROUP BY hd_income_band_sk, hd_buy_potential
+ORDER BY household_cnt DESC
 LIMIT 100

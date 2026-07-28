@@ -1,60 +1,64 @@
-WITH sales AS (
-    SELECT
-        ws.ws_order_number,
-        ws.ws_item_sk,
-        ws.ws_sold_date_sk,
-        ws.ws_ship_date_sk,
-        ws.ws_web_page_sk,
-        ws.ws_ship_mode_sk,
-        ws.ws_ext_sales_price,
-        ws.ws_net_profit,
-        ws.ws_quantity,
-        ws.ws_ext_discount_amt,
-        ws.ws_ext_tax,
-        ws.ws_net_paid
-    FROM web_sales ws
-    WHERE ws.ws_ext_sales_price > 100
-      AND ws.ws_quantity >= 1
+WITH base AS (
+  SELECT
+    d.d_year,
+    sm.sm_ship_mode_id,
+    cr.cr_return_amount,
+    cr.cr_return_tax,
+    cr.cr_return_quantity,
+    wr.wr_return_amt,
+    wr.wr_return_tax,
+    i.inv_quantity_on_hand,
+    ws.web_state,
+    hd_refunded.hd_income_band_sk,
+    hd_refunded.hd_buy_potential
+  FROM catalog_returns cr
+  JOIN date_dim d
+    ON cr.cr_returned_date_sk = d.d_date_sk
+  JOIN customer c_ref
+    ON cr.cr_refunded_customer_sk = c_ref.c_customer_sk
+  JOIN household_demographics hd_refunded
+    ON cr.cr_refunded_hdemo_sk = hd_refunded.hd_demo_sk
+  JOIN ship_mode sm
+    ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+  JOIN web_returns wr
+    ON wr.wr_returned_date_sk = d.d_date_sk
+  JOIN inventory i
+    ON i.inv_date_sk = d.d_date_sk
+  JOIN web_site ws
+    ON ws.web_open_date_sk = d.d_date_sk
+  WHERE d.d_year BETWEEN 1999 AND 2001
+    AND cr.cr_return_amount > 50
+    AND hd_refunded.hd_income_band_sk IN (4, 5, 6)
+    AND sm.sm_type = 'AIR'
+    AND i.inv_quantity_on_hand >= 0
+    AND ws.web_state = 'CA'
+    AND hd_refunded.hd_buy_potential = '1001-5000'
+),
+agg AS (
+  SELECT
+    d_year,
+    sm_ship_mode_id,
+    SUM(cr_return_amount) AS total_cr_return_amount,
+    SUM(wr_return_amt) AS total_wr_return_amount,
+    AVG(inv_quantity_on_hand) AS avg_inventory_qty,
+    COUNT(DISTINCT cr_return_quantity) AS distinct_return_qty,
+    SUM(cr_return_tax + wr_return_tax) AS total_tax,
+    COUNT(*) AS row_cnt
+  FROM base
+  GROUP BY d_year, sm_ship_mode_id
 )
 SELECT
-    s.ws_order_number,
-    d_sold.d_date AS sold_date,
-    d_ship.d_date AS ship_date,
-    i.i_product_name,
-    COALESCE(sm.sm_code, 'UNKNOWN') AS ship_mode_code,
-    wp.wp_type,
-    CASE
-        WHEN s.ws_net_profit > 0 THEN 'Profitable'
-        ELSE 'Loss'
-    END AS profit_flag,
-    s.ws_ext_sales_price,
-    (
-        SELECT AVG(ws2.ws_net_profit)
-        FROM web_sales ws2
-        JOIN date_dim d2 ON ws2.ws_sold_date_sk = d2.d_date_sk
-        WHERE d2.d_year = d_sold.d_year
-    ) AS avg_yearly_profit,
-    RANK() OVER (PARTITION BY d_sold.d_year ORDER BY s.ws_net_profit DESC) AS profit_rank,
-    cp.cp_department
-FROM sales s
-JOIN date_dim d_sold
-    ON s.ws_sold_date_sk = d_sold.d_date_sk
-JOIN date_dim d_ship
-    ON s.ws_ship_date_sk = d_ship.d_date_sk
-JOIN item i
-    ON s.ws_item_sk = i.i_item_sk
-LEFT JOIN ship_mode sm
-    ON s.ws_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN web_page wp
-    ON s.ws_web_page_sk = wp.wp_web_page_sk
-JOIN catalog_page cp
-    ON cp.cp_start_date_sk = d_sold.d_date_sk
-JOIN date_dim d_catalog
-    ON cp.cp_end_date_sk = d_catalog.d_date_sk
-WHERE d_sold.d_year = 2001
-  AND i.i_brand = 'Brand#12'
-  AND sm.sm_code IN ('AIR', 'SEA')
-  AND wp.wp_type = 'content'
-  AND cp.cp_department = 'Books'
-ORDER BY profit_rank
+  d_year,
+  sm_ship_mode_id,
+  total_cr_return_amount,
+  total_wr_return_amount,
+  avg_inventory_qty,
+  total_tax,
+  row_cnt,
+  (total_cr_return_amount / NULLIF(total_wr_return_amount, 0)) AS cr_to_wr_return_ratio
+FROM agg
+WHERE total_cr_return_amount > 1000
+  AND total_wr_return_amount > 500
+  AND avg_inventory_qty >= 10
+ORDER BY d_year DESC, total_cr_return_amount DESC
 LIMIT 100

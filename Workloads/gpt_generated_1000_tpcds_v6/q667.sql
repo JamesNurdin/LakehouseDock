@@ -1,43 +1,29 @@
-WITH joined AS (
-   SELECT
-       ws.ws_net_profit,
-       ws.ws_ext_sales_price,
-       td.t_meal_time,
-       s.web_gmt_offset,
-       s.web_name,
-       w.w_warehouse_name,
-       p.p_promo_name,
-       p.p_discount_active
-   FROM web_sales ws
-   JOIN time_dim td ON ws.ws_sold_time_sk = td.t_time_sk
-   JOIN web_site s ON ws.ws_web_site_sk = s.web_site_sk
-   JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
-   JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
-   WHERE td.t_meal_time = 'dinner'
-     AND s.web_gmt_offset BETWEEN -8.00 AND -5.00
-     AND p.p_discount_active = 'Y'
-),
-agg AS (
-   SELECT
-       j.web_name,
-       j.w_warehouse_name,
-       j.p_promo_name,
-       SUM(j.ws_net_profit) AS total_profit,
-       SUM(j.ws_ext_sales_price) AS total_sales,
-       COUNT(*) AS order_count
-   FROM joined j
-   GROUP BY j.web_name, j.w_warehouse_name, j.p_promo_name
+WITH filtered_items AS (
+    SELECT i_item_sk,
+           i_brand,
+           i_item_desc,
+           CONCAT(i_brand, ' ', i_item_desc) AS brand_desc
+    FROM tpcds.item
+    WHERE regexp_like(i_item_desc, '[A-Z]{2}[0-9]{2}')
 )
 SELECT
-   web_name,
-   w_warehouse_name,
-   p_promo_name,
-   total_profit,
-   total_sales,
-   order_count,
-   RANK() OVER (PARTITION BY web_name ORDER BY total_profit DESC) AS profit_rank,
-   AVG(total_profit) OVER (PARTITION BY web_name ORDER BY total_profit
-                           ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS profit_moving_avg
-FROM agg
-ORDER BY web_name, profit_rank
+    i.i_brand,
+    cd.cd_gender,
+    format_datetime(CAST(d.d_date AS timestamp), 'yyyy-MM') AS year_month,
+    SUM(cs.cs_net_profit) AS total_net_profit,
+    COUNT(*) AS sales_count,
+    MAX(cs.cs_sales_price) AS max_sales_price,
+    CONCAT('Brand ', i.i_brand) AS brand_label
+FROM filtered_items i
+JOIN tpcds.catalog_sales cs ON i.i_item_sk = cs.cs_item_sk
+JOIN tpcds.date_dim d ON cs.cs_sold_date_sk = d.d_date_sk
+JOIN tpcds.customer c ON cs.cs_bill_customer_sk = c.c_customer_sk
+JOIN tpcds.customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+WHERE d.d_year = 2001
+  AND (c.c_email_address LIKE '%@example.com' OR regexp_like(c.c_email_address, '.*@gmail\\.com$'))
+GROUP BY i.i_brand,
+         cd.cd_gender,
+         format_datetime(CAST(d.d_date AS timestamp), 'yyyy-MM')
+HAVING SUM(cs.cs_net_profit) > 10000
+ORDER BY total_net_profit DESC
 LIMIT 100

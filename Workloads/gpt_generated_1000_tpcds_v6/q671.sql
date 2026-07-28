@@ -1,60 +1,48 @@
-WITH sales_returns AS (
+WITH filtered_sales AS (
     SELECT
-        s.s_store_id,
-        p.p_promo_id,
-        cd.cd_gender,
-        i.i_category,
-        SUM(ss.ss_net_profit) AS total_sales_profit,
-        SUM(wr.wr_net_loss) AS total_return_loss,
-        COUNT(DISTINCT ss.ss_ticket_number) AS sales_transactions,
-        COUNT(DISTINCT wr.wr_order_number) AS return_transactions
-    FROM store_sales ss
-    JOIN item i
-        ON ss.ss_item_sk = i.i_item_sk
+        cs.cs_ext_sales_price,
+        w.w_warehouse_name,
+        w.w_street_name,
+        w.w_street_type,
+        w.w_street_number,
+        p.p_promo_name,
+        p.p_channel_details,
+        cp.cp_department,
+        d.d_month_seq,
+        d.d_year,
+        regexp_extract(p.p_channel_details, '(\\w+) families', 1) AS family_word,
+        concat(w.w_street_name, ' ', w.w_street_type) AS full_street
+    FROM catalog_sales cs
+    JOIN date_dim d
+      ON cs.cs_sold_date_sk = d.d_date_sk
+    JOIN warehouse w
+      ON cs.cs_warehouse_sk = w.w_warehouse_sk
     JOIN promotion p
-        ON ss.ss_promo_sk = p.p_promo_sk
-        AND p.p_item_sk = i.i_item_sk
-    JOIN store s
-        ON ss.ss_store_sk = s.s_store_sk
-    JOIN customer_demographics cd
-        ON ss.ss_cdemo_sk = cd.cd_demo_sk
-    LEFT JOIN web_returns wr
-        ON wr.wr_item_sk = i.i_item_sk
-        AND wr.wr_refunded_cdemo_sk = cd.cd_demo_sk
-    WHERE
-        s.s_state = 'TX'                                         -- predicate 1
-        AND p.p_discount_active = 'N'                             -- predicate 2
-        AND i.i_units IN ('Pallet', 'Gram')                       -- predicate 3
-        AND ss.ss_sold_date_sk BETWEEN 2450540 AND 2450600        -- predicate 4 (surrogate date key)
-        AND cd.cd_gender = 'M'                                    -- predicate 5
-    GROUP BY
-        s.s_store_id,
-        p.p_promo_id,
-        cd.cd_gender,
-        i.i_category
+      ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN catalog_page cp
+      ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    WHERE d.d_year = 2000
+      AND regexp_like(p.p_channel_details, '(?i)family')
+      AND w.w_street_name LIKE 'Lincoln%'
+      AND substring(w.w_street_number, 1, 1) = '6'
 )
 SELECT
-    sr.s_store_id,
-    sr.p_promo_id,
-    sr.cd_gender,
-    sr.i_category,
-    sr.total_sales_profit,
-    sr.total_return_loss,
-    sr.sales_transactions,
-    sr.return_transactions,
-    CASE
-        WHEN sr.total_return_loss = 0 THEN NULL
-        ELSE sr.total_sales_profit / sr.total_return_loss
-    END AS profit_to_loss_ratio
-FROM sales_returns sr
-WHERE
-    sr.total_sales_profit > 1000
-    AND (sr.total_return_loss IS NULL OR sr.total_return_loss < 5000)
-    AND EXISTS (
-        SELECT 1
-        FROM promotion p2
-        WHERE p2.p_promo_id = sr.p_promo_id
-          AND p2.p_response_target > 0
-    )
-ORDER BY profit_to_loss_ratio DESC NULLS LAST
+    w_warehouse_name,
+    p_promo_name,
+    cp_department,
+    d_month_seq,
+    sum(cs_ext_sales_price) AS total_sales,
+    CASE WHEN sum(cs_ext_sales_price) > 50000 THEN 'High' ELSE 'Low' END AS sales_category,
+    count(*) AS order_cnt,
+    max(family_word) AS example_family_word,
+    max(full_street) AS example_full_street
+FROM filtered_sales
+GROUP BY GROUPING SETS (
+    (w_warehouse_name, p_promo_name, cp_department, d_month_seq),
+    (w_warehouse_name, p_promo_name, d_month_seq),
+    (w_warehouse_name, d_month_seq),
+    (d_month_seq),
+    ()
+)
+ORDER BY total_sales DESC
 LIMIT 100

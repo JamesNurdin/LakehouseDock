@@ -1,34 +1,52 @@
-WITH filtered_sales AS (
+WITH return_summary AS (
     SELECT
-        ss.ss_hdemo_sk,
-        ss.ss_net_paid,
-        ss.ss_ext_discount_amt,
-        ss.ss_coupon_amt,
-        ss.ss_quantity,
-        ss.ss_sold_time_sk
-    FROM store_sales ss
-    WHERE ss.ss_coupon_amt > 1000
-      AND ss.ss_sold_time_sk IN (34466, 62630, 61768)
+        sr.sr_customer_sk AS sr_customer_sk,
+        cd.cd_gender AS cd_gender,
+        hd.hd_income_band_sk AS hd_income_band_sk,
+        r.r_reason_desc AS r_reason_desc,
+        SUM(sr.sr_refunded_cash) AS total_refunded,
+        COUNT(*) AS return_cnt
+    FROM tpcds.store_returns AS sr
+    JOIN tpcds.customer_demographics AS cd
+        ON sr.sr_cdemo_sk = cd.cd_demo_sk
+    JOIN tpcds.household_demographics AS hd
+        ON sr.sr_hdemo_sk = hd.hd_demo_sk
+    JOIN tpcds.reason AS r
+        ON sr.sr_reason_sk = r.r_reason_sk
+    WHERE cd.cd_marital_status = 'M'
+      AND cd.cd_dep_employed_count >= 2
+      AND sr.sr_return_tax > 5.0
+    GROUP BY sr.sr_customer_sk, cd.cd_gender, hd.hd_income_band_sk, r.r_reason_desc
 )
 SELECT
-    ib.ib_income_band_sk,
-    ib.ib_lower_bound,
-    ib.ib_upper_bound,
-    COUNT(*) AS sales_cnt,
-    SUM(fs.ss_net_paid) AS total_net_paid,
-    AVG(fs.ss_ext_discount_amt) AS avg_discount,
-    SUM(CASE WHEN fs.ss_coupon_amt > 5000 THEN 1 ELSE 0 END) AS high_coupon_cnt,
-    MAX(fs.ss_quantity) AS max_quantity,
-    (SELECT AVG(ss2.ss_net_paid) FROM store_sales ss2) AS overall_avg_net_paid
-FROM filtered_sales fs
-JOIN household_demographics hd
-    ON fs.ss_hdemo_sk = hd.hd_demo_sk
-JOIN income_band ib
-    ON hd.hd_income_band_sk = ib.ib_income_band_sk
-WHERE hd.hd_vehicle_count >= 1
-  AND ib.ib_upper_bound <= 100000
-  AND hd.hd_dep_count BETWEEN 4 AND 7
-GROUP BY ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
-HAVING SUM(fs.ss_net_paid) > 50000
-ORDER BY total_net_paid DESC
-LIMIT 100
+    rs.sr_customer_sk,
+    rs.cd_gender,
+    rs.hd_income_band_sk,
+    rs.r_reason_desc,
+    rs.total_refunded,
+    rs.return_cnt
+FROM return_summary AS rs
+WHERE rs.r_reason_desc LIKE '%duplicate%'
+  AND rs.total_refunded > (
+        SELECT AVG(total_refunded) FROM return_summary
+    )
+UNION ALL
+SELECT
+    rs.sr_customer_sk,
+    rs.cd_gender,
+    rs.hd_income_band_sk,
+    rs.r_reason_desc,
+    rs.total_refunded,
+    rs.return_cnt
+FROM return_summary AS rs
+WHERE rs.r_reason_desc LIKE '%warranty%'
+  AND EXISTS (
+        SELECT 1
+        FROM tpcds.store_returns AS sr2
+        JOIN tpcds.reason AS r2
+            ON sr2.sr_reason_sk = r2.r_reason_sk
+        WHERE sr2.sr_customer_sk = rs.sr_customer_sk
+          AND r2.r_reason_desc LIKE '%warranty%'
+          AND sr2.sr_reversed_charge > 100
+    )
+ORDER BY total_refunded DESC, return_cnt ASC

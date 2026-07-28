@@ -1,39 +1,33 @@
-WITH base_sales AS (
+WITH catalog_sub AS (
     SELECT
-        cs.cs_order_number,
-        w.w_warehouse_name AS w_warehouse_name,
-        cs.cs_net_profit,
-        cs.cs_ext_sales_price,
-        p.p_channel_demo,
-        p.p_start_date_sk,
-        p.p_end_date_sk
-    FROM catalog_sales cs
-    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
-    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+        d.d_year,
+        ca.ca_country,
+        SUM(cr.cr_return_amount) AS total_return_amount,
+        CASE WHEN SUM(cr.cr_return_amount) > 10000 THEN 'High' ELSE 'Low' END AS return_category
+    FROM catalog_returns cr
+    JOIN date_dim d ON cr.cr_returned_date_sk = d.d_date_sk
+    JOIN customer_address ca ON cr.cr_refunded_addr_sk = ca.ca_address_sk
+    WHERE d.d_year = 2000
+    GROUP BY d.d_year, ca.ca_country
+    HAVING SUM(cr.cr_return_amount) > 0
+),
+store_sub AS (
+    SELECT
+        d.d_year,
+        ca.ca_country,
+        SUM(sr.sr_return_amt) AS total_return_amount,
+        CASE WHEN SUM(sr.sr_return_amt) > 10000 THEN 'High' ELSE 'Low' END AS return_category
+    FROM store_returns sr
+    JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+    JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
+    WHERE d.d_year = 2000
+    GROUP BY d.d_year, ca.ca_country
+    HAVING SUM(sr.sr_return_amt) > 0
 )
 SELECT *
-FROM (
-    SELECT
-        w_warehouse_name,
-        SUM(cs_net_profit) AS total_net_profit,
-        SUM(cs_ext_sales_price) AS total_sales,
-        COUNT(DISTINCT cs_order_number) AS distinct_orders
-    FROM base_sales
-    WHERE p_channel_demo = 'N'
-      AND p_start_date_sk >= 2450300
-    GROUP BY w_warehouse_name
-
-    UNION ALL
-
-    SELECT
-        w_warehouse_name,
-        SUM(cs_net_profit) AS total_net_profit,
-        SUM(cs_ext_sales_price) AS total_sales,
-        COUNT(DISTINCT cs_order_number) AS distinct_orders
-    FROM base_sales
-    WHERE p_channel_demo <> 'N'
-      AND p_end_date_sk <= 2450580
-    GROUP BY w_warehouse_name
-) AS combined
-ORDER BY total_net_profit DESC
-LIMIT 20
+FROM catalog_sub
+UNION ALL
+SELECT *
+FROM store_sub
+ORDER BY d_year, total_return_amount DESC
+LIMIT 100

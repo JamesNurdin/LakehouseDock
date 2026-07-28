@@ -1,68 +1,61 @@
-WITH base_agg AS (
-   SELECT
-       d.d_year,
-       d.d_month_seq,
-       d.d_day_name,
-       SUM(cr.cr_net_loss) AS cat_net_loss,
-       SUM(sr.sr_net_loss) AS store_net_loss,
-       SUM(wr.wr_net_loss) AS web_net_loss,
-       SUM(cr.cr_return_amount) AS cat_return_amount
-   FROM tpcds.date_dim d
-   LEFT JOIN tpcds.catalog_returns cr ON cr.cr_returned_date_sk = d.d_date_sk
-   LEFT JOIN tpcds.store_returns sr   ON sr.sr_returned_date_sk   = d.d_date_sk
-   LEFT JOIN tpcds.web_returns wr    ON wr.wr_returned_date_sk   = d.d_date_sk
-   WHERE d.d_holiday = 'Y'
-     AND regexp_like(d.d_day_name, '^S')
-     AND d.d_day_name LIKE 'S%'
-   GROUP BY d.d_year, d.d_month_seq, d.d_day_name
+WITH billed AS (
+    SELECT
+        w.w_city AS city,
+        cc.cc_class AS call_center_class,
+        cd.cd_gender AS gender,
+        CASE
+            WHEN cs.cs_net_profit > 1000 THEN 'high'
+            WHEN cs.cs_net_profit > 0 THEN 'medium'
+            ELSE 'low'
+        END AS profit_category,
+        cs.cs_net_paid_inc_ship AS net_paid
+    FROM catalog_sales cs
+    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+    WHERE regexp_like(w.w_street_name, '.*[A-Z]{2,}$')
+      AND w.w_street_type LIKE 'A%'
+      AND cc.cc_hours LIKE '%8AM%'
 ),
-
-daily_agg AS (
-   SELECT
-       b.d_year,
-       b.d_month_seq,
-       b.d_day_name,
-       CONCAT(CAST(b.d_year AS varchar), '-', LPAD(CAST(b.d_month_seq AS varchar), 2, '0')) AS year_month,
-       b.cat_net_loss,
-       b.store_net_loss,
-       b.web_net_loss,
-       b.cat_return_amount
-   FROM base_agg b
+shipped AS (
+    SELECT
+        w.w_city AS city,
+        cc.cc_class AS call_center_class,
+        cd.cd_gender AS gender,
+        CASE
+            WHEN cs.cs_net_profit > 1000 THEN 'high'
+            WHEN cs.cs_net_profit > 0 THEN 'medium'
+            ELSE 'low'
+        END AS profit_category,
+        cs.cs_net_paid_inc_ship AS net_paid
+    FROM catalog_sales cs
+    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
+    JOIN customer_demographics cd ON cs.cs_ship_cdemo_sk = cd.cd_demo_sk
+    WHERE w.w_city LIKE '%ville%'
+      AND regexp_like(cc.cc_zip, '^[0-9]{5}$')
+      AND substring(cc.cc_zip, 1, 2) = '98'
 )
-
 SELECT
-    da.year_month,
-    da.d_day_name,
-    regexp_extract(da.d_day_name, '^(.).', 1) AS first_letter,
-    substring(da.d_day_name, 1, 3) AS day_abbrev,
-    da.cat_net_loss,
-    da.store_net_loss,
-    da.web_net_loss,
-    (da.cat_net_loss + da.store_net_loss + da.web_net_loss) AS total_net_loss,
-    CASE
-        WHEN (da.cat_net_loss + da.store_net_loss + da.web_net_loss) > (
-            SELECT AVG(t.total_net_loss)
-            FROM (
-                SELECT
-                    SUM(cr.cr_net_loss + sr.sr_net_loss + wr.wr_net_loss) AS total_net_loss
-                FROM tpcds.date_dim d2
-                LEFT JOIN tpcds.catalog_returns cr ON cr.cr_returned_date_sk = d2.d_date_sk
-                LEFT JOIN tpcds.store_returns sr   ON sr.sr_returned_date_sk   = d2.d_date_sk
-                LEFT JOIN tpcds.web_returns wr    ON wr.wr_returned_date_sk   = d2.d_date_sk
-                WHERE d2.d_holiday = 'Y'
-                GROUP BY d2.d_year, d2.d_month_seq
-            ) t
-        ) THEN 'High' ELSE 'Low'
-    END AS loss_category
-FROM daily_agg da
-WHERE EXISTS (
-    SELECT 1
-    FROM tpcds.store_returns sr2
-    JOIN tpcds.date_dim d2 ON sr2.sr_returned_date_sk = d2.d_date_sk
-    WHERE d2.d_year = da.d_year
-      AND d2.d_month_seq = da.d_month_seq
-      AND d2.d_day_name = da.d_day_name
-      AND sr2.sr_reversed_charge > 100
+    city,
+    call_center_class,
+    profit_category,
+    SUM(net_paid) AS total_net_paid,
+    COUNT(*) AS order_count
+FROM (
+    SELECT city, call_center_class, profit_category, net_paid FROM billed
+    UNION ALL
+    SELECT city, call_center_class, profit_category, net_paid FROM shipped
+) AS combined
+GROUP BY GROUPING SETS (
+    (city, call_center_class, profit_category),
+    (city, call_center_class),
+    (city),
+    ()
 )
-ORDER BY total_net_loss DESC
+ORDER BY
+    CASE WHEN city IS NULL THEN 1 ELSE 0 END,
+    city,
+    call_center_class,
+    profit_category
 LIMIT 100

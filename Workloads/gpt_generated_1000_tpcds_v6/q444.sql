@@ -1,60 +1,67 @@
-WITH sales_agg AS (
-    SELECT
-        cs.cs_item_sk,
-        i.i_category,
-        i.i_brand,
-        MIN(ca.ca_location_type) AS location_type,
-        MIN(hd.hd_vehicle_count) AS min_vehicle_count,
-        SUM(cs.cs_net_profit) AS total_net_profit,
-        SUM(cs.cs_quantity) AS total_quantity
-    FROM catalog_sales cs
-    JOIN item i ON cs.cs_item_sk = i.i_item_sk
-    JOIN customer_address ca ON cs.cs_bill_addr_sk = ca.ca_address_sk
-    JOIN household_demographics hd ON cs.cs_bill_hdemo_sk = hd.hd_demo_sk
-    WHERE i.i_size IN ('small', 'large')
-      AND ca.ca_location_type = 'apartment'
-      AND hd.hd_vehicle_count >= 2
-    GROUP BY ROLLUP (i.i_category, i.i_brand, cs.cs_item_sk)
-)
-SELECT
-    sa.i_category,
-    sa.i_brand,
-    sa.cs_item_sk,
-    sa.total_net_profit,
-    sa.total_quantity,
-    ROW_NUMBER() OVER (PARTITION BY sa.i_category ORDER BY sa.total_net_profit DESC) AS product_rank_in_category,
-    COALESCE(sr.avg_return_amt, 0) AS avg_store_return_amt,
-    COALESCE(wr.avg_return_amt, 0) AS avg_web_return_amt,
-    sa.location_type,
-    sa.min_vehicle_count
-FROM sales_agg sa
-LEFT JOIN (
-    SELECT
-        sr_item_sk,
-        AVG(sr_return_amt) AS avg_return_amt
-    FROM store_returns
-    WHERE sr_return_quantity > 0
-    GROUP BY sr_item_sk
-) sr ON sa.cs_item_sk = sr.sr_item_sk
-LEFT JOIN (
-    SELECT
-        wr_item_sk,
-        AVG(wr_return_amt) AS avg_return_amt
-    FROM web_returns
-    WHERE wr_return_quantity > 0
-    GROUP BY wr_item_sk
-) wr ON sa.cs_item_sk = wr.wr_item_sk
-WHERE (
-        sa.i_category IS NOT NULL
-        AND sa.total_quantity > 0
-        AND EXISTS (
-            SELECT 1
-            FROM inventory inv
-            JOIN warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
-            WHERE inv.inv_item_sk = sa.cs_item_sk
-              AND inv.inv_quantity_on_hand > 0
-              AND w.w_state = 'CA'
-        )
+WITH sales AS (
+        SELECT 
+            cs.cs_sold_date_sk,
+            cs.cs_order_number,
+            cs.cs_item_sk,
+            cs.cs_quantity,
+            cs.cs_ext_sales_price,
+            cs.cs_net_profit,
+            cs.cs_call_center_sk,
+            cs.cs_catalog_page_sk,
+            cs.cs_warehouse_sk,
+            cs.cs_bill_customer_sk,
+            cs.cs_bill_addr_sk
+        FROM catalog_sales cs
+        WHERE cs.cs_quantity > 5
+          AND cs.cs_sold_date_sk BETWEEN 2450000 AND 2450500
+    ),
+    returns AS (
+        SELECT 
+            cr.cr_order_number,
+            cr.cr_return_quantity,
+            cr.cr_return_amount,
+            cr.cr_reason_sk,
+            cr.cr_warehouse_sk,
+            cr.cr_returned_date_sk,
+            cr.cr_reversed_charge
+        FROM catalog_returns cr
+        WHERE cr.cr_reversed_charge > 100
+          AND cr.cr_return_quantity > 0
     )
-ORDER BY sa.i_category, product_rank_in_category
+SELECT
+    w.w_city AS warehouse_city,
+    r.r_reason_desc AS return_reason,
+    s.s_store_name AS store_name,
+    ws.ws_quantity AS web_quantity,
+    SUM(sa.cs_ext_sales_price) AS total_catalog_sales,
+    SUM(rt.cr_return_amount) AS total_returns_amount,
+    SUM(sa.cs_net_profit) - SUM(rt.cr_return_amount) AS net_profit_after_returns,
+    COUNT(DISTINCT sa.cs_order_number) AS distinct_orders,
+    MIN(sa.cs_sold_date_sk) AS min_sales_date_sk,
+    MAX(sa.cs_sold_date_sk) AS max_sales_date_sk
+FROM sales sa
+JOIN returns rt ON rt.cr_order_number = sa.cs_order_number
+JOIN item i ON i.i_item_sk = sa.cs_item_sk
+JOIN warehouse w ON w.w_warehouse_sk = sa.cs_warehouse_sk
+JOIN call_center cc ON cc.cc_call_center_sk = sa.cs_call_center_sk
+JOIN catalog_page cp ON cp.cp_catalog_page_sk = sa.cs_catalog_page_sk
+JOIN reason r ON r.r_reason_sk = rt.cr_reason_sk
+JOIN store_sales ss ON ss.ss_item_sk = i.i_item_sk
+JOIN store s ON s.s_store_sk = ss.ss_store_sk
+JOIN inventory inv ON inv.inv_item_sk = i.i_item_sk AND inv.inv_warehouse_sk = w.w_warehouse_sk
+JOIN web_sales ws ON ws.ws_item_sk = i.i_item_sk
+JOIN web_site we ON we.web_site_sk = ws.ws_web_site_sk
+JOIN customer c ON c.c_customer_sk = sa.cs_bill_customer_sk
+JOIN customer_address ca ON ca.ca_address_sk = sa.cs_bill_addr_sk
+WHERE cc.cc_name = 'Call Center 1'
+  AND cp.cp_type = 'A'
+  AND w.w_city IN ('Pleasant Grove', 'Salem')
+  AND r.r_reason_id = 'AAAAAAAABBAAAAAA'
+  AND we.web_name = 'Online Store'
+GROUP BY
+    w.w_city,
+    r.r_reason_desc,
+    s.s_store_name,
+    ws.ws_quantity
+ORDER BY total_catalog_sales DESC
 LIMIT 100

@@ -1,62 +1,65 @@
-/* goal: Identify top catalog sales orders for the year 2001, enriched with date, time, shipping, warehouse, store sales, web returns and website information, applying profit classification, multiple filters, window rankings, moving aggregates and an existence check. */
-WITH cs AS (
-    SELECT
-        cs.cs_order_number,
-        cs.cs_sold_date_sk,
-        cs.cs_sold_time_sk,
-        cs.cs_ship_mode_sk,
-        cs.cs_warehouse_sk,
-        cs.cs_net_paid,
-        cs.cs_net_profit,
-        CASE WHEN cs.cs_net_profit > 0 THEN 'Profitable' ELSE 'Loss' END AS cs_profit_flag
-    FROM catalog_sales cs
+WITH inventory_summary AS (
+    SELECT inv_warehouse_sk,
+           SUM(inv_quantity_on_hand) AS total_qty
+    FROM inventory
+    GROUP BY inv_warehouse_sk
 )
 SELECT
-    cs.cs_order_number,
-    d.d_date,
-    d.d_year,
-    t.t_hour,
-    sm.sm_type,
-    w.w_warehouse_name,
-    w.w_state,
-    ss.ss_net_paid AS store_net_paid,
-    wr.wr_return_amt,
-    ws.web_name,
-    cs.cs_profit_flag,
-    ROW_NUMBER() OVER (PARTITION BY d.d_year ORDER BY cs.cs_net_paid DESC) AS rn_year,
-    RANK() OVER (ORDER BY cs.cs_net_paid DESC) AS overall_rank,
-    SUM(cs.cs_net_paid) OVER (
-        PARTITION BY sm.sm_type
-        ORDER BY d.d_date
-        ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
-    ) AS moving_7day_sum
-FROM cs
-JOIN date_dim d
-    ON cs.cs_sold_date_sk = d.d_date_sk
-JOIN time_dim t
-    ON cs.cs_sold_time_sk = t.t_time_sk
-JOIN ship_mode sm
-    ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN warehouse w
-    ON cs.cs_warehouse_sk = w.w_warehouse_sk
-LEFT JOIN store_sales ss
-    ON ss.ss_sold_date_sk = cs.cs_sold_date_sk
-   AND ss.ss_sold_time_sk = cs.cs_sold_time_sk
-LEFT JOIN web_returns wr
-    ON wr.wr_returned_date_sk = cs.cs_sold_date_sk
-   AND wr.wr_returned_time_sk = cs.cs_sold_time_sk
-LEFT JOIN web_site ws
-    ON ws.web_open_date_sk = d.d_date_sk
-WHERE d.d_year = 2001
-  AND t.t_hour BETWEEN 8 AND 17
-  AND sm.sm_type IN ('OVERNIGHT', 'EXPRESS')
-  AND w.w_state = 'CA'
-  AND cs.cs_net_paid > 0
-  AND EXISTS (
+    s.s_store_name,
+    cc_sales.cc_name        AS sales_call_center,
+    p.p_promo_name,
+    SUM(cs.cs_net_profit)           AS total_profit,
+    SUM(cr.cr_return_amount)        AS total_return_amount,
+    SUM(sr.sr_return_amt)           AS total_store_return_amt,
+    SUM(wr.wr_return_amt)           AS total_web_return_amt,
+    SUM(isum.total_qty)             AS total_inventory_qty
+FROM
+    catalog_sales cs
+    JOIN call_center cc_sales
+        ON cs.cs_call_center_sk = cc_sales.cc_call_center_sk
+    JOIN warehouse w_sales
+        ON cs.cs_warehouse_sk = w_sales.w_warehouse_sk
+    JOIN promotion p
+        ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN customer_address ca_bill
+        ON cs.cs_bill_addr_sk = ca_bill.ca_address_sk
+    JOIN customer_address ca_ship
+        ON cs.cs_ship_addr_sk = ca_ship.ca_address_sk
+    /* catalog_returns linked to catalog_sales */
+    JOIN catalog_returns cr
+        ON cr.cr_order_number = cs.cs_order_number
+       AND cr.cr_item_sk = cs.cs_item_sk
+    JOIN call_center cc_ret
+        ON cr.cr_call_center_sk = cc_ret.cc_call_center_sk
+    JOIN warehouse w_ret
+        ON cr.cr_warehouse_sk = w_ret.w_warehouse_sk
+    JOIN customer_address ca_ret_refund
+        ON cr.cr_refunded_addr_sk = ca_ret_refund.ca_address_sk
+    JOIN customer_address ca_ret_return
+        ON cr.cr_returning_addr_sk = ca_ret_return.ca_address_sk
+    /* store and its returns */
+    JOIN store s
+        ON 1 = 1                     -- cross‑join to bring the store dimension into the query
+    JOIN store_returns sr
+        ON sr.sr_store_sk = s.s_store_sk
+    JOIN customer_address ca_sr_addr
+        ON sr.sr_addr_sk = ca_sr_addr.ca_address_sk
+    /* web returns linked via the same bill/ship addresses as the sale */
+    JOIN web_returns wr
+        ON wr.wr_refunded_addr_sk = ca_bill.ca_address_sk
+       AND wr.wr_returning_addr_sk = ca_ship.ca_address_sk
+    /* inventory summary (pre‑aggregated) */
+    JOIN inventory_summary isum
+        ON w_sales.w_warehouse_sk = isum.inv_warehouse_sk
+WHERE
+    EXISTS (
         SELECT 1
-        FROM store_sales s2
-        WHERE s2.ss_sold_date_sk = cs.cs_sold_date_sk
-          AND s2.ss_net_paid > 1000
+        FROM promotion p_sub
+        WHERE p_sub.p_promo_sk = cs.cs_promo_sk
+          AND p_sub.p_discount_active = 'Y'
     )
-ORDER BY cs.cs_net_paid DESC
+GROUP BY
+    ROLLUP (s.s_store_name, cc_sales.cc_name, p.p_promo_name)
+ORDER BY
+    total_profit DESC
 LIMIT 100

@@ -1,53 +1,40 @@
-WITH inventory_summary AS (
+WITH sales_data AS (
     SELECT
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ws.ws_sold_time_sk,
+        ws.ws_web_page_sk,
+        i.i_manufact,
+        i.i_current_price,
         i.i_item_sk,
-        w.w_warehouse_name,
-        SUM(inv.inv_quantity_on_hand) AS total_on_hand
-    FROM inventory inv
-    JOIN item i ON inv.inv_item_sk = i.i_item_sk
-    JOIN warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
-    GROUP BY i.i_item_sk, w.w_warehouse_name
+        wp.wp_url,
+        t.t_hour,
+        CONCAT(i.i_manufact, '-', CAST(i.i_item_sk AS varchar)) AS manufact_item_key,
+        SUBSTRING(wp.wp_url FROM 1 FOR 20) AS url_prefix,
+        CASE WHEN i.i_current_price > 5 THEN 'expensive' ELSE 'cheap' END AS price_category
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN time_dim t ON ws.ws_sold_time_sk = t.t_time_sk
+    WHERE regexp_like(i.i_manufact, '^.*anti.*$')
+      AND wp.wp_url LIKE 'http%://%store%'
 )
-
 SELECT
-    sr.sr_ticket_number AS return_ticket,
-    i.i_item_id AS item_id,
-    inv_sum.w_warehouse_name AS warehouse_name,
-    inv_sum.total_on_hand,
-    sr.sr_return_quantity AS return_quantity,
-    sr.sr_return_amt_inc_tax AS return_amount_inc_tax,
-    td.t_shift,
-    p.p_promo_name AS promo_name,
-    CASE WHEN sr.sr_return_amt_inc_tax > 500 THEN 'High' ELSE 'Low' END AS return_category
-FROM store_returns sr
-JOIN item i ON sr.sr_item_sk = i.i_item_sk
-JOIN time_dim td ON sr.sr_return_time_sk = td.t_time_sk
-JOIN household_demographics hd ON sr.sr_hdemo_sk = hd.hd_demo_sk
-LEFT JOIN promotion p ON p.p_item_sk = i.i_item_sk
-JOIN inventory_summary inv_sum ON inv_sum.i_item_sk = i.i_item_sk
-WHERE sr.sr_return_quantity > 30
-  AND td.t_shift = 'first               '
-
-UNION ALL
-
-SELECT
-    sr.sr_ticket_number AS return_ticket,
-    i.i_item_id AS item_id,
-    inv_sum.w_warehouse_name AS warehouse_name,
-    inv_sum.total_on_hand,
-    sr.sr_return_quantity AS return_quantity,
-    sr.sr_return_amt_inc_tax AS return_amount_inc_tax,
-    td.t_shift,
-    p.p_promo_name AS promo_name,
-    CASE WHEN sr.sr_return_amt_inc_tax > 500 THEN 'High' ELSE 'Low' END AS return_category
-FROM store_returns sr
-JOIN item i ON sr.sr_item_sk = i.i_item_sk
-JOIN time_dim td ON sr.sr_return_time_sk = td.t_time_sk
-JOIN household_demographics hd ON sr.sr_hdemo_sk = hd.hd_demo_sk
-LEFT JOIN promotion p ON p.p_item_sk = i.i_item_sk
-JOIN inventory_summary inv_sum ON inv_sum.i_item_sk = i.i_item_sk
-WHERE sr.sr_return_quantity <= 30
-  AND td.t_shift = 'second              '
-
-ORDER BY return_category DESC, return_amount_inc_tax DESC
+    manufact_item_key,
+    i_manufact,
+    t_hour,
+    price_category,
+    SUM(ws_net_paid) AS total_net_paid,
+    COUNT(DISTINCT ws_order_number) AS distinct_orders,
+    SUM(ws_quantity) AS total_quantity,
+    url_prefix
+FROM sales_data
+GROUP BY
+    manufact_item_key,
+    i_manufact,
+    t_hour,
+    price_category,
+    url_prefix
+ORDER BY total_net_paid DESC
 LIMIT 100

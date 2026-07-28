@@ -1,37 +1,27 @@
-WITH catalog_year AS (
-  SELECT
-    cp.cp_catalog_page_sk,
-    cp.cp_description,
-    d.d_year AS year_val,
-    regexp_extract(cp.cp_description, '(\\w+)', 1) AS first_word,
-    concat('Y', CAST(d.d_year AS varchar)) AS year_label
-  FROM catalog_page cp
-  JOIN date_dim d
-    ON cp.cp_start_date_sk = d.d_date_sk
-  WHERE regexp_like(cp.cp_description, '(?i)care')
-    AND cp.cp_description LIKE '%fields%'
-),
-promo_year AS (
-  SELECT
-    p.p_promo_sk,
-    d.d_year AS promo_year,
-    p.p_channel_tv
-  FROM promotion p
-  JOIN date_dim d
-    ON p.p_start_date_sk = d.d_date_sk
-  WHERE p.p_channel_tv = 'N'
+WITH sales_filtered AS (
+    SELECT ws.ws_order_number,
+           ws.ws_net_paid,
+           ws.ws_sold_date_sk,
+           ws.ws_ship_mode_sk,
+           ws.ws_web_site_sk
+    FROM web_sales ws
+    WHERE NOT EXISTS (
+        SELECT 1 FROM web_returns wr
+        WHERE wr.wr_order_number = ws.ws_order_number
+    )
 )
-SELECT
-  c.year_label,
-  c.year_val,
-  COUNT(DISTINCT c.cp_catalog_page_sk) AS catalog_page_cnt,
-  COUNT(DISTINCT pr.p_promo_sk) AS promotion_cnt,
-  MIN(c.first_word) AS sample_first_word
-FROM catalog_year c
-LEFT JOIN promo_year pr
-  ON c.year_val = pr.promo_year
-GROUP BY
-  c.year_label,
-  c.year_val
-ORDER BY c.year_val DESC, catalog_page_cnt DESC
+SELECT ws.web_manager,
+       substring(ws.web_manager, 1, 3) AS manager_prefix,
+       SUM(sf.ws_net_paid) AS total_net_paid,
+       COUNT(DISTINCT sf.ws_order_number) AS orders_cnt,
+       ROW_NUMBER() OVER (ORDER BY SUM(sf.ws_net_paid) DESC) AS manager_rank
+FROM sales_filtered sf
+JOIN date_dim d ON sf.ws_sold_date_sk = d.d_date_sk
+JOIN ship_mode sm ON sf.ws_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN web_site ws ON sf.ws_web_site_sk = ws.web_site_sk
+WHERE d.d_year = 2021
+  AND regexp_like(ws.web_manager, '^J.*')
+  AND sm.sm_carrier LIKE 'D%'
+GROUP BY ws.web_manager, substring(ws.web_manager, 1, 3)
+ORDER BY total_net_paid DESC
 LIMIT 100

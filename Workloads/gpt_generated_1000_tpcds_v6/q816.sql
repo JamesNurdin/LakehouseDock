@@ -1,47 +1,44 @@
-WITH avg_discount AS (
-    SELECT avg(cs_ext_discount_amt) AS avg_discount
-    FROM catalog_sales
-),
-sales_by_entity AS (
-    SELECT
-        cc.cc_call_center_id AS entity_id,
-        'call_center' AS entity_type,
-        td.t_hour AS hour,
-        sum(cs.cs_ext_sales_price) AS total_amount,
-        (SELECT avg_discount FROM avg_discount) AS avg_discount_all
-    FROM catalog_sales cs
-    JOIN call_center cc ON cs.cs_call_center_sk = cc.cc_call_center_sk
-    JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
-    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
-    WHERE p.p_channel_catalog = 'N'
-    GROUP BY cc.cc_call_center_id, td.t_hour
-),
-sales_by_warehouse AS (
-    SELECT
-        w.w_warehouse_id AS entity_id,
-        'warehouse' AS entity_type,
-        td.t_hour AS hour,
-        sum(cs.cs_ext_sales_price) AS total_amount,
-        (SELECT avg_discount FROM avg_discount) AS avg_discount_all
-    FROM catalog_sales cs
-    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
-    JOIN time_dim td ON cs.cs_sold_time_sk = td.t_time_sk
-    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
-    WHERE p.p_channel_press = 'N'
-    GROUP BY w.w_warehouse_id, td.t_hour
+WITH combined AS (
+    SELECT src, id, total_net_paid, category, tag
+    FROM (
+        SELECT
+            'store' AS src,
+            s.s_store_id AS id,
+            SUM(ss.ss_net_paid) AS total_net_paid,
+            CASE WHEN s.s_geography_class = 'Unknown' THEN 'Other' ELSE s.s_geography_class END AS category,
+            regexp_extract(s.s_market_desc, '(\\w+)', 1) AS tag
+        FROM store_sales ss
+        JOIN store s ON ss.ss_store_sk = s.s_store_sk
+        JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+        WHERE d.d_year = 2001
+          AND s.s_market_desc LIKE '%Local%'
+        GROUP BY s.s_store_id, s.s_geography_class, s.s_market_desc
+    )
+    UNION ALL
+    SELECT src, id, total_net_paid, category, tag
+    FROM (
+        SELECT
+            'return' AS src,
+            s.s_store_id AS id,
+            -SUM(sr.sr_return_amt) AS total_net_paid,
+            CASE WHEN regexp_like(r.r_reason_desc, '.*damage.*') THEN 'Damage' ELSE 'Other' END AS category,
+            CONCAT('Return_', CAST(s.s_store_sk AS VARCHAR)) AS tag
+        FROM store_returns sr
+        JOIN store s ON sr.sr_store_sk = s.s_store_sk
+        JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+        JOIN date_dim d ON sr.sr_returned_date_sk = d.d_date_sk
+        WHERE d.d_year = 2001
+          AND r.r_reason_desc LIKE '%customer%'
+        GROUP BY s.s_store_id, s.s_store_sk, r.r_reason_desc
+    )
 )
-SELECT entity_id,
-       entity_type,
-       hour,
-       total_amount,
-       avg_discount_all
-FROM sales_by_entity
-UNION ALL
-SELECT entity_id,
-       entity_type,
-       hour,
-       total_amount,
-       avg_discount_all
-FROM sales_by_warehouse
-ORDER BY total_amount DESC
+SELECT
+    src,
+    id,
+    total_net_paid,
+    category,
+    tag,
+    ROW_NUMBER() OVER (PARTITION BY src ORDER BY total_net_paid DESC) AS rank_within_src
+FROM combined
+ORDER BY total_net_paid DESC, src
 LIMIT 100

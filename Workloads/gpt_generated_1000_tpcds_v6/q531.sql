@@ -1,45 +1,36 @@
-WITH joined AS (
-  SELECT
-    wp.wp_type,
-    wp.wp_char_count,
-    ws.ws_order_number,
-    ws.ws_net_paid_inc_ship_tax,
-    ws.ws_ext_wholesale_cost,
-    wr.wr_return_amt
-  FROM tpcds.web_page wp
-  JOIN tpcds.web_sales ws
-    ON ws.ws_web_page_sk = wp.wp_web_page_sk
-  JOIN tpcds.web_returns wr
-    ON wr.wr_item_sk = ws.ws_item_sk
-   AND wr.wr_order_number = ws.ws_order_number
-   AND wr.wr_web_page_sk = wp.wp_web_page_sk
-  WHERE wp.wp_access_date_sk = 2452565
-    AND wp.wp_char_count > 2000
-    AND ws.ws_net_paid_inc_ship_tax > 1500.00
-),
-aggregated AS (
-  SELECT
-    wp_type,
-    wp_char_count,
-    COUNT(DISTINCT ws_order_number) AS num_orders,
-    SUM(ws_net_paid_inc_ship_tax) AS total_sales,
-    SUM(wr_return_amt) AS total_returns,
-    AVG(ws_ext_wholesale_cost) AS avg_wholesale_cost
-  FROM joined
-  GROUP BY wp_type, wp_char_count
-)
 SELECT
-  wp_type,
-  wp_char_count,
-  num_orders,
-  total_sales,
-  total_returns,
-  avg_wholesale_cost,
-  SUM(total_sales) OVER (
-    PARTITION BY wp_type
-    ORDER BY total_sales DESC
-    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-  ) AS cumulative_sales_by_type
-FROM aggregated
-ORDER BY total_sales DESC
+    cd.cd_gender,
+    r.r_reason_desc,
+    CASE WHEN sr.sr_net_loss > 500 THEN 'High' ELSE 'Low' END AS loss_category,
+    CASE WHEN sr.sr_return_amt > (SELECT AVG(sr2.sr_return_amt) FROM store_returns sr2) THEN 'Above Avg' ELSE 'Below Avg' END AS amt_category,
+    COUNT(*) AS return_count,
+    SUM(sr.sr_return_amt) AS total_return_amt,
+    AVG(sr.sr_return_amt) AS avg_return_amt,
+    MIN(sr.sr_return_amt) AS min_return_amt,
+    MAX(sr.sr_return_amt) AS max_return_amt
+FROM store_returns sr
+JOIN customer_demographics cd
+    ON sr.sr_cdemo_sk = cd.cd_demo_sk
+JOIN reason r
+    ON sr.sr_reason_sk = r.r_reason_sk
+WHERE cd.cd_credit_rating = 'Low Risk'
+  AND cd.cd_marital_status = 'U'
+  AND cd.cd_dep_employed_count >= 2
+  AND r.r_reason_desc LIKE '%color%'
+  AND sr.sr_return_amt > 100
+  AND sr.sr_return_tax > 0
+  AND NOT EXISTS (
+        SELECT 1
+        FROM store_returns sr_ex
+        JOIN reason r_ex
+            ON sr_ex.sr_reason_sk = r_ex.r_reason_sk
+        WHERE sr_ex.sr_cdemo_sk = cd.cd_demo_sk
+          AND r_ex.r_reason_id = 'AAAAAAAADBAAAAAA'
+    )
+GROUP BY
+    cd.cd_gender,
+    r.r_reason_desc,
+    CASE WHEN sr.sr_net_loss > 500 THEN 'High' ELSE 'Low' END,
+    CASE WHEN sr.sr_return_amt > (SELECT AVG(sr2.sr_return_amt) FROM store_returns sr2) THEN 'Above Avg' ELSE 'Below Avg' END
+ORDER BY total_return_amt DESC
 LIMIT 100

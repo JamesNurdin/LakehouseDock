@@ -1,48 +1,53 @@
-/*
-  Goal: Compare and aggregate net loss from catalog returns and store returns per customer address, flagging addresses with high overall loss. The query uses a UNION ALL to combine two sub‑queries (each with required joins and filters), includes an EXISTS subquery, a scalar subquery for the average catalog net loss, and a CASE expression to categorize overall loss. Results are ordered by total loss descending.
-*/
-WITH combined AS (
-    -- Catalog returns side
+WITH
+  agg_a AS (
     SELECT
-        ca.ca_address_id AS address_id,
-        SUM(cr.cr_net_loss) AS total_net_loss
-    FROM catalog_returns cr
-    JOIN customer_address ca
-        ON cr.cr_refunded_addr_sk = ca.ca_address_sk
-    WHERE ca.ca_gmt_offset BETWEEN -9.00 AND -5.00
-    GROUP BY ca.ca_address_id
-
-    UNION ALL
-
-    -- Store returns side
+      sm.sm_carrier AS carrier,
+      SUM(ws.ws_ext_sales_price) AS total_sales,
+      SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE sm.sm_carrier IN ('LATVIAN', 'GREAT EASTERN')
+    GROUP BY sm.sm_carrier
+  ),
+  sub_a AS (
     SELECT
-        ca.ca_address_id AS address_id,
-        SUM(sr.sr_net_loss) AS total_net_loss
-    FROM store_returns sr
-    JOIN customer_address ca
-        ON sr.sr_addr_sk = ca.ca_address_sk
-    JOIN store s
-        ON sr.sr_store_sk = s.s_store_sk
-    WHERE s.s_state = 'CA'
-      AND ca.ca_gmt_offset = -8.00
-      AND EXISTS (
-            SELECT 1
-            FROM store s2
-            WHERE s2.s_store_sk = sr.sr_store_sk
-              AND s2.s_tax_percentage > 0.05
-        )
-    GROUP BY ca.ca_address_id
-)
-SELECT
-    address_id,
-    SUM(total_net_loss) AS overall_net_loss,
-    CASE
-        WHEN SUM(total_net_loss) > 1500 THEN 'Critical'
-        WHEN SUM(total_net_loss) > 800  THEN 'High'
-        ELSE 'Normal'
-    END AS overall_category,
-    (SELECT AVG(cr2.cr_net_loss) FROM catalog_returns cr2) AS avg_catalog_net_loss
-FROM combined
-GROUP BY address_id
-ORDER BY overall_net_loss DESC
+      carrier,
+      total_sales,
+      total_profit,
+      CASE WHEN total_profit > 0 THEN 'PROFIT' ELSE 'LOSS' END AS profit_status,
+      ROW_NUMBER() OVER (PARTITION BY carrier ORDER BY total_sales DESC) AS sales_rank
+    FROM agg_a
+  ),
+  agg_b AS (
+    SELECT
+      sm.sm_carrier AS carrier,
+      SUM(ws.ws_ext_sales_price) AS total_sales,
+      SUM(ws.ws_net_profit) AS total_profit
+    FROM web_sales ws
+    JOIN ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE sm.sm_carrier = 'GERMA'
+      AND ws.ws_list_price > 100
+    GROUP BY sm.sm_carrier
+  ),
+  sub_b AS (
+    SELECT
+      carrier,
+      total_sales,
+      total_profit,
+      CASE WHEN total_profit > 0 THEN 'PROFIT' ELSE 'LOSS' END AS profit_status,
+      ROW_NUMBER() OVER (PARTITION BY carrier ORDER BY total_sales DESC) AS sales_rank
+    FROM agg_b
+  )
+SELECT DISTINCT
+  carrier,
+  total_sales,
+  total_profit,
+  profit_status,
+  sales_rank
+FROM (
+  SELECT * FROM sub_a
+  UNION ALL
+  SELECT * FROM sub_b
+) combined
+ORDER BY carrier, sales_rank
 LIMIT 100

@@ -1,46 +1,45 @@
-WITH joined_data AS (
-    SELECT
-        d.d_year AS d_year,
-        cd.cd_gender AS cd_gender,
-        p.p_channel_dmail AS p_channel_dmail,
-        c.c_customer_id AS c_customer_id,
-        cr.cr_return_amount AS cr_return_amount,
-        cr.cr_return_quantity AS cr_return_quantity,
-        cr.cr_fee AS cr_fee,
-        ws.ws_ext_sales_price AS ws_ext_sales_price,
-        ws.ws_quantity AS ws_quantity
-    FROM catalog_returns cr
-    JOIN date_dim d
-        ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN customer c
-        ON cr.cr_refunded_customer_sk = c.c_customer_sk
-    JOIN customer_demographics cd
-        ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-    JOIN web_sales ws
-        ON ws.ws_sold_date_sk = d.d_date_sk
-    JOIN promotion p
-        ON ws.ws_promo_sk = p.p_promo_sk
-    JOIN web_page wp
-        ON ws.ws_web_page_sk = wp.wp_web_page_sk
-    WHERE d.d_year = 2001
-      AND p.p_channel_dmail = 'Y'
-      AND cd.cd_gender = 'M'
-      AND c.c_preferred_cust_flag = 'Y'
-      AND cr.cr_return_quantity > 1
-      AND wp.wp_type = 'home'
-)
 SELECT
-    d_year,
-    cd_gender,
-    p_channel_dmail,
-    COUNT(DISTINCT c_customer_id) AS distinct_customers,
-    SUM(cr_return_amount) AS total_return_amount,
-    SUM(ws_ext_sales_price) AS total_sales_amount,
-    AVG(ws_quantity) AS avg_sales_quantity,
-    MIN(cr_fee) AS min_return_fee,
-    MAX(cr_fee) AS max_return_fee
-FROM joined_data
-GROUP BY d_year, cd_gender, p_channel_dmail
-HAVING SUM(cr_return_amount) > 1000
-ORDER BY total_return_amount DESC
+    s.s_state,
+    s.s_city,
+    s.s_store_name,
+    COUNT(DISTINCT cs.cs_order_number) AS num_catalog_orders,
+    SUM(cs.cs_net_profit) AS catalog_net_profit,
+    SUM(ss.ss_net_profit) AS store_sales_net_profit,
+    SUM(sr.sr_net_loss) AS store_returns_net_loss,
+    (SUM(cs.cs_net_profit) + SUM(ss.ss_net_profit) - SUM(sr.sr_net_loss)) AS total_contribution
+FROM catalog_sales cs
+JOIN customer_demographics cd_bill
+  ON cs.cs_bill_cdemo_sk = cd_bill.cd_demo_sk
+JOIN customer_address ca_bill
+  ON cs.cs_bill_addr_sk = ca_bill.ca_address_sk
+JOIN customer_demographics cd_ship
+  ON cs.cs_ship_cdemo_sk = cd_ship.cd_demo_sk
+JOIN customer_address ca_ship
+  ON cs.cs_ship_addr_sk = ca_ship.ca_address_sk
+JOIN store_sales ss
+  ON ss.ss_cdemo_sk = cd_bill.cd_demo_sk               -- use the same gender/age dimension as the billing customer
+ AND ss.ss_addr_sk = ca_bill.ca_address_sk               -- use the same address dimension as the billing address
+JOIN customer_demographics cd_sales
+  ON ss.ss_cdemo_sk = cd_sales.cd_demo_sk
+JOIN customer_address ca_sales
+  ON ss.ss_addr_sk = ca_sales.ca_address_sk
+JOIN store s
+  ON ss.ss_store_sk = s.s_store_sk
+JOIN store_returns sr
+  ON sr.sr_item_sk = ss.ss_item_sk
+ AND sr.sr_ticket_number = ss.ss_ticket_number
+JOIN customer_demographics cd_ret
+  ON sr.sr_cdemo_sk = cd_ret.cd_demo_sk
+JOIN customer_address ca_ret
+  ON sr.sr_addr_sk = ca_ret.ca_address_sk
+JOIN store s_ret
+  ON sr.sr_store_sk = s_ret.s_store_sk
+WHERE EXISTS (
+    SELECT 1
+    FROM catalog_sales cs_check
+    WHERE cs_check.cs_bill_customer_sk = cs.cs_bill_customer_sk
+      AND cs_check.cs_net_profit > 1000
+)
+GROUP BY s.s_state, s.s_city, s.s_store_name
+ORDER BY total_contribution DESC
 LIMIT 100

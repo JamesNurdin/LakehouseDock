@@ -1,49 +1,57 @@
-WITH filtered_sales AS (
+WITH agg_promo AS (
     SELECT
-        cs.cs_sold_date_sk,
-        cs.cs_quantity,
-        cs.cs_net_profit,
-        cs.cs_ext_discount_amt,
-        cs.cs_promo_sk,
-        cs.cs_bill_addr_sk,
-        cs.cs_bill_cdemo_sk,
-        cs.cs_bill_hdemo_sk
-    FROM catalog_sales cs
-    WHERE cs.cs_quantity > 1
-      AND cs.cs_net_profit > 0
-      AND cs.cs_ext_discount_amt > 0
-      AND cs.cs_sold_date_sk BETWEEN 2450815 AND 2451200
+        p.p_promo_id,
+        p.p_promo_name,
+        p.p_channel_demo,
+        COUNT(*) AS sales_transactions,
+        SUM(ws.ws_net_paid_inc_ship_tax) AS total_net_paid,
+        AVG(ws.ws_net_paid_inc_ship_tax) AS avg_net_paid,
+        MAX(ws.ws_net_paid_inc_ship_tax) AS max_single_payment
+    FROM
+        tpcds.promotion p
+        JOIN tpcds.web_sales ws
+            ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE
+        ws.ws_net_paid_inc_ship_tax > 500
+        AND ws.ws_ext_tax < 200
+        AND ws.ws_quantity >= 1
+        AND p.p_channel_demo = 'N'
+        AND p.p_purpose <> 'Unknown'
+        AND p.p_end_date_sk BETWEEN 2450400 AND 2450800
+        AND NOT EXISTS (
+            SELECT 1
+            FROM tpcds.web_sales ws2
+            WHERE ws2.ws_promo_sk = p.p_promo_sk
+              AND ws2.ws_ext_tax > 250
+        )
+    GROUP BY
+        p.p_promo_id,
+        p.p_promo_name,
+        p.p_channel_demo
 )
 SELECT
-    p.p_promo_id,
-    ca.ca_state,
-    SUM(fs.cs_net_profit) AS total_net_profit,
-    SUM(fs.cs_quantity) AS total_quantity,
-    AVG(fs.cs_ext_discount_amt) AS avg_discount,
-    COUNT(DISTINCT fs.cs_bill_cdemo_sk) AS distinct_customer_demo,
-    RANK() OVER (PARTITION BY ca.ca_state ORDER BY SUM(fs.cs_net_profit) DESC) AS profit_rank_state,
-    SUM(SUM(fs.cs_net_profit)) OVER (
-        PARTITION BY ca.ca_state
-        ORDER BY SUM(fs.cs_net_profit) DESC
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS cumulative_profit_state
-FROM filtered_sales fs
-JOIN promotion p
-    ON fs.cs_promo_sk = p.p_promo_sk
-JOIN customer_address ca
-    ON fs.cs_bill_addr_sk = ca.ca_address_sk
-JOIN customer_demographics cd
-    ON fs.cs_bill_cdemo_sk = cd.cd_demo_sk
-JOIN household_demographics hd
-    ON fs.cs_bill_hdemo_sk = hd.hd_demo_sk
-WHERE p.p_cost > 500
-  AND p.p_channel_catalog = 'N'
-  AND cd.cd_dep_count >= 2
-  AND cd.cd_dep_employed_count >= 1
-  AND hd.hd_vehicle_count >= 1
-  AND ca.ca_country = 'United States'
-GROUP BY
-    p.p_promo_id,
-    ca.ca_state
-ORDER BY total_net_profit DESC
+    ap.p_promo_id,
+    ap.p_promo_name,
+    ap.p_channel_demo,
+    ap.sales_transactions,
+    ap.total_net_paid,
+    ap.avg_net_paid,
+    ap.max_single_payment,
+    ROW_NUMBER() OVER (ORDER BY ap.total_net_paid DESC) AS sales_rank,
+    CASE
+        WHEN ap.total_net_paid > (
+            SELECT MAX(total_sum)
+            FROM (
+                SELECT SUM(ws_net_paid_inc_ship_tax) AS total_sum
+                FROM tpcds.web_sales
+                GROUP BY ws_promo_sk
+            ) AS sub
+        ) THEN 'Above Overall Max'
+        ELSE 'Below Overall Max'
+    END AS performance_category
+FROM
+    agg_promo ap
+ORDER BY
+    ap.total_net_paid DESC,
+    sales_rank
 LIMIT 100

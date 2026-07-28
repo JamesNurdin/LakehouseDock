@@ -1,45 +1,58 @@
-WITH store_ret AS (
-    SELECT
-        c.c_customer_id,
-        c.c_birth_country,
-        SUM(sr.sr_net_loss) AS total_loss,
-        COUNT(*) AS return_cnt,
-        CASE WHEN SUM(sr.sr_net_loss) > 500 THEN 'HIGH' ELSE 'LOW' END AS loss_category
-    FROM tpcds.store_returns sr
-    JOIN tpcds.customer c
-        ON sr.sr_customer_sk = c.c_customer_sk
-    WHERE c.c_birth_country = 'BAHAMAS'
-      AND sr.sr_reversed_charge > 100
-    GROUP BY c.c_customer_id, c.c_birth_country
+WITH page_return_stats AS (
+   SELECT
+       wp.wp_web_page_sk,
+       wp.wp_url,
+       wp.wp_type,
+       wp.wp_autogen_flag,
+       wp.wp_image_count,
+       COUNT(wr.wr_return_quantity) AS return_cnt,
+       SUM(wr.wr_return_amt) AS total_return_amt,
+       SUM(wr.wr_return_tax) AS total_return_tax,
+       AVG(wr.wr_return_quantity) AS avg_return_qty,
+       CASE 
+           WHEN wp.wp_image_count >= 5 THEN 'High Image'
+           WHEN wp.wp_image_count >= 2 THEN 'Medium Image'
+           ELSE 'Low Image'
+       END AS image_category
+   FROM web_page wp
+   LEFT JOIN web_returns wr
+       ON wr.wr_web_page_sk = wp.wp_web_page_sk
+   WHERE wp.wp_autogen_flag = 'N'
+     AND wp.wp_rec_end_date > DATE '2000-01-01'
+     AND wp.wp_image_count >= 2
+   GROUP BY
+       wp.wp_web_page_sk,
+       wp.wp_url,
+       wp.wp_type,
+       wp.wp_autogen_flag,
+       wp.wp_image_count,
+       CASE 
+           WHEN wp.wp_image_count >= 5 THEN 'High Image'
+           WHEN wp.wp_image_count >= 2 THEN 'Medium Image'
+           ELSE 'Low Image'
+       END
 ),
-web_ret AS (
-    SELECT
-        c.c_customer_id,
-        c.c_birth_country,
-        SUM(wr.wr_net_loss) AS total_loss,
-        COUNT(*) AS return_cnt,
-        CASE WHEN SUM(wr.wr_net_loss) > 300 THEN 'HIGH' ELSE 'LOW' END AS loss_category
-    FROM tpcds.web_returns wr
-    JOIN tpcds.customer c
-        ON wr.wr_refunded_customer_sk = c.c_customer_sk
-    WHERE c.c_birth_country = 'KOREA'
-      AND wr.wr_return_tax > 20
-    GROUP BY c.c_customer_id, c.c_birth_country
+ranked_stats AS (
+   SELECT
+       prs.*,
+       RANK() OVER (PARTITION BY prs.image_category ORDER BY prs.total_return_amt DESC) AS img_cat_rank,
+       AVG(prs.total_return_amt) OVER (PARTITION BY prs.image_category) AS avg_return_amt_by_cat
+   FROM page_return_stats prs
+   WHERE prs.total_return_amt > 0
 )
 SELECT
-    c_customer_id,
-    c_birth_country,
-    total_loss,
-    return_cnt,
-    loss_category
-FROM store_ret
-UNION ALL
-SELECT
-    c_customer_id,
-    c_birth_country,
-    total_loss,
-    return_cnt,
-    loss_category
-FROM web_ret
-ORDER BY total_loss DESC, loss_category
+   rs.wp_web_page_sk,
+   rs.wp_url,
+   rs.wp_type,
+   rs.image_category,
+   rs.return_cnt,
+   rs.total_return_amt,
+   rs.total_return_tax,
+   rs.avg_return_qty,
+   rs.img_cat_rank,
+   rs.avg_return_amt_by_cat
+FROM ranked_stats rs
+WHERE rs.return_cnt >= 5
+  AND rs.avg_return_amt_by_cat > 100
+ORDER BY rs.total_return_amt DESC
 LIMIT 100

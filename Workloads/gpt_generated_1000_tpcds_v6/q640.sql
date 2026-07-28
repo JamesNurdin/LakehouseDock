@@ -1,51 +1,73 @@
-WITH filtered_returns AS (
+/*
+  Goal: Analyze the combined impact of catalog returns and web sales by year, month, call center, ship mode and return reason, while applying several filters on date, call center, ship mode contract, household vehicle count and web sales net paid. The query first builds a detailed base view joining all nine tables, then aggregates using GROUPING SETS to produce subtotals at various hierarchy levels, and finally adds a windowed average of return amounts per year.
+*/
+WITH base AS (
     SELECT
-        sr.sr_returned_date_sk,
-        sr.sr_return_time_sk,
-        sr.sr_item_sk,
-        sr.sr_customer_sk,
-        sr.sr_addr_sk,
-        sr.sr_store_sk,
-        sr.sr_return_quantity,
-        sr.sr_return_amt,
-        sr.sr_return_tax,
-        sr.sr_return_amt_inc_tax,
-        sr.sr_fee,
-        sr.sr_return_ship_cost,
-        sr.sr_refunded_cash,
-        sr.sr_reversed_charge,
-        sr.sr_store_credit,
-        sr.sr_net_loss
-    FROM store_returns sr
-    WHERE sr.sr_returned_date_sk BETWEEN 2450900 AND 2452000
-      AND sr.sr_return_amt_inc_tax > 100
-      AND sr.sr_return_quantity >= 1
-      AND sr.sr_fee >= 0
-      AND sr.sr_return_ship_cost >= 0
+        d.d_year,
+        d.d_month_seq,
+        cc.cc_name,
+        cc.cc_call_center_id,
+        sm.sm_ship_mode_id,
+        sm.sm_contract,
+        r.r_reason_desc,
+        hd.hd_vehicle_count,
+        cr.cr_return_amount,
+        ws.ws_net_paid
+    FROM catalog_returns cr
+    JOIN date_dim d
+        ON cr.cr_returned_date_sk = d.d_date_sk
+    LEFT JOIN call_center cc
+        ON cr.cr_call_center_sk = cc.cc_call_center_sk
+    LEFT JOIN ship_mode sm
+        ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
+    LEFT JOIN reason r
+        ON cr.cr_reason_sk = r.r_reason_sk
+    LEFT JOIN household_demographics hd
+        ON cr.cr_returning_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN warehouse w
+        ON cr.cr_warehouse_sk = w.w_warehouse_sk
+    LEFT JOIN web_sales ws
+        ON ws.ws_sold_date_sk = d.d_date_sk
+    LEFT JOIN store s
+        ON s.s_closed_date_sk = d.d_date_sk
+    WHERE d.d_year = 2001
+      AND d.d_month_seq BETWEEN 1 AND 12
+      AND cc.cc_call_center_id = 'CC_001'
+      AND sm.sm_contract = 'GNJr3g5i7oorKqtX'
+      AND hd.hd_vehicle_count >= 1
+      AND ws.ws_net_paid > 0
+),
+agg AS (
+    SELECT
+        d_year,
+        d_month_seq,
+        cc_name,
+        sm_ship_mode_id,
+        r_reason_desc,
+        SUM(cr_return_amount) AS total_return_amount,
+        SUM(ws_net_paid) AS total_net_paid
+    FROM base
+    GROUP BY GROUPING SETS (
+        (d_year, d_month_seq, cc_name, sm_ship_mode_id, r_reason_desc),
+        (d_year, d_month_seq, cc_name, sm_ship_mode_id),
+        (d_year, d_month_seq, cc_name),
+        (d_year, d_month_seq),
+        (d_year)
+    )
 )
 SELECT
-    s.s_store_id,
-    s.s_store_name,
-    ca.ca_city,
-    ca.ca_state,
-    fr.sr_returned_date_sk,
-    fr.sr_return_amt_inc_tax,
-    CASE
-        WHEN fr.sr_return_amt_inc_tax > 1000 THEN 'High'
-        WHEN fr.sr_return_amt_inc_tax > 500 THEN 'Medium'
-        ELSE 'Low'
-    END AS return_category,
-    ROW_NUMBER() OVER (PARTITION BY s.s_store_id ORDER BY fr.sr_return_amt_inc_tax DESC) AS rn_store,
-    DENSE_RANK() OVER (ORDER BY fr.sr_return_amt_inc_tax DESC) AS overall_rank
-FROM filtered_returns fr
-JOIN customer_address ca
-    ON fr.sr_addr_sk = ca.ca_address_sk
-JOIN store s
-    ON fr.sr_store_sk = s.s_store_sk
-WHERE ca.ca_zip LIKE '4%'
-  AND ca.ca_state = 'CA'
-  AND s.s_state = 'CA'
-  AND s.s_tax_percentage > 0.05
-  AND s.s_city = 'Seattle'
-ORDER BY overall_rank ASC, s.s_store_id
+    d_year,
+    d_month_seq,
+    cc_name,
+    sm_ship_mode_id,
+    r_reason_desc,
+    total_return_amount,
+    total_net_paid,
+    AVG(total_return_amount) OVER (PARTITION BY d_year) AS avg_return_amount_per_year
+FROM agg
+WHERE total_return_amount > 0
+  AND total_net_paid IS NOT NULL
+  AND (cc_name IS NOT NULL OR sm_ship_mode_id IS NOT NULL)
+  AND (r_reason_desc IS NOT NULL OR d_month_seq IS NOT NULL)
+ORDER BY d_year, d_month_seq
 LIMIT 100

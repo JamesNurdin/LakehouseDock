@@ -1,39 +1,47 @@
-WITH sales_returns AS (
+WITH store_data AS (
     SELECT
-        ws.ws_order_number,
-        ws.ws_bill_customer_sk,
-        ws.ws_sold_date_sk,
-        ws.ws_quantity,
-        ws.ws_net_profit,
-        wr.wr_return_quantity,
-        wr.wr_return_amt,
-        CASE
-            WHEN wr.wr_return_quantity IS NULL THEN ws.ws_net_profit
-            ELSE ws.ws_net_profit - wr.wr_return_amt
-        END AS adj_net_profit
+        i.i_item_id,
+        i.i_product_name,
+        'store' AS sales_channel,
+        SUM(ss.ss_net_paid) AS total_net_paid,
+        COUNT(*) AS txn_count
+    FROM store_sales ss
+    JOIN item i ON ss.ss_item_sk = i.i_item_sk
+    JOIN store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN promotion p ON ss.ss_promo_sk = p.p_promo_sk
+    WHERE s.s_county = 'Franklin Parish'
+      AND EXISTS (
+          SELECT 1
+          FROM promotion p2
+          WHERE p2.p_item_sk = i.i_item_sk
+            AND p2.p_discount_active = 'Y'
+      )
+    GROUP BY i.i_item_id, i.i_product_name
+),
+web_data AS (
+    SELECT
+        i.i_item_id,
+        i.i_product_name,
+        'web' AS sales_channel,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        COUNT(*) AS txn_count
     FROM web_sales ws
-    LEFT JOIN web_returns wr
-        ON ws.ws_order_number = wr.wr_order_number
-        AND ws.ws_item_sk = wr.wr_item_sk
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN web_site w ON ws.ws_web_site_sk = w.web_site_sk
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE w.web_name = 'site_4'
+      AND EXISTS (
+          SELECT 1
+          FROM promotion p2
+          WHERE p2.p_item_sk = i.i_item_sk
+            AND p2.p_discount_active = 'Y'
+      )
+    GROUP BY i.i_item_id, i.i_product_name
 )
-SELECT
-    c.c_customer_id,
-    d_sold.d_year,
-    COUNT(DISTINCT sr.ws_order_number) AS distinct_orders,
-    SUM(sr.ws_quantity) AS total_quantity,
-    SUM(sr.ws_net_profit) AS total_net_profit,
-    SUM(sr.adj_net_profit) AS total_adj_net_profit,
-    AVG(sr.ws_net_profit) AS avg_net_profit,
-    MIN(sr.ws_net_profit) AS min_net_profit,
-    MAX(sr.ws_net_profit) AS max_net_profit
-FROM sales_returns sr
-JOIN date_dim d_sold
-    ON sr.ws_sold_date_sk = d_sold.d_date_sk
-JOIN customer c
-    ON sr.ws_bill_customer_sk = c.c_customer_sk
-WHERE d_sold.d_year = 2001
-  AND c.c_birth_month = 7
-  AND sr.ws_quantity > 2
-GROUP BY c.c_customer_id, d_sold.d_year
-ORDER BY total_adj_net_profit DESC
+SELECT *
+FROM store_data
+UNION ALL
+SELECT *
+FROM web_data
+ORDER BY total_net_paid DESC
 LIMIT 100

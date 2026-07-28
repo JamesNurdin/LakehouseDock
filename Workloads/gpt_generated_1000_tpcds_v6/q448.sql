@@ -1,91 +1,59 @@
-WITH
-    store_agg AS (
-        SELECT
-            i.i_item_sk,
-            i.i_item_id,
-            i.i_product_name,
-            SUM(ss.ss_quantity) AS store_qty,
-            SUM(ss.ss_net_paid) AS store_net_paid,
-            COUNT(DISTINCT ss.ss_ticket_number) AS store_orders,
-            MIN(ss.ss_sold_date_sk) AS store_first_date,
-            MAX(ss.ss_sold_date_sk) AS store_last_date
-        FROM store_sales ss
-        JOIN item i ON ss.ss_item_sk = i.i_item_sk
-        JOIN household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-        JOIN customer_address ca ON ss.ss_addr_sk = ca.ca_address_sk
-        LEFT JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
-        JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
-        WHERE
-            ss.ss_quantity >= 2
-            AND i.i_current_price BETWEEN 10 AND 100
-            AND hd.hd_vehicle_count > 0
-            AND ca.ca_state = 'TX'
-            AND ib.ib_upper_bound <= 120000
-            AND (inv.inv_quantity_on_hand IS NULL OR inv.inv_quantity_on_hand > 0)
-        GROUP BY i.i_item_sk, i.i_item_id, i.i_product_name
-    ),
-    web_agg AS (
-        SELECT
-            i.i_item_sk,
-            SUM(ws.ws_quantity) AS web_qty,
-            SUM(ws.ws_net_paid) AS web_net_paid,
-            COUNT(DISTINCT ws.ws_order_number) AS web_orders,
-            MIN(ws.ws_sold_date_sk) AS web_first_date,
-            MAX(ws.ws_sold_date_sk) AS web_last_date,
-            ws.ws_ship_mode_sk,
-            ws.ws_web_site_sk
-        FROM web_sales ws
-        JOIN item i ON ws.ws_item_sk = i.i_item_sk
-        JOIN household_demographics hd ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
-        JOIN customer_address ca ON ws.ws_bill_addr_sk = ca.ca_address_sk
-        LEFT JOIN inventory inv ON i.i_item_sk = inv.inv_item_sk
-        JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
-        WHERE
-            ws.ws_quantity >= 2
-            AND i.i_current_price BETWEEN 10 AND 100
-            AND hd.hd_vehicle_count > 0
-            AND ca.ca_state = 'CA'
-            AND ib.ib_upper_bound <= 120000
-            AND (inv.inv_quantity_on_hand IS NULL OR inv.inv_quantity_on_hand > 0)
-        GROUP BY i.i_item_sk, ws.ws_ship_mode_sk, ws.ws_web_site_sk
-    ),
-    joined AS (
-        SELECT
-            s.i_item_sk,
-            s.i_item_id,
-            s.i_product_name,
-            s.store_qty,
-            s.store_net_paid,
-            s.store_orders,
-            w.web_qty,
-            w.web_net_paid,
-            w.web_orders,
-            COALESCE(sm.sm_ship_mode_id, 'UNKNOWN') AS ship_mode_id,
-            COALESCE(ws.web_name, 'UNKNOWN') AS web_site_name,
-            (s.store_net_paid + w.web_net_paid) AS total_net_paid,
-            (s.store_qty + w.web_qty) AS total_qty,
-            CASE
-                WHEN (s.store_qty + w.web_qty) = 0 THEN 'NO SALES'
-                WHEN (s.store_qty + w.web_qty) < 5 THEN 'LOW'
-                ELSE 'HIGH'
-            END AS sales_volume_category
-        FROM store_agg s
-        JOIN web_agg w ON s.i_item_sk = w.i_item_sk
-        LEFT JOIN ship_mode sm ON w.ws_ship_mode_sk = sm.sm_ship_mode_sk
-        LEFT JOIN web_site ws ON w.ws_web_site_sk = ws.web_site_sk
-    )
+WITH overall_stats AS (
+    SELECT AVG(sr_net_loss) AS avg_net_loss_all
+    FROM store_returns
+)
 SELECT
-    DISTINCT i_item_sk,
-    i_item_id,
-    i_product_name,
-    total_qty,
-    total_net_paid,
-    sales_volume_category,
-    ship_mode_id,
-    web_site_name,
-    RANK() OVER (ORDER BY total_net_paid DESC) AS sales_rank
-FROM joined
-WHERE total_net_paid > 1000
-  AND sales_volume_category <> 'NO SALES'
-ORDER BY sales_rank
+    c.c_customer_id,
+    ca.ca_state,
+    ib.ib_lower_bound,
+    t.t_sub_shift,
+    r.r_reason_id,
+    COUNT(DISTINCT sr.sr_ticket_number) AS distinct_tickets,
+    SUM(sr.sr_net_loss) AS total_store_net_loss,
+    AVG(sr.sr_return_amt) AS avg_return_amount,
+    CASE
+        WHEN SUM(sr.sr_net_loss) > 10000 THEN 'HIGH'
+        WHEN SUM(sr.sr_net_loss) > 0    THEN 'MEDIUM'
+        ELSE 'LOW'
+    END AS loss_category,
+    (SELECT avg_net_loss_all FROM overall_stats) AS overall_avg_loss
+FROM
+    customer c
+    JOIN customer_address ca
+        ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN household_demographics hd
+        ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib
+        ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN store_returns sr
+        ON sr.sr_customer_sk = c.c_customer_sk
+        AND sr.sr_hdemo_sk = hd.hd_demo_sk
+        AND sr.sr_addr_sk = ca.ca_address_sk
+    JOIN reason r
+        ON sr.sr_reason_sk = r.r_reason_sk
+    JOIN time_dim t
+        ON sr.sr_return_time_sk = t.t_time_sk
+WHERE
+    t.t_time BETWEEN 9 AND 18
+    AND t.t_sub_shift = 'morning'
+    AND r.r_reason_sk = 33
+    AND ib.ib_lower_bound >= 30000
+    AND c.c_birth_country = 'United States'
+    AND c.c_preferred_cust_flag = 'Y'
+    AND EXISTS (
+        SELECT 1
+        FROM web_returns wr
+        WHERE wr.wr_refunded_customer_sk = c.c_customer_sk
+          AND wr.wr_returned_time_sk = t.t_time_sk
+          AND wr.wr_reason_sk = r.r_reason_sk
+          AND wr.wr_return_quantity > 1
+    )
+GROUP BY
+    c.c_customer_id,
+    ca.ca_state,
+    ib.ib_lower_bound,
+    t.t_sub_shift,
+    r.r_reason_id
+ORDER BY
+    total_store_net_loss DESC
 LIMIT 100

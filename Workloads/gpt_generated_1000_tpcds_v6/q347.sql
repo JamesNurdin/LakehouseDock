@@ -1,40 +1,79 @@
-WITH sales_a AS (
+WITH
+  sales_by_item AS (
     SELECT
-        c.c_customer_id,
-        SUM(ss.ss_net_paid_inc_tax) AS total_net_paid_inc_tax
-    FROM
-        store_sales AS ss
-        JOIN customer AS c ON ss.ss_customer_sk = c.c_customer_sk
-    WHERE
-        c.c_last_review_date > 2452570
-        AND ss.ss_sold_date_sk BETWEEN 2452000 AND 2452100
+      i.i_item_id                                 AS item_id,
+      i.i_product_name                           AS product_name,
+      sm.sm_carrier                              AS carrier,
+      SUM(ws.ws_ext_sales_price)                 AS total_sales,
+      COUNT(*)                                   AS cnt_sales,
+      CASE
+        WHEN regexp_like(i.i_product_name, '^.*[A-Z]{3}.*$') THEN 'HAS3CAPS'
+        ELSE 'OTHER'
+      END                                        AS product_type
+    FROM web_sales ws
+    JOIN item i
+      ON ws.ws_item_sk = i.i_item_sk
+    JOIN ship_mode sm
+      ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN time_dim t
+      ON ws.ws_sold_time_sk = t.t_time_sk
+    WHERE sm.sm_carrier LIKE 'U%'                     -- carriers that start with "U"
+      AND i.i_item_desc LIKE '%steel%'                -- description contains the word "steel"
+      AND t.t_am_pm = 'PM'
     GROUP BY
-        c.c_customer_id
-    HAVING
-        SUM(ss.ss_net_paid_inc_tax) > 5000
-),
-sales_b AS (
+      i.i_item_id,
+      i.i_product_name,
+      sm.sm_carrier,
+      CASE
+        WHEN regexp_like(i.i_product_name, '^.*[A-Z]{3}.*$') THEN 'HAS3CAPS'
+        ELSE 'OTHER'
+      END
+  ),
+
+  sales_by_item_alt AS (
     SELECT
-        c.c_customer_id,
-        SUM(ss.ss_net_paid_inc_tax) AS total_net_paid_inc_tax
-    FROM
-        store_sales AS ss
-        JOIN customer AS c ON ss.ss_customer_sk = c.c_customer_sk
-    WHERE
-        c.c_preferred_cust_flag = 'Y'
-        AND ss.ss_ext_list_price > 5000
+      i.i_item_id                                 AS item_id,
+      i.i_product_name                           AS product_name,
+      sm.sm_carrier                              AS carrier,
+      SUM(ws.ws_ext_sales_price)                 AS total_sales,
+      COUNT(*)                                   AS cnt_sales,
+      CASE
+        WHEN regexp_like(i.i_item_desc, '.*[0-9]{2,}.*') THEN 'NUMERIC_DESC'
+        ELSE 'NON_NUMERIC'
+      END                                        AS product_type
+    FROM web_sales ws
+    JOIN item i
+      ON ws.ws_item_sk = i.i_item_sk
+    JOIN ship_mode sm
+      ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN time_dim t
+      ON ws.ws_sold_time_sk = t.t_time_sk
+    WHERE sm.sm_carrier LIKE '%S'                     -- carriers that end with "S"
+      AND regexp_like(i.i_product_name, '^.*[0-9]+.*$')
+      AND t.t_am_pm = 'AM'
     GROUP BY
-        c.c_customer_id
-    HAVING
-        SUM(ss.ss_net_paid_inc_tax) BETWEEN 1000 AND 5000
-)
-SELECT DISTINCT
-    customer_id,
-    total_net_paid_inc_tax
+      i.i_item_id,
+      i.i_product_name,
+      sm.sm_carrier,
+      CASE
+        WHEN regexp_like(i.i_item_desc, '.*[0-9]{2,}.*') THEN 'NUMERIC_DESC'
+        ELSE 'NON_NUMERIC'
+      END
+  )
+
+SELECT
+  item_id,
+  product_name,
+  carrier,
+  total_sales,
+  cnt_sales,
+  product_type,
+  CONCAT('Item-', CAST(item_id AS VARCHAR))          AS item_key,
+  ROW_NUMBER() OVER (PARTITION BY carrier ORDER BY total_sales DESC) AS rn_per_carrier
 FROM (
-    SELECT c_customer_id AS customer_id, total_net_paid_inc_tax FROM sales_a
-    UNION ALL
-    SELECT c_customer_id AS customer_id, total_net_paid_inc_tax FROM sales_b
+  SELECT * FROM sales_by_item
+  UNION ALL
+  SELECT * FROM sales_by_item_alt
 ) AS combined
-ORDER BY total_net_paid_inc_tax DESC
+ORDER BY total_sales DESC
 LIMIT 100

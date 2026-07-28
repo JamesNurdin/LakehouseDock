@@ -1,70 +1,36 @@
-WITH sales AS (
+WITH returns_agg AS (
     SELECT
-        cs.cs_sold_date_sk,
-        cs.cs_sold_time_sk,
-        cs.cs_ship_date_sk,
-        cs.cs_bill_cdemo_sk,
-        cs.cs_ship_cdemo_sk,
-        cs.cs_ship_mode_sk,
-        cs.cs_item_sk,
-        cs.cs_order_number,
-        cs.cs_net_paid,
-        cs.cs_ext_list_price,
-        cs.cs_quantity
-    FROM catalog_sales cs
-    WHERE cs.cs_ext_list_price > 5000
-      AND cs.cs_quantity >= 1
-),
-returns AS (
-    SELECT
-        cr.cr_returned_date_sk,
-        cr.cr_returned_time_sk,
-        cr.cr_item_sk,
-        cr.cr_order_number,
-        cr.cr_return_quantity,
-        cr.cr_net_loss,
-        cr.cr_refunded_cdemo_sk,
-        cr.cr_returning_cdemo_sk,
-        cr.cr_ship_mode_sk
-    FROM catalog_returns cr
-    WHERE cr.cr_return_quantity > 0
-      AND cr.cr_net_loss IS NOT NULL
+        wr_order_number,
+        SUM(wr_return_amt) AS total_return_amt,
+        SUM(wr_net_loss) AS total_net_loss
+    FROM web_returns
+    WHERE wr_return_tax > 50
+    GROUP BY wr_order_number
 )
 SELECT
-    sm.sm_type,
-    cd.cd_gender,
-    CASE WHEN cr.cr_net_loss > 1000 THEN 'High' ELSE 'Low' END AS loss_category,
-    SUM(cr.cr_net_loss) AS total_net_loss,
-    AVG(cs.cs_net_paid) AS avg_net_paid,
-    COUNT(DISTINCT cs.cs_order_number) AS orders_count,
-    MIN(cs.cs_ext_list_price) AS min_list_price,
-    MAX(cs.cs_ext_list_price) AS max_list_price
-FROM returns cr
-JOIN sales cs
-    ON cr.cr_order_number = cs.cs_order_number
-   AND cr.cr_item_sk = cs.cs_item_sk
-JOIN date_dim d_ret
-    ON cr.cr_returned_date_sk = d_ret.d_date_sk
-JOIN time_dim t_ret
-    ON cr.cr_returned_time_sk = t_ret.t_time_sk
-JOIN ship_mode sm
-    ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN customer_demographics cd
-    ON cr.cr_refunded_cdemo_sk = cd.cd_demo_sk
-JOIN store s
-    ON s.s_closed_date_sk = d_ret.d_date_sk
-JOIN date_dim d_sales
-    ON cs.cs_sold_date_sk = d_sales.d_date_sk
-JOIN time_dim t_sales
-    ON cs.cs_sold_time_sk = t_sales.t_time_sk
-WHERE d_ret.d_fy_year = 1911
-  AND t_ret.t_meal_time = 'dinner'
-  AND sm.sm_type = 'AIR'
-  AND cd.cd_gender = 'M'
-  AND d_sales.d_fy_year = 1911
-  AND t_sales.t_hour BETWEEN 12 AND 14
-GROUP BY sm.sm_type,
-         cd.cd_gender,
-         CASE WHEN cr.cr_net_loss > 1000 THEN 'High' ELSE 'Low' END
-ORDER BY total_net_loss DESC
+    w.w_warehouse_name,
+    hd.hd_buy_potential,
+    COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+    SUM(ws.ws_ext_sales_price) AS total_sales,
+    SUM(ws.ws_net_profit) AS total_profit,
+    SUM(COALESCE(r.total_return_amt, 0)) AS total_return_amount,
+    SUM(COALESCE(r.total_net_loss, 0)) AS total_return_loss
+FROM web_sales ws
+JOIN warehouse w
+  ON ws.ws_warehouse_sk = w.w_warehouse_sk
+JOIN household_demographics hd
+  ON ws.ws_bill_hdemo_sk = hd.hd_demo_sk
+LEFT JOIN returns_agg r
+  ON ws.ws_order_number = r.wr_order_number
+WHERE w.w_warehouse_sq_ft > 600000
+  AND w.w_county = 'Bronx County'
+  AND hd.hd_buy_potential = '>10000'
+  AND ws.ws_quantity >= 2
+  AND NOT EXISTS (
+        SELECT 1 FROM web_returns wr
+        WHERE wr.wr_order_number = ws.ws_order_number
+          AND wr.wr_return_amt_inc_tax > 1000
+    )
+GROUP BY w.w_warehouse_name, hd.hd_buy_potential
+ORDER BY total_sales DESC
 LIMIT 100

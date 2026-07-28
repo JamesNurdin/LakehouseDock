@@ -1,72 +1,65 @@
-WITH sr_agg AS (
+WITH base_sales AS (
     SELECT
-        sr_returned_date_sk,
-        sr_store_sk,
-        sr_return_time_sk,
-        sr_item_sk,
-        SUM(sr_return_amt)        AS total_return_amt,
-        SUM(sr_return_quantity)   AS total_quantity,
-        COUNT(*)                  AS return_cnt
-    FROM store_returns
-    GROUP BY
-        sr_returned_date_sk,
-        sr_store_sk,
-        sr_return_time_sk,
-        sr_item_sk
+        cs.cs_order_number,
+        cs.cs_net_profit,
+        cs.cs_ext_sales_price,
+        cr.cr_return_amount,
+        ws.ws_net_profit,
+        wr.wr_return_amt,
+        i.i_item_id,
+        i.i_category,
+        i.i_brand,
+        p.p_promo_name,
+        d_year.d_year,
+        hd_bill.hd_buy_potential,
+        hd_ship.hd_vehicle_count,
+        cs.cs_bill_customer_sk AS bill_cust_sk
+    FROM catalog_sales cs
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN promotion p ON cs.cs_promo_sk = p.p_promo_sk
+    JOIN date_dim d_year ON cs.cs_sold_date_sk = d_year.d_date_sk
+    JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+    LEFT JOIN catalog_returns cr
+        ON cs.cs_order_number = cr.cr_order_number
+        AND cs.cs_item_sk = cr.cr_item_sk
+    JOIN store_returns sr
+        ON sr.sr_item_sk = i.i_item_sk
+        AND sr.sr_returned_date_sk = d_year.d_date_sk
+    JOIN web_sales ws
+        ON ws.ws_item_sk = i.i_item_sk
+        AND ws.ws_sold_date_sk = d_year.d_date_sk
+    LEFT JOIN web_returns wr
+        ON ws.ws_order_number = wr.wr_order_number
+        AND ws.ws_item_sk = wr.wr_item_sk
+    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    JOIN web_site we ON ws.ws_web_site_sk = we.web_site_sk
+    JOIN date_dim d_site_open ON we.web_open_date_sk = d_site_open.d_date_sk
+    JOIN date_dim d_site_close ON we.web_close_date_sk = d_site_close.d_date_sk
+    JOIN household_demographics hd_bill ON cs.cs_bill_hdemo_sk = hd_bill.hd_demo_sk
+    JOIN household_demographics hd_ship ON cs.cs_ship_hdemo_sk = hd_ship.hd_demo_sk
+    WHERE d_year.d_year = 2000
+      AND p.p_discount_active = 'Y'
 )
 SELECT
-    d_ret.d_date,
-    s.s_store_name,
-    i.i_product_name,
-    t.t_hour,
-    ws.web_name,
-    SUM(sa.total_return_amt) AS sum_return_amt,
-    SUM(sa.total_quantity)   AS sum_quantity,
-    COUNT(*)                 AS num_rows,
-    MIN(sa.total_return_amt) AS min_return_amt,
-    MAX(sa.total_return_amt) AS max_return_amt,
-    AVG(sa.total_return_amt) AS avg_return_amt,
-    (
-        SELECT MAX(p2.p_cost)
-        FROM promotion p2
-        WHERE p2.p_item_sk = i.i_item_sk
-    ) AS max_item_promo_cost
-FROM sr_agg sa
-JOIN date_dim d_ret
-    ON sa.sr_returned_date_sk = d_ret.d_date_sk
-JOIN time_dim t
-    ON sa.sr_return_time_sk = t.t_time_sk
-JOIN item i
-    ON sa.sr_item_sk = i.i_item_sk
-JOIN store s
-    ON sa.sr_store_sk = s.s_store_sk
-JOIN date_dim d_closed
-    ON s.s_closed_date_sk = d_closed.d_date_sk
-JOIN promotion p
-    ON p.p_item_sk = i.i_item_sk
-    AND p.p_start_date_sk = d_ret.d_date_sk
-JOIN date_dim d_promo_end
-    ON p.p_end_date_sk = d_promo_end.d_date_sk
-JOIN web_page wp
-    ON wp.wp_creation_date_sk = d_ret.d_date_sk
-JOIN date_dim d_page_access
-    ON wp.wp_access_date_sk = d_page_access.d_date_sk
-JOIN web_site ws
-    ON ws.web_open_date_sk = d_ret.d_date_sk
-JOIN date_dim d_site_close
-    ON ws.web_close_date_sk = d_site_close.d_date_sk
-WHERE
-    d_ret.d_year = 2001
-    AND i.i_wholesale_cost > 1.00
-    AND p.p_channel_email = 'Y'
-    AND s.s_state = 'CA'
-    AND t.t_hour BETWEEN 9 AND 17
-    AND d_ret.d_holiday = 'N'
-GROUP BY
-    d_ret.d_date,
-    s.s_store_name,
-    i.i_product_name,
-    t.t_hour,
-    ws.web_name,
-    i.i_item_sk
+    i_item_id,
+    i_category,
+    i_brand,
+    p_promo_name,
+    d_year,
+    SUM(cs_net_profit) AS total_net_profit,
+    SUM(cs_ext_sales_price) AS total_sales,
+    SUM(cr_return_amount) AS total_return_amount,
+    SUM(ws_net_profit) AS total_web_net_profit,
+    SUM(wr_return_amt) AS total_web_return_amount,
+    COUNT(DISTINCT cs_order_number) AS order_cnt,
+    AVG(CASE WHEN hd_buy_potential = '1001-5000' THEN 1 ELSE 0 END) AS pct_buy_potential_1001_5000
+FROM base_sales
+WHERE EXISTS (
+    SELECT 1 FROM customer c
+    WHERE c.c_customer_sk = base_sales.bill_cust_sk
+      AND c.c_preferred_cust_flag = 'Y'
+)
+GROUP BY i_item_id, i_category, i_brand, p_promo_name, d_year
+HAVING SUM(cs_net_profit) > 10000
+ORDER BY total_net_profit DESC
 LIMIT 100

@@ -1,35 +1,28 @@
-WITH store_data AS (
-   SELECT
-       r.r_reason_desc AS reason_desc,
-       ca.ca_city AS city,
-       sr.sr_net_loss AS net_loss,
-       1 AS return_cnt
-   FROM store_returns sr
-   JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
-   JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk
-   WHERE r.r_reason_desc LIKE '%size%'
-),
-web_data AS (
-   SELECT
-       r.r_reason_desc AS reason_desc,
-       ca.ca_city AS city,
-       wr.wr_net_loss AS net_loss,
-       1 AS return_cnt
-   FROM web_returns wr
-   JOIN reason r ON wr.wr_reason_sk = r.r_reason_sk
-   JOIN customer_address ca ON wr.wr_returning_addr_sk = ca.ca_address_sk
-   WHERE ca.ca_city IN ('Oakland', 'Fairview')
-)
+/*
+  goal: Summarize sales performance by manufacturer, warehouse state, and hour of day, applying realistic selective filters on product, cost, warehouse size, and time.
+*/
 SELECT
-   reason_desc,
-   city,
-   SUM(net_loss) AS total_net_loss,
-   SUM(return_cnt) AS total_returns
-FROM (
-   SELECT * FROM store_data
-   UNION ALL
-   SELECT * FROM web_data
-) AS combined
-GROUP BY reason_desc, city
-ORDER BY total_net_loss DESC
-LIMIT 20
+  i.i_manufact AS manufacturer,
+  w.w_state AS warehouse_state,
+  t.t_hour AS hour_of_day,
+  SUM(cs.cs_ext_sales_price) AS total_sales_amount,
+  SUM(cs.cs_quantity) AS total_quantity_sold,
+  AVG(cs.cs_net_profit) AS avg_net_profit,
+  COUNT(DISTINCT cs.cs_order_number) AS distinct_orders,
+  MIN(cs.cs_ext_discount_amt) AS min_discount_amount,
+  MAX(cs.cs_ext_discount_amt) AS max_discount_amount
+FROM catalog_sales cs
+JOIN item i
+  ON cs.cs_item_sk = i.i_item_sk
+JOIN time_dim t
+  ON cs.cs_sold_time_sk = t.t_time_sk
+JOIN warehouse w
+  ON cs.cs_warehouse_sk = w.w_warehouse_sk
+WHERE i.i_manufact = 'antiablecally'
+  AND i.i_class_id IN (1, 4)
+  AND cs.cs_ext_wholesale_cost > 1000.00
+  AND w.w_warehouse_sq_ft BETWEEN 600000 AND 700000
+  AND t.t_hour BETWEEN 9 AND 17
+GROUP BY i.i_manufact, w.w_state, t.t_hour
+ORDER BY total_sales_amount DESC
+LIMIT 100

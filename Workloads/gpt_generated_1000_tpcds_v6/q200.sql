@@ -1,81 +1,55 @@
-WITH sales_data AS (
-   SELECT
-       ss.ss_ticket_number,
-       ss.ss_sold_date_sk,
-       ss.ss_item_sk,
-       ss.ss_store_sk,
-       ss.ss_customer_sk,
-       ss.ss_quantity,
-       ss.ss_ext_sales_price,
-       ss.ss_net_profit,
-       d_sales.d_year,
-       i.i_item_id,
-       i.i_product_name,
-       i.i_category,
-       c.c_first_name,
-       c.c_last_name,
-       cd.cd_gender,
-       ca.ca_state,
-       s.s_store_name,
-       s.s_state,
-       inv.inv_quantity_on_hand,
-       cc.cc_name AS call_center_name,
-       cp.cp_catalog_number,
-       wp.wp_url
-   FROM store_sales ss
-   JOIN date_dim d_sales
-     ON ss.ss_sold_date_sk = d_sales.d_date_sk
-   JOIN item i
-     ON ss.ss_item_sk = i.i_item_sk
-   JOIN customer c
-     ON ss.ss_customer_sk = c.c_customer_sk
-   JOIN customer_demographics cd
-     ON ss.ss_cdemo_sk = cd.cd_demo_sk
-   JOIN customer_address ca
-     ON ss.ss_addr_sk = ca.ca_address_sk
-   JOIN store s
-     ON ss.ss_store_sk = s.s_store_sk
-   LEFT JOIN inventory inv
-     ON inv.inv_item_sk = ss.ss_item_sk
-    AND inv.inv_date_sk = d_sales.d_date_sk
-   LEFT JOIN call_center cc
-     ON cc.cc_open_date_sk = d_sales.d_date_sk
-   LEFT JOIN catalog_page cp
-     ON cp.cp_start_date_sk = d_sales.d_date_sk
-   LEFT JOIN web_page wp
-     ON wp.wp_creation_date_sk = d_sales.d_date_sk
-    AND wp.wp_customer_sk = c.c_customer_sk
+WITH max_price AS (
+    SELECT MAX(i_current_price) AS mx_price
+    FROM item
+    WHERE i_brand = 'Brand#12'
 )
 SELECT
-    d_return.d_year AS return_year,
-    sd.s_store_name,
-    sd.i_category,
-    CASE WHEN sd.s_state = 'CA' THEN 'West' ELSE 'Other' END AS region_group,
-    COUNT(DISTINCT sd.ss_ticket_number) AS orders,
-    SUM(sd.ss_ext_sales_price) AS total_sales,
-    SUM(sr.sr_return_amt) AS total_returns,
-    SUM(sd.ss_net_profit) - SUM(sr.sr_return_amt) AS net_profit_after_returns,
-    AVG(sd.inv_quantity_on_hand) AS avg_inventory_on_hand,
-    (SELECT AVG(i_current_price) FROM item) AS avg_item_price,
-    MAX(sr.sr_returned_date_sk) FILTER (WHERE sr.sr_return_amt > 0) AS latest_return_date_sk
-FROM sales_data sd
-JOIN store_returns sr
-  ON sr.sr_ticket_number = sd.ss_ticket_number
- AND sr.sr_item_sk = sd.ss_item_sk
- AND sr.sr_store_sk = sd.ss_store_sk
- AND sr.sr_customer_sk = sd.ss_customer_sk
-JOIN date_dim d_return
-  ON sr.sr_returned_date_sk = d_return.d_date_sk
-WHERE EXISTS (
-    SELECT 1
-    FROM store_returns sr2
-    WHERE sr2.sr_store_sk = sd.ss_store_sk
-      AND sr2.sr_returned_date_sk = d_return.d_date_sk
-)
+    s.s_store_id,
+    d_sr.d_year,
+    COUNT(DISTINCT ws.ws_order_number) AS distinct_web_orders,
+    SUM(sr.sr_net_loss) AS total_store_return_loss,
+    SUM(cs.cs_net_profit) AS total_catalog_sales_profit,
+    SUM(ws.ws_net_paid) AS total_web_sales,
+    AVG(i_sr.i_current_price) AS avg_item_price,
+    MAX(p.p_discount_active) FILTER (WHERE p.p_discount_active IS NOT NULL) AS any_discount_active
+FROM store_returns sr
+JOIN date_dim d_sr
+    ON sr.sr_returned_date_sk = d_sr.d_date_sk
+JOIN store s
+    ON sr.sr_store_sk = s.s_store_sk
+JOIN household_demographics hd_sr
+    ON sr.sr_hdemo_sk = hd_sr.hd_demo_sk
+JOIN item i_sr
+    ON sr.sr_item_sk = i_sr.i_item_sk
+JOIN catalog_sales cs
+    ON cs.cs_item_sk = i_sr.i_item_sk
+JOIN date_dim d_cs
+    ON cs.cs_sold_date_sk = d_cs.d_date_sk
+JOIN call_center cc
+    ON cs.cs_call_center_sk = cc.cc_call_center_sk
+JOIN catalog_page cp
+    ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+JOIN ship_mode sm
+    ON cs.cs_ship_mode_sk = sm.sm_ship_mode_sk
+JOIN promotion p
+    ON cs.cs_promo_sk = p.p_promo_sk
+JOIN web_sales ws
+    ON ws.ws_item_sk = i_sr.i_item_sk
+JOIN household_demographics hd_ws
+    ON ws.ws_bill_hdemo_sk = hd_ws.hd_demo_sk
+JOIN web_page wp
+    ON ws.ws_web_page_sk = wp.wp_web_page_sk
+JOIN web_site wsite
+    ON ws.ws_web_site_sk = wsite.web_site_sk
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM catalog_returns cr
+        WHERE cr.cr_item_sk = sr.sr_item_sk
+          AND cr.cr_returned_date_sk = sr.sr_returned_date_sk
+    )
+  AND i_sr.i_current_price > (SELECT mx_price FROM max_price)
 GROUP BY
-    d_return.d_year,
-    sd.s_store_name,
-    sd.i_category,
-    CASE WHEN sd.s_state = 'CA' THEN 'West' ELSE 'Other' END
-ORDER BY total_sales DESC
+    s.s_store_id,
+    d_sr.d_year
+ORDER BY total_store_return_loss DESC
 LIMIT 100

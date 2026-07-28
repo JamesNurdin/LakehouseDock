@@ -1,33 +1,33 @@
-WITH category_inventory AS (
-    SELECT
-        i.i_category AS category,
-        w.w_warehouse_name AS warehouse,
-        SUM(inv.inv_quantity_on_hand) AS total_qty,
-        (SELECT AVG(i2.i_current_price)
-         FROM item i2
-         WHERE i2.i_category = i.i_category) AS avg_price
-    FROM inventory inv
-    JOIN item i ON inv.inv_item_sk = i.i_item_sk
-    JOIN warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
-    WHERE i.i_category_id IN (1, 5, 6)
-      AND w.w_warehouse_sq_ft > 200000
-    GROUP BY i.i_category, w.w_warehouse_name
+WITH filtered_returns AS (
+    SELECT sr.*
+    FROM store_returns sr
+    WHERE sr.sr_fee > 20
+      AND sr.sr_return_quantity >= 2
+      AND sr.sr_refunded_cash < 5000
+      AND sr.sr_return_amt_inc_tax > 100
 )
-SELECT category, warehouse, total_qty, avg_price
-FROM category_inventory
-UNION ALL
 SELECT
-    i.i_category AS category,
-    w.w_warehouse_name AS warehouse,
-    SUM(inv.inv_quantity_on_hand) AS total_qty,
-    (SELECT AVG(i2.i_current_price)
-     FROM item i2
-     WHERE i2.i_category = i.i_category) AS avg_price
-FROM inventory inv
-JOIN item i ON inv.inv_item_sk = i.i_item_sk
-JOIN warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
-WHERE i.i_manager_id = 27
-  AND w.w_suite_number LIKE 'Suite %'
-GROUP BY i.i_category, w.w_warehouse_name
-ORDER BY total_qty DESC, category
+    ib.ib_income_band_sk,
+    hd.hd_buy_potential,
+    COUNT(DISTINCT fr.sr_ticket_number) AS num_returns,
+    SUM(fr.sr_return_amt) AS total_return_amt,
+    AVG(fr.sr_fee) AS avg_fee,
+    MIN(fr.sr_return_amt_inc_tax) AS min_return_inc_tax,
+    MAX(fr.sr_return_amt_inc_tax) AS max_return_inc_tax
+FROM filtered_returns fr
+JOIN household_demographics hd
+    ON fr.sr_hdemo_sk = hd.hd_demo_sk
+JOIN income_band ib
+    ON hd.hd_income_band_sk = ib.ib_income_band_sk
+WHERE ib.ib_lower_bound >= 60000
+  AND ib.ib_upper_bound <= 150000
+  AND hd.hd_buy_potential = '5001-10000'
+  AND NOT EXISTS (
+        SELECT 1
+        FROM income_band ib_ex
+        WHERE ib_ex.ib_income_band_sk = hd.hd_income_band_sk
+          AND ib_ex.ib_upper_bound < 80000
+      )
+GROUP BY ib.ib_income_band_sk, hd.hd_buy_potential
+ORDER BY total_return_amt DESC
 LIMIT 100

@@ -1,32 +1,43 @@
-WITH customer_income AS (
-    SELECT c.c_customer_sk,
-           ib.ib_lower_bound,
-           ib.ib_upper_bound
-    FROM customer c
-    JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
-    JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+WITH promo_sales AS (
+    SELECT
+        w.w_warehouse_name,
+        'PROMO' AS sale_type,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(*) AS sales_cnt
+    FROM web_sales ws
+    JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE p.p_discount_active = 'Y'
+      AND EXISTS (
+          SELECT 1
+          FROM web_page wp
+          WHERE wp.wp_web_page_sk = ws.ws_web_page_sk
+            AND wp.wp_max_ad_count > 1
+      )
+    GROUP BY w.w_warehouse_name
+),
+non_promo_sales AS (
+    SELECT
+        w.w_warehouse_name,
+        'NON_PROMO' AS sale_type,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(*) AS sales_cnt
+    FROM web_sales ws
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    LEFT JOIN promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE (p.p_promo_sk IS NULL OR p.p_discount_active <> 'Y')
+      AND EXISTS (
+          SELECT 1
+          FROM web_page wp
+          WHERE wp.wp_web_page_sk = ws.ws_web_page_sk
+            AND wp.wp_max_ad_count = 0
+      )
+    GROUP BY w.w_warehouse_name
 )
-SELECT
-    ci.ib_lower_bound,
-    ci.ib_upper_bound,
-    'High Ship Cost' AS segment,
-    SUM(sr.sr_return_amt) AS total_return_amount
-FROM store_returns sr
-JOIN customer_income ci ON sr.sr_customer_sk = ci.c_customer_sk
-WHERE sr.sr_return_ship_cost > 100
-GROUP BY ci.ib_lower_bound, ci.ib_upper_bound, 'High Ship Cost'
-
+SELECT *
+FROM promo_sales
 UNION ALL
-
-SELECT
-    ci.ib_lower_bound,
-    ci.ib_upper_bound,
-    'Low Tax' AS segment,
-    SUM(sr.sr_return_amt) AS total_return_amount
-FROM store_returns sr
-JOIN customer_income ci ON sr.sr_customer_sk = ci.c_customer_sk
-WHERE sr.sr_return_tax < 5
-GROUP BY ci.ib_lower_bound, ci.ib_upper_bound, 'Low Tax'
-
-ORDER BY total_return_amount DESC
+SELECT *
+FROM non_promo_sales
+ORDER BY sale_type, total_profit DESC
 LIMIT 100

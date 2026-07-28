@@ -1,66 +1,55 @@
-WITH cr_agg AS (
+WITH sales_agg AS (
     SELECT
-        cr_returned_date_sk,
-        cr_returning_cdemo_sk,
-        cr_returning_hdemo_sk,
-        cr_ship_mode_sk,
-        SUM(cr_return_amount)          AS total_return_amount,
-        COUNT(*)                       AS return_cnt
-    FROM catalog_returns
-    WHERE cr_return_quantity > 0
-    GROUP BY cr_returned_date_sk, cr_returning_cdemo_sk, cr_returning_hdemo_sk, cr_ship_mode_sk
+        'sales' AS src,
+        ws_site.web_name,
+        CONCAT(CAST(ib.ib_lower_bound AS varchar), '-', CAST(ib.ib_upper_bound AS varchar)) AS income_range,
+        SUM(ws.ws_net_profit) AS total_amount
+    FROM web_sales ws
+    JOIN customer c
+        ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN household_demographics hd
+        ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib
+        ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN web_site ws_site
+        ON ws.ws_web_site_sk = ws_site.web_site_sk
+    WHERE ib.ib_lower_bound >= 50000
+      AND ws_site.web_country = 'United States'
+    GROUP BY ws_site.web_name,
+             CONCAT(CAST(ib.ib_lower_bound AS varchar), '-', CAST(ib.ib_upper_bound AS varchar))
+    HAVING SUM(ws.ws_net_profit) > 10000
 ),
-wr_agg AS (
+returns_agg AS (
     SELECT
-        wr_returned_date_sk,
-        wr_returning_cdemo_sk,
-        wr_web_page_sk,
-        SUM(wr_return_amt)            AS total_web_return_amt,
-        COUNT(*)                       AS web_return_cnt
-    FROM web_returns
-    WHERE wr_return_quantity > 0
-    GROUP BY wr_returned_date_sk, wr_returning_cdemo_sk, wr_web_page_sk
+        'returns' AS src,
+        ws_site.web_name,
+        CONCAT(CAST(ib.ib_lower_bound AS varchar), '-', CAST(ib.ib_upper_bound AS varchar)) AS income_range,
+        SUM(wr.wr_net_loss) * -1 AS total_amount   -- convert loss to positive amount for comparison
+    FROM web_returns wr
+    JOIN web_sales ws
+        ON wr.wr_order_number = ws.ws_order_number
+    JOIN customer c
+        ON wr.wr_refunded_customer_sk = c.c_customer_sk
+    JOIN household_demographics hd
+        ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    JOIN income_band ib
+        ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    JOIN web_site ws_site
+        ON ws.ws_web_site_sk = ws_site.web_site_sk
+    WHERE ib.ib_lower_bound >= 50000
+      AND ws_site.web_country = 'United States'
+    GROUP BY ws_site.web_name,
+             CONCAT(CAST(ib.ib_lower_bound AS varchar), '-', CAST(ib.ib_upper_bound AS varchar))
+    HAVING SUM(wr.wr_net_loss) > 5000
 )
-SELECT DISTINCT
-    d.d_year,
-    sm.sm_code,
-    cd.cd_gender,
-    hd.hd_buy_potential,
-    ws.web_name,
-    p.p_promo_name,
-    cr_agg.total_return_amount,
-    cr_agg.return_cnt,
-    wr_agg.total_web_return_amt,
-    wr_agg.web_return_cnt,
-    CASE
-        WHEN (SELECT COUNT(*) FROM promotion WHERE p_discount_active = 'Y') > 5 THEN 'HIGH'
-        ELSE 'LOW'
-    END                                   AS promo_activity_level,
-    ROUND(cr_agg.total_return_amount / NULLIF(cr_agg.return_cnt, 0), 2) AS avg_return_amount
-FROM cr_agg
-JOIN ship_mode sm
-    ON cr_agg.cr_ship_mode_sk = sm.sm_ship_mode_sk
-JOIN customer_demographics cd
-    ON cr_agg.cr_returning_cdemo_sk = cd.cd_demo_sk
-JOIN household_demographics hd
-    ON cr_agg.cr_returning_hdemo_sk = hd.hd_demo_sk
-JOIN wr_agg
-    ON cr_agg.cr_returned_date_sk = wr_agg.wr_returned_date_sk
-   AND cr_agg.cr_returning_cdemo_sk = wr_agg.wr_returning_cdemo_sk
-JOIN web_page wp
-    ON wr_agg.wr_web_page_sk = wp.wp_web_page_sk
-JOIN date_dim d
-    ON cr_agg.cr_returned_date_sk = d.d_date_sk
-   AND wr_agg.wr_returned_date_sk = d.d_date_sk
-   AND wp.wp_creation_date_sk = d.d_date_sk
-JOIN web_site ws
-    ON ws.web_open_date_sk = d.d_date_sk
-JOIN promotion p
-    ON p.p_start_date_sk = d.d_date_sk
-WHERE sm.sm_code = 'AIR'
-  AND wp.wp_autogen_flag = 'Y'
-  AND cd.cd_gender = 'M'
-  AND d.d_year = 2001
-  AND ws.web_state = 'CA'
-ORDER BY cr_agg.total_return_amount DESC
+SELECT DISTINCT src,
+       web_name,
+       income_range,
+       total_amount
+FROM (
+    SELECT * FROM sales_agg
+    UNION ALL
+    SELECT * FROM returns_agg
+) u
+ORDER BY total_amount DESC
 LIMIT 100

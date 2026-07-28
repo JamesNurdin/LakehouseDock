@@ -1,35 +1,40 @@
-WITH sales_agg AS (
+WITH qualified_stores AS (
+    SELECT DISTINCT
+        s.s_store_sk,
+        s.s_store_id,
+        s.s_market_id,
+        s.s_state
+    FROM tpcds.store s
+    WHERE s.s_market_id IN (2, 4, 8)
+      AND s.s_state = 'CA'
+      AND s.s_rec_start_date >= DATE '1999-01-01'
+      AND s.s_rec_end_date <= DATE '2002-12-31'
+),
+sales_agg AS (
     SELECT
-        c.c_customer_sk,
-        c.c_first_name,
-        c.c_last_name,
-        d.d_year,
-        SUM(ws.ws_net_profit) AS total_profit,
-        SUM(ws.ws_quantity) AS total_quantity,
-        COUNT(*) AS order_count
-    FROM web_sales ws
-    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
-    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
-    JOIN web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
-    WHERE d.d_year BETWEEN 2000 AND 2002
-      AND d.d_month_seq BETWEEN 1200 AND 1220
-      AND c.c_current_cdemo_sk IN (213219, 1196373)
-      AND wp.wp_type = 'content'
-      AND wp.wp_char_count BETWEEN 1000 AND 5000
-      AND ws.ws_quantity >= 1
-      AND ws.ws_net_profit > 0
-    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, d.d_year
+        qs.s_store_id,
+        qs.s_market_id,
+        qs.s_state,
+        t.t_hour,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_customer_sk) AS unique_customers,
+        AVG(ss.ss_net_profit) AS avg_profit
+    FROM qualified_stores qs
+    JOIN tpcds.store_sales ss ON ss.ss_store_sk = qs.s_store_sk
+    JOIN tpcds.time_dim t ON ss.ss_sold_time_sk = t.t_time_sk
+    JOIN tpcds.household_demographics hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
+    WHERE hd.hd_income_band_sk BETWEEN 7 AND 20
+      AND hd.hd_vehicle_count >= 0
+      AND t.t_hour BETWEEN 8 AND 18
+    GROUP BY qs.s_store_id, qs.s_market_id, qs.s_state, t.t_hour
 )
 SELECT
-    c_customer_sk,
-    c_first_name,
-    c_last_name,
-    d_year,
-    total_profit,
-    total_quantity,
-    order_count,
-    ROW_NUMBER() OVER (PARTITION BY d_year ORDER BY total_profit DESC) AS profit_rank,
-    CASE WHEN total_profit > 10000 THEN 'HIGH' ELSE 'MEDIUM' END AS profit_category
-FROM sales_agg
-ORDER BY d_year, profit_rank
+    sa.s_market_id,
+    AVG(sa.total_sales) AS avg_total_sales,
+    SUM(sa.unique_customers) AS total_unique_customers,
+    MAX(sa.avg_profit) AS max_avg_profit_per_store
+FROM sales_agg sa
+GROUP BY sa.s_market_id
+HAVING AVG(sa.total_sales) > 10000
+ORDER BY avg_total_sales DESC
 LIMIT 100

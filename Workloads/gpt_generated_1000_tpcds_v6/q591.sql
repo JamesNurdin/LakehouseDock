@@ -1,63 +1,53 @@
-WITH base_data AS (
-    SELECT
-        d.d_year,
-        d.d_month_seq,
-        d.d_date,
-        ss.ss_item_sk,
-        ss.ss_quantity,
-        ss.ss_net_paid,
-        ss.ss_net_profit,
-        cr.cr_return_quantity,
-        cr.cr_net_loss,
-        wr.wr_return_quantity,
-        wr.wr_return_amt_inc_tax,
-        i.inv_quantity_on_hand,
-        wsite.web_state,
-        wsite.web_site_id
-    FROM tpcds.date_dim d
-    JOIN tpcds.store_sales ss ON ss.ss_sold_date_sk = d.d_date_sk
-    JOIN tpcds.catalog_returns cr ON cr.cr_returned_date_sk = d.d_date_sk
-    JOIN tpcds.web_sales ws ON ws.ws_sold_date_sk = d.d_date_sk
-    JOIN tpcds.web_returns wr ON wr.wr_returned_date_sk = d.d_date_sk
-        AND wr.wr_item_sk = ws.ws_item_sk
-        AND wr.wr_order_number = ws.ws_order_number
-    JOIN tpcds.inventory i ON i.inv_date_sk = d.d_date_sk
-    JOIN tpcds.web_site wsite ON wsite.web_site_sk = ws.ws_web_site_sk
-        AND wsite.web_open_date_sk = d.d_date_sk
-    WHERE d.d_year = 2001
-      AND d.d_month_seq BETWEEN 1200 AND 1300
-      AND i.inv_quantity_on_hand > 600
-      AND wsite.web_state = 'CA'
-      AND ss.ss_quantity >= 5
-      AND ws.ws_net_profit > 0
-),
-agg_data AS (
-    SELECT
-        bd.d_year,
-        bd.d_month_seq,
-        bd.web_state,
-        COUNT(DISTINCT bd.ss_item_sk) AS distinct_items_sold,
-        SUM(bd.ss_net_paid) AS total_sales,
-        AVG(bd.ss_net_profit) AS avg_profit,
-        SUM(CASE WHEN bd.cr_net_loss > 0 THEN bd.cr_net_loss ELSE 0 END) AS total_return_loss,
-        SUM(bd.wr_return_amt_inc_tax) AS total_web_return_amount,
-        (SELECT AVG(inv_quantity_on_hand) FROM tpcds.inventory) AS avg_inventory_all_dates
-    FROM base_data bd
-    GROUP BY bd.d_year, bd.d_month_seq, bd.web_state
-    HAVING COUNT(*) > 10
+WITH joined AS (
+  SELECT
+    i.i_item_sk,
+    i.i_manufact_id,
+    cp.cp_department,
+    cd.cd_gender,
+    cs.cs_order_number,
+    cs.cs_ext_sales_price,
+    cs.cs_net_paid,
+    ss.ss_quantity,
+    ss.ss_net_paid,
+    wr.wr_return_amt,
+    wr.wr_return_ship_cost
+  FROM catalog_sales cs
+  JOIN catalog_page cp ON cs.cs_catalog_page_sk = cp.cp_catalog_page_sk
+  JOIN item i ON cs.cs_item_sk = i.i_item_sk
+  JOIN customer_demographics cd ON cs.cs_bill_cdemo_sk = cd.cd_demo_sk
+  JOIN store_sales ss ON ss.ss_item_sk = i.i_item_sk
+  JOIN web_returns wr ON wr.wr_item_sk = i.i_item_sk
+  WHERE i.i_manufact_id IN (264, 214)
+    AND i.i_rec_end_date >= DATE '1999-01-01'
+    AND cp.cp_department = 'Electronics'
+    AND cs.cs_ship_date_sk BETWEEN 2450845 AND 2450899
+    AND cd.cd_gender = 'M'
+    AND ss.ss_quantity > 2
+    AND wr.wr_return_ship_cost > 100
 )
 SELECT
-    a.d_year,
-    a.d_month_seq,
-    a.web_state,
-    a.distinct_items_sold,
-    a.total_sales,
-    a.avg_profit,
-    a.total_return_loss,
-    a.total_web_return_amount,
-    a.avg_inventory_all_dates,
-    SUM(a.total_sales) OVER (PARTITION BY a.web_state ORDER BY a.d_month_seq
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_sales_state
-FROM agg_data a
-ORDER BY a.d_year, a.d_month_seq
+  i_item_sk,
+  i_manufact_id,
+  cp_department,
+  cd_gender,
+  COUNT(DISTINCT cs_order_number) AS distinct_orders,
+  SUM(cs_net_paid) AS total_cs_net_paid,
+  SUM(ss_net_paid) AS total_ss_net_paid,
+  SUM(wr_return_amt) AS total_wr_return_amt,
+  AVG(cs_ext_sales_price) AS avg_cs_ext_sales_price,
+  CASE
+    WHEN SUM(cs_ext_sales_price) > (
+      SELECT AVG(cs2.cs_ext_sales_price)
+      FROM catalog_sales cs2
+      WHERE cs2.cs_item_sk = j.i_item_sk
+    ) THEN 'Above Avg'
+    ELSE 'Below Avg'
+  END AS sales_price_category
+FROM joined j
+GROUP BY
+  i_item_sk,
+  i_manufact_id,
+  cp_department,
+  cd_gender
+ORDER BY total_cs_net_paid DESC
 LIMIT 100

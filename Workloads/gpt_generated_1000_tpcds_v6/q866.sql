@@ -1,39 +1,72 @@
-WITH filtered_returns AS (
+WITH cat_sales AS (
     SELECT
-        cr.cr_return_amount,
-        cr.cr_return_quantity,
-        cr.cr_refunded_cdemo_sk,
-        cc.cc_name,
-        cc.cc_company_name,
-        i.i_brand,
-        i.i_current_price,
-        sm.sm_carrier,
-        sm.sm_code
-    FROM catalog_returns cr
-    JOIN call_center cc ON cr.cr_call_center_sk = cc.cc_call_center_sk
-    JOIN item i ON cr.cr_item_sk = i.i_item_sk
-    JOIN ship_mode sm ON cr.cr_ship_mode_sk = sm.sm_ship_mode_sk
-    WHERE i.i_current_price > 100.00
-      AND sm.sm_code = 'AIR'
-      AND cc.cc_company_name = 'anti'
-      AND cr.cr_return_amount > 50.00
+        i.i_item_id,
+        i.i_item_sk,
+        w.w_warehouse_name,
+        SUM(cs.cs_net_profit) AS total_net_profit,
+        CASE WHEN SUM(cs.cs_net_profit) > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_category,
+        'Catalog' AS sales_channel,
+        (SELECT AVG(cs2.cs_net_profit)
+         FROM catalog_sales cs2
+         WHERE cs2.cs_item_sk = i.i_item_sk) AS avg_item_profit
+    FROM catalog_sales cs
+    JOIN item i ON cs.cs_item_sk = i.i_item_sk
+    JOIN warehouse w ON cs.cs_warehouse_sk = w.w_warehouse_sk
+    WHERE cs.cs_sold_date_sk BETWEEN 2450815 AND 2451088
+      AND NOT EXISTS (
+            SELECT 1
+            FROM inventory inv
+            WHERE inv.inv_item_sk = cs.cs_item_sk
+              AND inv.inv_warehouse_sk = cs.cs_warehouse_sk
+        )
+    GROUP BY i.i_item_id, i.i_item_sk, w.w_warehouse_name
+),
+web_sales_agg AS (
+    SELECT
+        i.i_item_id,
+        i.i_item_sk,
+        w.w_warehouse_name,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        CASE WHEN SUM(ws.ws_net_profit) > 0 THEN 'Profitable' ELSE 'Loss' END AS profit_category,
+        'Web' AS sales_channel,
+        (SELECT AVG(ws2.ws_net_profit)
+         FROM web_sales ws2
+         WHERE ws2.ws_item_sk = i.i_item_sk) AS avg_item_profit
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE ws.ws_sold_date_sk BETWEEN 2450815 AND 2451088
+      AND NOT EXISTS (
+            SELECT 1
+            FROM inventory inv
+            WHERE inv.inv_item_sk = ws.ws_item_sk
+              AND inv.inv_warehouse_sk = ws.ws_warehouse_sk
+        )
+    GROUP BY i.i_item_id, i.i_item_sk, w.w_warehouse_name
 )
-SELECT
-    fr.cc_name,
-    fr.sm_carrier,
-    fr.i_brand,
-    SUM(fr.cr_return_amount) AS total_return_amount,
-    COUNT(*) AS return_cnt,
-    AVG(fr.i_current_price) AS avg_price,
-    MIN(fr.cr_return_quantity) AS min_qty,
-    MAX(fr.cr_return_quantity) AS max_qty
-FROM filtered_returns fr
-WHERE EXISTS (
-    SELECT 1
-    FROM customer_demographics cd
-    WHERE cd.cd_demo_sk = fr.cr_refunded_cdemo_sk
-      AND cd.cd_purchase_estimate > 5000
-)
-GROUP BY fr.cc_name, fr.sm_carrier, fr.i_brand
-ORDER BY total_return_amount DESC
+SELECT DISTINCT
+    item_id,
+    warehouse_name,
+    total_net_profit,
+    profit_category,
+    sales_channel,
+    avg_item_profit
+FROM (
+    SELECT i_item_id AS item_id,
+           w_warehouse_name AS warehouse_name,
+           total_net_profit,
+           profit_category,
+           sales_channel,
+           avg_item_profit
+    FROM cat_sales
+    UNION ALL
+    SELECT i_item_id AS item_id,
+           w_warehouse_name AS warehouse_name,
+           total_net_profit,
+           profit_category,
+           sales_channel,
+           avg_item_profit
+    FROM web_sales_agg
+) combined
+ORDER BY profit_category, total_net_profit DESC
 LIMIT 100
