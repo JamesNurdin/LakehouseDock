@@ -1,0 +1,1 @@
+SELECT DISTINCT c.c_customer_id, c.c_first_name, c.c_last_name, cd.cd_gender, cd.cd_marital_status, cd.cd_dep_employed_count, c.c_last_review_date FROM tpcds.customer AS c JOIN tpcds.customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk WHERE cd.cd_marital_status = 'M' AND cd.cd_dep_employed_count >= 3 AND c.c_last_review_date = 2452361 LIMIT 100
