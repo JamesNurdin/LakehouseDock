@@ -50,9 +50,10 @@ from trino_stack.profile import NodeProfiler
 from trino_stack.resource_logger import NodeLogger
 from trino_stack.resource_profile import LakehouseResourceProfiler
 
-# query_generator (v9: validity-gated lever curriculum + per-candidate token/
-# validity accounting; plan_feedback=False == v6)
-from workload_generation.query_generator_v9 import (
+# query_generator (v9_1: dose-corrected validity gate -- forced first lever (A)
+# + threshold-gated deeper levels (C); per-candidate token/validity accounting;
+# plan_feedback=False == v6)
+from workload_generation.query_generator_v9_1 import (
     load_schema,
     make_openai_client,
     warm_up_model,
@@ -61,7 +62,7 @@ from workload_generation.query_generator_v9 import (
     write_workload_directory,
     fetch_table_columns,
     fetch_schema_table_columns,
-    DiversityTrackerV9,
+    DiversityTrackerV91,
 )
 
 @dataclass
@@ -714,7 +715,7 @@ class Lakehouse:
         rng = random.Random(random_seed)
 
         
-        tracker = DiversityTrackerV9()
+        tracker = DiversityTrackerV91()
         tracker.feedback_enabled = plan_feedback
 
 

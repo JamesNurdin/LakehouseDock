@@ -715,10 +715,12 @@ def write_workload_directory(
     tracker: DiversityTrackerV9 | None = None,
     queries: list[dict],
     extra_report_fields: dict | None = None,
+    generator_version: str = GENERATOR_VERSION,
+    feedback_overrides: dict | None = None,
     **kwargs,
 ):
     extra = dict(extra_report_fields or {})
-    extra["generator"] = GENERATOR_VERSION
+    extra["generator"] = generator_version
 
     fb = {
         "mechanism": "validity-gated lever curriculum (Thompson per-depth gates) + Vendi-aligned 3-gram reward",
@@ -729,6 +731,8 @@ def write_workload_directory(
         "softmax_temp": V9_SOFTMAX_TEMP,
         "ceiling_source": "workload_generation.resources (operators_ground_truth.csv + lever_operator_map.csv)",
     }
+    if feedback_overrides:
+        fb.update(feedback_overrides)
     if tracker is not None:
         fb.update(tracker.plan_feedback_snapshot())
         fb["feedback_enabled"] = tracker.feedback_enabled
