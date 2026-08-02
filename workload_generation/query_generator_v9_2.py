@@ -58,7 +58,6 @@ from workload_generation.query_generator import (
     register_retry_observer,
     unregister_retry_observer,
     last_retry_count,
-    set_retry_max_default,
 )
 from workload_generation.query_generator_v9_1 import (
     DiversityTrackerV91,
@@ -100,11 +99,6 @@ V92_CONC_START = 8               # initial in-flight target (clamped to ceiling)
 V92_CONC_BETA = 0.5              # multiplicative-decrease factor on contention
 V92_CONC_PROBE_INTERVAL_S = 12.0  # additive-increase (+1) cadence when healthy
 V92_CONC_COOLDOWN_S = 25.0       # after a cut: debounce cuts + pause increases
-# Fail-fast retry budget for generation calls. With an AIMD pool the pool is the
-# backoff, so a contended call should give up quickly (freeing its worker so
-# in-flight actually drops to the throttled limit) rather than re-sending up to
-# 2000x and defeating the throttle. Restored to the previous default afterwards.
-V92_RETRY_MAX = 2
 
 
 class ConcurrencyController:
@@ -538,9 +532,6 @@ def generate_query_batch(
         start=min(max(1, generation_workers), V92_CONC_START),
     )
     register_retry_observer(controller.on_contention)
-    # Fail fast so contended calls free their worker instead of re-sending under
-    # throttle (the pool re-submits fresh queries). Restored in the finally.
-    _prev_retry_max = set_retry_max_default(V92_RETRY_MAX)
 
     executor = ThreadPoolExecutor(max_workers=max(1, generation_workers))
     inflight: set = set()
@@ -596,7 +587,6 @@ def generate_query_batch(
             _emit("progress" if done else "tick")
     finally:
         unregister_retry_observer(controller.on_contention)
-        set_retry_max_default(_prev_retry_max)        # restore patient default
         # target met (or budget exhausted): stop scheduling; let the running
         # calls finish in the background (bounded tail, no barrier).
         try:
