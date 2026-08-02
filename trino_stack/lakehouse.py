@@ -50,10 +50,10 @@ from trino_stack.profile import NodeProfiler
 from trino_stack.resource_logger import NodeLogger
 from trino_stack.resource_profile import LakehouseResourceProfiler
 
-# query_generator (v9_1: dose-corrected validity gate -- forced first lever (A)
-# + threshold-gated deeper levels (C); per-candidate token/validity accounting;
+# query_generator (v9_2: v9_1 A+C validity gate + W1 continuous-pool scheduling
+# + W2 adaptive reasoning; per-candidate token/validity accounting;
 # plan_feedback=False == v6)
-from workload_generation.query_generator_v9_1 import (
+from workload_generation.query_generator_v9_2 import (
     load_schema,
     make_openai_client,
     warm_up_model,
@@ -62,7 +62,7 @@ from workload_generation.query_generator_v9_1 import (
     write_workload_directory,
     fetch_table_columns,
     fetch_schema_table_columns,
-    DiversityTrackerV91,
+    DiversityTrackerV92,
 )
 
 @dataclass
@@ -715,7 +715,7 @@ class Lakehouse:
         rng = random.Random(random_seed)
 
         
-        tracker = DiversityTrackerV91()
+        tracker = DiversityTrackerV92()
         tracker.feedback_enabled = plan_feedback
 
 
@@ -769,66 +769,36 @@ class Lakehouse:
                 }
             )
 
-        valid_queries = []
-        invalid_queries = []
-        batches_run = 0
-        total_candidates_generated = 0
+        # v9_2 (W1): one continuous saturating pool over the FULL request -- no
+        # outer per-batch barrier. generate_query_batch already validates each
+        # candidate via EXPLAIN (plan_valid) and returns only valid, deduped
+        # queries, so the previous validate_candidates_parallel re-EXPLAIN pass
+        # was redundant (it rejected 0) and is dropped. Validation counts now
+        # come from the tracker's per-candidate accounting.
+        if self.verbose:
+            print(f"Generating {num_queries} queries (continuous pool, "
+                  f"workers={generation_workers})")
 
-        while len(valid_queries) < num_queries:
-            batches_run += 1
+        valid_queries = generate_query_batch(
+            conn_factory=conn_factory,
+            schema_json=schema_json,
+            num_queries=num_queries,
+            catalog=catalog,
+            trino_schema=schema,
+            client_factory=client_factory,
+            model_name=model_name,
+            temperature=temperature,
+            reasoning=reasoning,
+            min_tables=min_tables,
+            max_tables=max_tables,
+            random_seed=rng.randint(0, 10**9),
+            ddl_cache=ddl_cache,
+            ddl_cache_lock=ddl_cache_lock,
+            generation_workers=generation_workers,
+            tracker=tracker,
+        )[:num_queries]
 
-            remaining_needed = num_queries - len(valid_queries)
-
-            # aim to generate what queries for what is remaining
-            current_batch_size = min(
-                batch_size,
-                remaining_needed,
-            )
-            
-            if self.verbose:
-                print(f"Generating {current_batch_size} queries")
-
-            candidates = generate_query_batch(
-                conn_factory=conn_factory,
-                schema_json=schema_json,
-                num_queries=current_batch_size,
-                catalog=catalog,
-                trino_schema=schema,
-                client_factory=client_factory,
-                model_name=model_name,
-                temperature=temperature,
-                reasoning=reasoning,
-                min_tables=min_tables,
-                max_tables=max_tables,
-                random_seed=rng.randint(0, 10**9),
-                ddl_cache=ddl_cache,
-                ddl_cache_lock=ddl_cache_lock,
-                generation_workers=generation_workers,
-                tracker=tracker,
-            )
-
-            total_candidates_generated += len(candidates)
-
-            hive_mod.wait_for_trino(
-                self.trino_host,
-                timeout_s=120,
-                poll_s=2,
-                verbose=self.verbose,
-            )
-            
-            if self.verbose:
-                print(f"Validating {current_batch_size} queries")
-
-            valid_batch, invalid_batch = self.validate_candidates_parallel(
-                candidates=candidates,
-                schema=schema,
-                validation_workers=validation_workers,
-            )
-            
-            valid_queries.extend(valid_batch)
-            invalid_queries.extend(invalid_batch)
-
-        valid_queries = valid_queries[:num_queries]
+        acc = tracker.generation_accounting_snapshot()
 
         print(f"Finished query generation")
 
@@ -852,16 +822,16 @@ class Lakehouse:
                 "plan_feedback_enabled": plan_feedback,
                 "validation": {
                     "enabled": True,
-                    "method": "EXPLAIN via Lakehouse.issue_query(save=False)",
+                    "method": "EXPLAIN inside generate_query_batch (single continuous pass; no redundant re-validation)",
                     "target_num_queries": num_queries,
                     "num_valid_queries_written": len(valid_queries),
-                    "num_invalid_queries_rejected": len(invalid_queries),
-                    "batches_run": batches_run,
-                    "batch_size": batch_size,
-                    "total_candidates_generated": total_candidates_generated,
+                    "num_invalid_queries_rejected": acc.get("invalid"),
+                    "total_candidates_generated": acc.get("total_candidates"),
+                    "candidate_validity_rate": acc.get("validity_rate"),
                 },
                 "parallelism": {
                     "generation_workers": generation_workers,
+                    "scheduling": "continuous saturating pool (W1)",
                     "validation_workers": validation_workers,
                     "batch_size": batch_size,
                 },
