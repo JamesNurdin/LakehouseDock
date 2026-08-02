@@ -37,6 +37,7 @@ from __future__ import annotations
 import math
 import random
 import threading
+import time
 
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
@@ -52,6 +53,11 @@ from workload_generation.query_generator_v9 import (
     warm_up_model,
     fetch_table_columns,
     fetch_schema_table_columns,
+)
+from workload_generation.query_generator import (
+    register_retry_observer,
+    unregister_retry_observer,
+    last_retry_count,
 )
 from workload_generation.query_generator_v9_1 import (
     DiversityTrackerV91,
@@ -81,6 +87,95 @@ V92_MID_REASONING = "medium"  # tier used for shallow/small queries
 
 _REASON_ORDER = {"low": 0, "medium": 1, "high": 2}
 _REASON_INV = {0: "low", 1: "medium", 2: "high"}
+
+# ---- W1+: adaptive concurrency (AIMD) tunables ----
+# The caller's ``generation_workers`` is the CEILING. The controller ramps the
+# in-flight target up while the endpoint is healthy and cuts it hard the moment
+# it sees contention (503/504/timeout retries), so throughput self-tunes to what
+# the endpoint can actually sustain instead of congestion-collapsing at a fixed
+# high worker count.
+V92_CONC_MIN = 2                 # never throttle below this many in flight
+V92_CONC_START = 8               # initial in-flight target (clamped to ceiling)
+V92_CONC_BETA = 0.5              # multiplicative-decrease factor on contention
+V92_CONC_PROBE_INTERVAL_S = 12.0  # additive-increase (+1) cadence when healthy
+V92_CONC_COOLDOWN_S = 25.0       # after a cut: debounce cuts + pause increases
+
+
+class ConcurrencyController:
+    """AIMD controller for the number of concurrent LLM calls in flight.
+
+    * additive increase: +1 to the in-flight target every
+      ``probe_interval_s`` of contention-free operation, up to ``c_max``.
+    * multiplicative decrease: on a contention signal (an API retry, surfaced in
+      real time via ``query_generator.register_retry_observer``), cut the target
+      to ``limit * beta``, then freeze for ``cooldown_s`` so a burst of retries
+      from one overload episode causes a single cut, not a collapse.
+
+    Thread-safe; ``on_contention`` is called from worker threads (the retry
+    observer) while the scheduler thread calls ``limit`` / ``on_success``.
+    """
+
+    def __init__(self, *, c_min, c_max, start,
+                 beta=V92_CONC_BETA,
+                 probe_interval_s=V92_CONC_PROBE_INTERVAL_S,
+                 cooldown_s=V92_CONC_COOLDOWN_S):
+        self.c_min = max(1, int(c_min))
+        self.c_max = max(self.c_min, int(c_max))
+        self.beta = beta
+        self.probe_interval_s = probe_interval_s
+        self.cooldown_s = cooldown_s
+        self._limit = float(min(max(int(start), self.c_min), self.c_max))
+        self._lock = threading.Lock()
+        now = time.monotonic()
+        self._last_change = now
+        self._frozen_until = 0.0
+        self.increases = 0
+        self.decreases = 0
+        self.contention_events = 0
+        self.min_seen = self._limit
+        self.max_seen = self._limit
+
+    def _maybe_increase_locked(self) -> None:
+        now = time.monotonic()
+        if now < self._frozen_until or self._limit >= self.c_max:
+            return
+        if now - self._last_change >= self.probe_interval_s:
+            self._limit = min(self.c_max, self._limit + 1.0)
+            self.increases += 1
+            self._last_change = now
+            self.max_seen = max(self.max_seen, self._limit)
+
+    def limit(self) -> int:
+        with self._lock:
+            self._maybe_increase_locked()
+            return max(self.c_min, int(round(self._limit)))
+
+    def on_contention(self, exc=None) -> None:
+        with self._lock:
+            self.contention_events += 1
+            now = time.monotonic()
+            if now < self._frozen_until:          # debounce: one cut per episode
+                return
+            new_limit = max(self.c_min, self._limit * self.beta)
+            if new_limit < self._limit:
+                self._limit = new_limit
+                self.decreases += 1
+                self.min_seen = min(self.min_seen, self._limit)
+            self._frozen_until = now + self.cooldown_s
+            self._last_change = now
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {
+                "final_limit": max(self.c_min, int(round(self._limit))),
+                "ceiling": self.c_max,
+                "floor": self.c_min,
+                "min_limit_seen": max(self.c_min, int(round(self.min_seen))),
+                "max_limit_seen": int(round(self.max_seen)),
+                "increases": self.increases,
+                "decreases": self.decreases,
+                "contention_events": self.contention_events,
+            }
 
 
 def _adaptive_reasoning(ceiling: str, hint_depth: int, n_tables: int) -> str:
@@ -309,6 +404,7 @@ def generate_query_batch(
     skeleton_cap: int = 12,
     plan_signature_cap: int = 3,
     max_attempt_factor: float = 4.0,
+    progress_cb=None,
 ) -> list[dict]:
     rng = random.Random(random_seed)
 
@@ -335,6 +431,9 @@ def generate_query_batch(
             ddl_cache_lock=ddl_cache_lock, tracker=tracker,
             connected_fraction=connected_fraction,
         )
+        # Contention signal: retries this LLM call incurred (thread-local, set by
+        # call_with_retry on this worker thread during generate_query).
+        q["contention_retries"] = last_retry_count()
         if q.get("sql"):
             plan_json = _v6._explain_plan_json(conn_factory, q["sql"])
             if plan_json is None:
@@ -422,41 +521,84 @@ def generate_query_batch(
         else:
             rejected_duplicate += 1
 
-    # ---- W1: one saturating pool, no wave barriers ----
-    executor = ThreadPoolExecutor(max_workers=generation_workers)
+    # ---- W1+: one saturating pool with an AIMD in-flight target ----
+    # generation_workers is the CEILING; the controller ramps up while the
+    # endpoint is healthy and cuts hard on contention (retry observer), so we
+    # find the sustainable concurrency instead of congestion-collapsing at a
+    # fixed high worker count.
+    controller = ConcurrencyController(
+        c_min=V92_CONC_MIN,
+        c_max=max(1, generation_workers),
+        start=min(max(1, generation_workers), V92_CONC_START),
+    )
+    register_retry_observer(controller.on_contention)
+
+    executor = ThreadPoolExecutor(max_workers=max(1, generation_workers))
     inflight: set = set()
 
-    def _submit() -> None:
+    def _submit() -> bool:
         nonlocal attempts
         if attempts >= max_attempts:
-            return
+            return False
         inflight.add(executor.submit(worker, rng.randint(0, 10**9)))
         attempts += 1
+        return True
+
+    def _refill() -> None:
+        while (len(inflight) < controller.limit()
+               and len(accepted) < num_queries
+               and attempts < max_attempts):
+            if not _submit():
+                break
+
+    def _emit(event: str) -> None:
+        if progress_cb is None:
+            return
+        try:
+            progress_cb({
+                "event": event,
+                "accepted": len(accepted),
+                "target": num_queries,
+                "attempts": attempts,
+                "max_attempts": max_attempts,
+                "inflight": len(inflight),
+                "concurrency_limit": controller.limit(),
+                "rejected_invalid": rejected_invalid,
+                "contention_events": controller.contention_events,
+            })
+        except Exception:
+            pass
 
     try:
-        for _ in range(generation_workers):           # prime the pump
-            if len(accepted) >= num_queries:
-                break
-            _submit()
-
+        _refill()                                     # prime up to the initial limit
+        _emit("start")
         while inflight and len(accepted) < num_queries:
-            done, _pending = wait(inflight, return_when=FIRST_COMPLETED)
+            # timeout wakes the loop under stalls so the controller can probe
+            # upward and the progress bar keeps refreshing even mid-straggler.
+            done, _pending = wait(inflight, timeout=2.0, return_when=FIRST_COMPLETED)
             for fut in done:
                 inflight.discard(fut)
                 try:
                     _process(fut.result())
                 except Exception as e:
+                    controller.on_contention()        # a bubbled failure == contention
                     print(f"[generation failed] {type(e).__name__}: {e}")
-                # keep the pool full while there is still work to do
-                if len(accepted) < num_queries:
-                    _submit()
+            _refill()
+            _emit("progress" if done else "tick")
     finally:
-        # target met (or budget exhausted): stop scheduling; let the <=workers
-        # already-running calls finish in the background (bounded tail, no barrier).
+        unregister_retry_observer(controller.on_contention)
+        # target met (or budget exhausted): stop scheduling; let the running
+        # calls finish in the background (bounded tail, no barrier).
         try:
             executor.shutdown(wait=False, cancel_futures=True)   # py>=3.9
         except TypeError:
             executor.shutdown(wait=False)
+
+    try:
+        tracker._concurrency_snapshot = controller.snapshot()
+    except Exception:
+        pass
+    _emit("done")
 
     # relaxed second pass over cap-rejected candidates (unchanged from v9)
     while len(accepted) < num_queries and overflow:
@@ -509,7 +651,7 @@ def write_workload_directory(**kwargs):
         feedback_overrides={
             "mechanism": (
                 "v9_1 A+C validity-gated lever curriculum (unchanged) + "
-                "W1 continuous-pool scheduling + W2 adaptive reasoning"
+                "W1+ adaptive-concurrency continuous pool (AIMD) + W2 adaptive reasoning"
             ),
             "depth_policy": (
                 f"forced >= {V91_MIN_HINTS} hint(s); deeper continue while "
