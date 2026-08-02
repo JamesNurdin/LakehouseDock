@@ -687,6 +687,7 @@ class Lakehouse:
         generation_workers: int = 4,
         validation_workers: int = 4,
         plan_feedback: bool = True,
+        request_timeout_s: float = 180.0,
     ) -> dict:
         schema_json = load_schema(schema)
     
@@ -703,9 +704,13 @@ class Lakehouse:
             return hive_mod.connect_trino(self.trino_host, schema)
         
         def client_factory():
+            # Shorter-than-gateway timeout: abort a hung request fast instead of
+            # waiting ~5 min for a gateway 504 (healthy calls finish in ~25s, so
+            # this only kills genuine hangs). Warmup/baselines keep the 600s default.
             return make_openai_client(
                 base_url=base_url,
                 api_key_env=api_key_env,
+                timeout_s=request_timeout_s,
             )
             
         if warmup:

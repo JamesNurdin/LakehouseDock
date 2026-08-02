@@ -312,6 +312,23 @@ def make_openai_client(
 _RETRY_TLS = threading.local()
 _RETRY_OBSERVERS: list = []
 _RETRY_OBSERVERS_LOCK = threading.Lock()
+# Default retry budget for call_with_retry. Baselines/warmup keep the patient
+# default; the generation pool lowers it (via set_retry_max_default) so contended
+# calls FAIL FAST -- with an AIMD pool the pool is the backoff, and a worker that
+# keeps re-sending under contention just re-adds the load the controller sheds.
+_RETRY_MAX_DEFAULT = 2000
+
+
+def set_retry_max_default(n: int) -> int:
+    """Set the default retry budget; returns the previous value (for restore)."""
+    global _RETRY_MAX_DEFAULT
+    prev = _RETRY_MAX_DEFAULT
+    _RETRY_MAX_DEFAULT = int(n)
+    return prev
+
+
+def get_retry_max_default() -> int:
+    return _RETRY_MAX_DEFAULT
 # Quiet the per-retry prints when observers are watching (the controller reports
 # contention instead) unless QUERYDOCK_RETRY_VERBOSE is set.
 _RETRY_VERBOSE = os.environ.get("QUERYDOCK_RETRY_VERBOSE", "0").strip().lower() not in (
@@ -351,9 +368,12 @@ def _notify_retry(exc) -> None:
 def call_with_retry(
     fn,
     *,
-    max_retries: int = 2000,
+    max_retries: int | None = None,
     sleep_s: float = 2.5,
 ):
+    if max_retries is None:
+        max_retries = _RETRY_MAX_DEFAULT
+
     last_error = None
     _RETRY_TLS.count = 0
 
