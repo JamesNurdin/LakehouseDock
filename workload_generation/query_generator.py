@@ -299,6 +299,55 @@ def make_openai_client(
         max_retries=0,
     )
 
+# ------------------------------------------------------------
+# Retry observability (for adaptive concurrency control).
+#
+# `call_with_retry` swallows transient 5xx / timeout / rate-limit errors with a
+# long retry loop. On a congested endpoint that hides contention from the caller
+# (a stuck call just looks slow). These hooks surface each retry WITHOUT changing
+# retry behaviour: a thread-local count (read post-call) and a set of observers
+# notified in real time on every retry. Both are no-ops unless something opts in,
+# so all existing callers/baselines are unaffected.
+# ------------------------------------------------------------
+_RETRY_TLS = threading.local()
+_RETRY_OBSERVERS: list = []
+_RETRY_OBSERVERS_LOCK = threading.Lock()
+# Quiet the per-retry prints when observers are watching (the controller reports
+# contention instead) unless QUERYDOCK_RETRY_VERBOSE is set.
+_RETRY_VERBOSE = os.environ.get("QUERYDOCK_RETRY_VERBOSE", "0").strip().lower() not in (
+    "", "0", "false", "no", "off",
+)
+
+
+def register_retry_observer(cb) -> None:
+    """Register ``cb(exc)`` to be called once per transient-error retry."""
+    with _RETRY_OBSERVERS_LOCK:
+        _RETRY_OBSERVERS.append(cb)
+
+
+def unregister_retry_observer(cb) -> None:
+    with _RETRY_OBSERVERS_LOCK:
+        try:
+            _RETRY_OBSERVERS.remove(cb)
+        except ValueError:
+            pass
+
+
+def last_retry_count() -> int:
+    """Retries incurred by the most recent ``call_with_retry`` on THIS thread."""
+    return int(getattr(_RETRY_TLS, "count", 0))
+
+
+def _notify_retry(exc) -> None:
+    with _RETRY_OBSERVERS_LOCK:
+        observers = list(_RETRY_OBSERVERS)
+    for cb in observers:
+        try:
+            cb(exc)
+        except Exception:
+            pass
+
+
 def call_with_retry(
     fn,
     *,
@@ -306,6 +355,7 @@ def call_with_retry(
     sleep_s: float = 2.5,
 ):
     last_error = None
+    _RETRY_TLS.count = 0
 
     for attempt in range(max_retries):
         try:
@@ -317,11 +367,15 @@ def call_with_retry(
             APITimeoutError,
         ) as e:
             last_error = e
+            _RETRY_TLS.count = attempt + 1
+            _notify_retry(e)
 
-            print(f"[API retry {attempt + 1}/{max_retries}] {type(e).__name__}: {e}")
+            if _RETRY_VERBOSE or not _RETRY_OBSERVERS:
+                print(f"[API retry {attempt + 1}/{max_retries}] {type(e).__name__}: {e}")
+                if attempt < max_retries - 1:
+                    print(f"Sleeping {sleep_s:.1f}s before retry...")
 
             if attempt < max_retries - 1:
-                print(f"Sleeping {sleep_s:.1f}s before retry...")
                 time.sleep(sleep_s)
 
     raise RuntimeError(f"API call failed after {max_retries} retries") from last_error

@@ -776,29 +776,57 @@ class Lakehouse:
         # was redundant (it rejected 0) and is dropped. Validation counts now
         # come from the tracker's per-candidate accounting.
         if self.verbose:
-            print(f"Generating {num_queries} queries (continuous pool, "
-                  f"workers={generation_workers})")
+            print(f"Generating {num_queries} queries (adaptive continuous pool, "
+                  f"ceiling workers={generation_workers})")
 
-        valid_queries = generate_query_batch(
-            conn_factory=conn_factory,
-            schema_json=schema_json,
-            num_queries=num_queries,
-            catalog=catalog,
-            trino_schema=schema,
-            client_factory=client_factory,
-            model_name=model_name,
-            temperature=temperature,
-            reasoning=reasoning,
-            min_tables=min_tables,
-            max_tables=max_tables,
-            random_seed=rng.randint(0, 10**9),
-            ddl_cache=ddl_cache,
-            ddl_cache_lock=ddl_cache_lock,
-            generation_workers=generation_workers,
-            tracker=tracker,
-        )[:num_queries]
+        # Jupyter/terminal progress bar over ACCEPTED queries, fed live by
+        # generate_query_batch's progress_cb. tqdm.auto renders in notebooks and
+        # terminals; if tqdm is unavailable it degrades to a silent no-op.
+        try:
+            from tqdm.auto import tqdm as _tqdm
+            _bar = _tqdm(total=num_queries, desc=f"gen {workload_name}", unit="q")
+        except Exception:
+            _bar = None
+
+        def _progress_cb(st: dict) -> None:
+            if _bar is None:
+                return
+            _bar.n = min(st.get("accepted", 0), num_queries)
+            _bar.set_postfix({
+                "conc": st.get("concurrency_limit"),
+                "inflight": st.get("inflight"),
+                "attempts": st.get("attempts"),
+                "invalid": st.get("rejected_invalid"),
+                "contention": st.get("contention_events"),
+            }, refresh=False)
+            _bar.refresh()
+
+        try:
+            valid_queries = generate_query_batch(
+                conn_factory=conn_factory,
+                schema_json=schema_json,
+                num_queries=num_queries,
+                catalog=catalog,
+                trino_schema=schema,
+                client_factory=client_factory,
+                model_name=model_name,
+                temperature=temperature,
+                reasoning=reasoning,
+                min_tables=min_tables,
+                max_tables=max_tables,
+                random_seed=rng.randint(0, 10**9),
+                ddl_cache=ddl_cache,
+                ddl_cache_lock=ddl_cache_lock,
+                generation_workers=generation_workers,
+                tracker=tracker,
+                progress_cb=_progress_cb,
+            )[:num_queries]
+        finally:
+            if _bar is not None:
+                _bar.close()
 
         acc = tracker.generation_accounting_snapshot()
+        conc = getattr(tracker, "_concurrency_snapshot", None)
 
         print(f"Finished query generation")
 
@@ -831,7 +859,8 @@ class Lakehouse:
                 },
                 "parallelism": {
                     "generation_workers": generation_workers,
-                    "scheduling": "continuous saturating pool (W1)",
+                    "scheduling": "adaptive continuous pool (W1+ AIMD concurrency)",
+                    "adaptive_concurrency": conc,
                     "validation_workers": validation_workers,
                     "batch_size": batch_size,
                 },
