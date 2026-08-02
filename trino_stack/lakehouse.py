@@ -50,10 +50,10 @@ from trino_stack.profile import NodeProfiler
 from trino_stack.resource_logger import NodeLogger
 from trino_stack.resource_profile import LakehouseResourceProfiler
 
-# query_generator (v9_2: v9_1 A+C validity gate + W1 continuous-pool scheduling
-# + W2 adaptive reasoning; per-candidate token/validity accounting;
-# plan_feedback=False == v6)
-from workload_generation.query_generator_v9_2 import (
+# query_generator: consolidated src package (v8 diversity design, flattened; one
+# unified budgeted feedback-driven construct selection + adaptive AIMD pool).
+# feedback_enabled=False -> coverage-blind baseline.
+from workload_generation.src.main import (
     load_schema,
     make_openai_client,
     warm_up_model,
@@ -62,7 +62,7 @@ from workload_generation.query_generator_v9_2 import (
     write_workload_directory,
     fetch_table_columns,
     fetch_schema_table_columns,
-    DiversityTrackerV92,
+    DiversityTracker as DiversityTrackerV92,
 )
 
 @dataclass

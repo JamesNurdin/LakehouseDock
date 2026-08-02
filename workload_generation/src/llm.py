@@ -1,0 +1,216 @@
+"""llm -- client, retry(+observer), structured generate_sql (moved from v1/v2)."""
+from __future__ import annotations
+import os, time, json, threading, re
+from openai import (OpenAI, InternalServerError, APIConnectionError, RateLimitError, APITimeoutError)
+from .config import (MODEL_NAME, BASE_MODEL_URL, API_KEY_ENV,
+                     USE_RESPONSES_STREAMING, RETRY_VERBOSE)
+from .prompt import PROMPT_TEMPLATE, INSTRUCTIONS_TEMPLATE
+
+def make_openai_client(
+    *,
+    base_url: str = BASE_MODEL_URL,
+    api_key_env: str = API_KEY_ENV,
+    timeout_s: float = 600.0,
+) -> OpenAI:
+    return OpenAI(
+        base_url=base_url,
+        api_key=os.environ[api_key_env],
+        timeout=timeout_s,
+        max_retries=0,
+    )
+
+_RETRY_TLS = threading.local()
+
+_RETRY_OBSERVERS: list = []
+
+_RETRY_OBSERVERS_LOCK = threading.Lock()
+
+_RETRY_MAX_DEFAULT = 2000
+
+def set_retry_max_default(n: int) -> int:
+    """Set the default retry budget; returns the previous value (for restore)."""
+    global _RETRY_MAX_DEFAULT
+    prev = _RETRY_MAX_DEFAULT
+    _RETRY_MAX_DEFAULT = int(n)
+    return prev
+
+def get_retry_max_default() -> int:
+    return _RETRY_MAX_DEFAULT
+
+def register_retry_observer(cb) -> None:
+    """Register ``cb(exc)`` to be called once per transient-error retry."""
+    with _RETRY_OBSERVERS_LOCK:
+        _RETRY_OBSERVERS.append(cb)
+
+def unregister_retry_observer(cb) -> None:
+    with _RETRY_OBSERVERS_LOCK:
+        try:
+            _RETRY_OBSERVERS.remove(cb)
+        except ValueError:
+            pass
+
+def last_retry_count() -> int:
+    """Retries incurred by the most recent ``call_with_retry`` on THIS thread."""
+    return int(getattr(_RETRY_TLS, "count", 0))
+
+def _notify_retry(exc) -> None:
+    with _RETRY_OBSERVERS_LOCK:
+        observers = list(_RETRY_OBSERVERS)
+    for cb in observers:
+        try:
+            cb(exc)
+        except Exception:
+            pass
+
+def call_with_retry(
+    fn,
+    *,
+    max_retries: int | None = None,
+    sleep_s: float = 2.5,
+):
+    if max_retries is None:
+        max_retries = _RETRY_MAX_DEFAULT
+
+    last_error = None
+    _RETRY_TLS.count = 0
+
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except (
+            InternalServerError,
+            APIConnectionError,
+            RateLimitError,
+            APITimeoutError,
+        ) as e:
+            last_error = e
+            _RETRY_TLS.count = attempt + 1
+            _notify_retry(e)
+
+            if RETRY_VERBOSE or not _RETRY_OBSERVERS:
+                print(f"[API retry {attempt + 1}/{max_retries}] {type(e).__name__}: {e}")
+                if attempt < max_retries - 1:
+                    print(f"Sleeping {sleep_s:.1f}s before retry...")
+
+            if attempt < max_retries - 1:
+                time.sleep(sleep_s)
+
+    raise RuntimeError(f"API call failed after {max_retries} retries") from last_error
+
+def call_with_retry_start_up(
+    fn,
+    *,
+    max_retries: int = 16,
+    base_sleep_s: float = 10.0,
+    max_sleep_s: float = 240.0,
+):
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except (
+            InternalServerError,
+            APIConnectionError,
+            RateLimitError,
+            APITimeoutError,
+        ) as e:
+            last_error = e
+            sleep_s = min(base_sleep_s * (2 ** attempt), max_sleep_s)
+            print(f"[API retry {attempt + 1}/{max_retries}] {type(e).__name__}: {e}")
+            print(f"Sleeping {sleep_s:.1f}s before retry...")
+            time.sleep(sleep_s)
+
+    raise RuntimeError(f"API call failed after {max_retries} retries") from last_error
+
+def warm_up_model(
+    client: OpenAI,
+    *,
+    model_name: str = MODEL_NAME,
+) -> None:
+    def _call():
+        return client.responses.create(
+            model=model_name,
+            input="Return only the word ready.",
+            temperature=0,
+            store=False,
+        )
+
+    result = call_with_retry_start_up(_call)
+    print(f"Model warm-up response: {result.output_text.strip()}")
+
+def sanitize_sql(query: str) -> str:
+    if not query:
+        return query
+
+    query = query.strip()
+    query = re.sub(r"^```[a-zA-Z]*\n?", "", query)
+    query = re.sub(r"\n?```$", "", query)
+    query = re.sub(r";+\s*$", "", query)
+
+    return query.strip()
+
+def normalise_sql_result(data: dict) -> dict:
+    return {
+        "sql": sanitize_sql(data.get("sql", "")),
+        "goal": data.get("goal", ""),
+        "tables_used": data.get("tables_used", []),
+        "columns_used": data.get("columns_used", []),
+        "assumptions": data.get("assumptions", []),
+    }
+
+_OUTPUT_SCHEMA = {
+    "type": "json_schema",
+    "name": "sql_generation_result",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "sql": {
+                "type": "string",
+                "description": "The generated Trino SQL query.",
+            },
+            "goal": {
+                "type": "string",
+                "description": "A short description of the analytical goal of the query.",
+            },
+            "tables_used": {"type": "array", "items": {"type": "string"}},
+            "columns_used": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["sql", "goal", "tables_used", "columns_used"],
+        "additionalProperties": False,
+    },
+}
+
+def generate_sql(
+    client: OpenAI,
+    schema_context: str,
+    *,
+    task: str,
+    reasoning: str = "medium",
+    model_name: str = MODEL_NAME,
+    temperature: float = 0.6,
+) -> dict:
+    def _call():
+        kwargs = dict(
+            model=model_name,
+            instructions=INSTRUCTIONS_TEMPLATE,
+            input=PROMPT_TEMPLATE.format(schema_context=schema_context, task=task),
+            text={"format": _OUTPUT_SCHEMA},
+            temperature=temperature,
+            store=False,
+        )
+        # Streaming keeps the connection alive on long high-reasoning
+        # generations so a remote router (e.g. HF) doesn't 504. It is opt-in
+        # because many *local* OpenAI-compatible servers don't implement
+        # Responses-API streaming and raise AssertionError/IndexError in
+        # get_final_response(). Toggle config.USE_RESPONSES_STREAMING for HF;
+        # leave False (default) for local / non-streaming endpoints.
+        if USE_RESPONSES_STREAMING:
+            with client.responses.stream(**kwargs) as stream:
+                return stream.get_final_response()
+        return client.responses.create(**kwargs)
+
+    result = call_with_retry(_call)
+    data = json.loads(result.output_text)
+    return normalise_sql_result(data)
