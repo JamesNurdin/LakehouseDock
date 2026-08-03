@@ -1,28 +1,18 @@
 """
-feedback -- the adaptive step: pick this query's constructs, budgeted + coverage-weighted.
+choose_constructs(tracker, rng, family):
+1. budget k   = FAMILY_CONSTRUCT_BUDGET[family]  (+hint_aggression when feedback
+                plateaus). This CAPS stacking -- the direct lever on invalids --
+                while keeping enough constructs for sequence variety.
+2. candidates = the unified CONSTRUCTS catalog, filtered to the family.
+3. score(c)   = need(op) * reliability
+                need(op) = 1/(1+operator_usage[op])  (under-used -> higher;
+                1.0 for pure-clause constructs and when feedback is off)
+                reliability = 1.0 guaranteed else CONDITIONAL_WEIGHT
+4. pick k     = softmax SAMPLING, one per distinct operator so a query never 
+                double-asks for the same operator.
 
-This replaces v8's three uncoordinated injectors (independent add-on rolls +
-plan-shape + a bolted-on operator hint). v8 showed why that was wrong: ~7
-overlapping demands/query -> 62% invalid, and the bolted-on hint was often
-irrelevant to what the family/add-ons already asked for. Yet the complexity is
-what drove Vendi (motif variety). So the fix is ONE selection:
-
-  choose_constructs(tracker, rng, family):
-    1. budget k   = FAMILY_CONSTRUCT_BUDGET[family]  (+hint_aggression when feedback
-                    plateaus). This CAPS stacking -- the direct lever on invalids --
-                    while keeping enough constructs for motif variety.
-    2. candidates = the unified CONSTRUCTS catalog, filtered to the family.
-    3. score(c)   = need(op) * reliability
-                    need(op) = 1/(1+operator_usage[op])  (under-used -> higher;
-                    1.0 for pure-clause constructs and when feedback is off)
-                    reliability = 1.0 guaranteed else CONDITIONAL_WEIGHT
-    4. pick k     = softmax SAMPLING (not argmax -> preserves the spread; the v7.x
-                    collapse came from argmax-style concentration), one per distinct
-                    operator so a query never double-asks for the same operator.
-
-Because it's ONE coverage-weighted draw, every construct in the prompt serves
-coverage and there is no irrelevant bolt-on. ``feedback_enabled=False`` -> uniform
-weights (still budgeted, coherent) -- a coverage-blind baseline.
+``feedback_enabled=False`` -> uniform weights (still budgeted, coherent) 
+                           -- a coverage-blind baseline.
 
 Tunables in config: FAMILY_CONSTRUCT_BUDGET, HINT_SOFTMAX_TEMP, CONDITIONAL_WEIGHT,
 MAX_AGGRESSION. Plateau pressure (hint_aggression) is raised in the tracker.
@@ -38,9 +28,7 @@ from .prompt import CONSTRUCTS
 
 
 class FeedbackPolicy:
-    """Default = budgeted, coverage-weighted construct selection. Subclass +
-    override ``choose_constructs`` for an experiment (e.g. hit-rate down-weighting
-    or a depth curriculum)."""
+    """Default = budgeted, coverage-weighted construct selection. """"
 
     def choose_constructs(self, tracker, rng: random.Random, family: dict) -> list[dict]:
         """-> [{'name', 'line'}] to append as add-on lines for this query."""

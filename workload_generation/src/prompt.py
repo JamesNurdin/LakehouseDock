@@ -1,22 +1,17 @@
 """
-prompt -- everything that goes into the LLM task, in one place.
 
-A query's prompt has three parts, with ONE unified construct-selection step
-(replacing the old add-ons + plan-shapes + bolted-on hint that double-injected and
-over-stacked to ~7 demands/query):
+A query's prompt has three parts, with a single unified construct-selection step:
 
   1. FAMILY     (PROMPT_VARIANTS) -- what KIND of query. Base task text, table-count
-                                     band, temperature delta.
+                                     band.
   2. CONSTRUCTS (CONSTRUCTS)      -- ONE operator-grounded catalog (clause constructs
                                      + operator levers). The feedback policy draws a
-                                     small, BUDGETED, coverage-weighted subset per
-                                     query (feedback.choose_constructs), appended as
+                                     small, coverage-weighted subset per query 
+                                     (feedback.choose_constructs), appended as
                                      "Additionally: - ...". FINISHERS (order_by,
                                      limit) are cheap and rolled independently.
   3. PLAN-SHAPE (PLAN_SHAPES)     -- a pure join TOPOLOGY hint for join_all families.
 
-``sample_shape_spec`` draws 1 + finishers + 3; ``feedback.choose_constructs`` draws
-the budgeted 2; ``build_task_text`` renders it all.
 """
 
 from __future__ import annotations
@@ -70,7 +65,7 @@ Important SQL rules:
 """.strip()
 
 # ============================================================
-# 1. Prompt families -- weights are final (sum to 1.0).
+# 1. Prompt families -- weights are final.
 # ============================================================
 
 PROMPT_VARIANTS: list[dict] = [
@@ -156,25 +151,13 @@ if abs(sum(v["weight"] for v in PROMPT_VARIANTS) - 1.0) > 1e-6:
     raise ValueError("family weights must sum to 1.0")
 
 # ============================================================
-# 2. Constructs -- ONE unified, operator-grounded catalog.
-#
-#    v8 lesson: firing many overlapping construct demands independently (add-ons +
-#    plan-shapes + a bolted-on operator hint) produced ~7 demands/query, a 62%
-#    invalid rate, and levers that mostly didn't land -- yet the complexity drove
-#    the motif variety that won Vendi. So we keep ONE catalog and let the feedback
-#    policy draw a small, BUDGETED, coverage-weighted subset (feedback.py),
-#    instead of rolling each independently.
+# 2. Constructs
 #
 #    Each construct: name, prompt line, the plan operator it targets (None for
 #    pure-clause shaping), reliability, and whether it may fire for "simple".
 #    The operator-grounded entries come straight from the lever map so there is a
 #    single source of truth for construct->operator.
 # ============================================================
-
-FINISHERS: list[dict] = [
-    {"name": "order_by", "p": 0.75, "line": "Order the final result."},
-    {"name": "limit", "p": 0.85, "line": "End the query with LIMIT 100."},
-]
 
 # Pure-clause constructs (shape the query; no single distinct structural operator).
 _CLAUSE_CONSTRUCTS: list[dict] = [
@@ -190,8 +173,14 @@ _CLAUSE_CONSTRUCTS: list[dict] = [
      "line": "Use DISTINCT somewhere meaningful."},
 ]
 
-# Unified catalog = clause constructs + operator levers (minus the order-by/limit
-# lever, which is a finisher above). Feedback selects a budgeted subset of this.
+FINISHERS: list[dict] = [
+    {"name": "order_by", "p": 0.75, "line": "Order the final result."},
+    {"name": "limit", "p": 0.85, "line": "End the query with LIMIT 100."},
+]
+
+
+# Unified catalog = clause constructs + operator levers.
+# Feedback selects a budgeted subset of this.
 CONSTRUCTS: list[dict] = _CLAUSE_CONSTRUCTS + [
     {"name": lv.lever_id, "line": lv.prompt_hint, "target_operator": lv.target_operator,
      "reliability": lv.reliability, "simple_ok": False}
@@ -200,9 +189,6 @@ CONSTRUCTS: list[dict] = _CLAUSE_CONSTRUCTS + [
 
 # ============================================================
 # 3. Plan shapes -- pure join TOPOLOGY hints (join_all families).
-#    Operator-specific shapes (semi-join, outer-join, rollup, windowed) are gone:
-#    they overlapped the constructs and double-injected. What's left is topology
-#    only, which no construct expresses.
 # ============================================================
 
 PLAN_SHAPES: list[dict] = [
