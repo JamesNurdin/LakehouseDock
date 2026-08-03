@@ -1,4 +1,4 @@
-"""sampling -- coverage-weighted table + value selection (moved from v2)."""
+"""sampling -- coverage-weighted table + value selection."""
 from __future__ import annotations
 import random, threading, math
 from collections import Counter, defaultdict, deque
@@ -55,20 +55,14 @@ def sample_tables_v2(
     """
     Returns (tables, mode) where mode is "connected" or "uniform".
 
-    Both modes now guarantee a *joinable* subset (V2.1-B): v2.0's
-    unconstrained uniform draws frequently induced zero FK edges in a
-    snowflake schema, and with the "only listed join rules" guardrail the
-    model degenerated to one-table queries -- the root cause of the
-    complexity collapse (45% low vs the real 13%).
-
     "uniform": rejection-sample uniform subsets until the induced FK
-    subgraph is connected (largest-component + top-up as fallback). Keeps
-    E2ETune-style table entropy without the degenerate sets.
+    subgraph is connected (largest-component + top-up as fallback). 
+    Keeps table entropy without the degenerate sets.
 
-    "connected": v1's walk, re-weighted. Start table and expansion steps are
-    drawn with weight 1/(1+table_usage) (CHANGE-2), multiplied by
-    1/(1+usage of the least-used FK edge that connects the candidate to the
-    current selection) (V2.1-D) so under-covered join edges get exercised.
+    "connected": Start table and expansion steps are
+    drawn with weight 1/(1+table_usage), multiplied by 1/(1+usage of the 
+    least-used FK edge that connects the candidate to the current selection)
+    so under-covered join edges get exercised.
     """
     all_tables = extract_schema_tables(schema)
     n_tables = min(n_tables, len(all_tables))
@@ -200,14 +194,7 @@ def build_value_aid(
     max_cols: int = 8,
     max_vals: int = 5,
 ) -> str:
-    """
-    "table.column (type): v1, v2, ..." lines. Randomising which columns and
-    values are shown per query is E2ETune's second diversity lever; v2.1
-    additionally weights the column pick by 1/(1+usage) (V2.1-E) so columns
-    the workload has not touched yet are shown first -- pushing column
-    coverage, a headline notebook metric, instead of re-showing the same
-    "obvious" columns.
-    """
+    
     usage = column_usage or {}
     lines: list[str] = []
     budget = max_cols
