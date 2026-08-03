@@ -28,7 +28,7 @@ from .prompt import CONSTRUCTS
 
 
 class FeedbackPolicy:
-    """Default = budgeted, coverage-weighted construct selection. """"
+    """Default = budgeted, coverage-weighted construct selection."""
 
     def choose_constructs(self, tracker, rng: random.Random, family: dict) -> list[dict]:
         """-> [{'name', 'line'}] to append as add-on lines for this query."""

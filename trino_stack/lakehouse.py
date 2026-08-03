@@ -688,6 +688,7 @@ class Lakehouse:
         validation_workers: int = 4,
         plan_feedback: bool = True,
         request_timeout_s: float = 600.0,
+        policy=None,
     ) -> dict:
         schema_json = load_schema(schema)
     
@@ -745,6 +746,7 @@ class Lakehouse:
                 ddl_cache_lock=ddl_cache_lock,
                 generation_workers=generation_workers,
                 tracker=tracker,
+                policy=policy,
             )
 
             return write_workload_directory(
@@ -825,6 +827,7 @@ class Lakehouse:
                 ddl_cache_lock=ddl_cache_lock,
                 generation_workers=generation_workers,
                 tracker=tracker,
+                policy=policy,
                 progress_cb=_progress_cb,
             )[:num_queries]
         finally:
