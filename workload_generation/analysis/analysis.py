@@ -37,7 +37,7 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 import pandas as pd
 
 from loader.stats import load_sql_workload
-from workload_generation.sql_features import query_features, workload_metaheuristics
+from workload_generation.shared.sql_features import query_features, workload_metaheuristics
 from trino_stack.config import WORKLOAD_ROOT as _DEFAULT_WORKLOAD_ROOT
 from workload_generation.baselines.query_generator import extract_schema_tables, load_schema
 

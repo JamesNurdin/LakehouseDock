@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from workload_generation.baselines.common import BaselineContext, write_baseline_workload
-from workload_generation.sql_features import query_features
+from workload_generation.shared.sql_features import query_features
 from workload_generation.baselines.query_generator import sanitize_sql, get_relevant_relationships
 
 

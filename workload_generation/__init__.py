@@ -25,7 +25,7 @@ The ``generation_report.json`` mirrors the structure produced by
 ``workload_generation.src.report.write_workload_directory`` (see the sample
 at ``LakehouseDock/Workloads/bigbenchv2/generation_report.json``) and is
 enriched with the static SQL "metaheuristics" computed in
-:mod:`workload_generation.sql_features`.
+:mod:`workload_generation.shared.sql_features`.
 
 Papers implemented (see ``README.md`` for the mapping):
 

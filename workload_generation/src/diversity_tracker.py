@@ -45,7 +45,7 @@ def _dedup_key(sql: str) -> str:
 def _skeleton_key(sql: str):
     """Coarse structural skeleton via the evaluation's own feature extractor, so
     the "shape" the generator diversifies matches what the metrics measure."""
-    from workload_generation.sql_features import query_features
+    from workload_generation.shared.sql_features import query_features
     f = query_features(sql)
 
     def n(key):
