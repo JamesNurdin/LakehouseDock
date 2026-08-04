@@ -50,7 +50,7 @@ from trino_stack.config import (
     WORKLOAD_ROOT,
 )
 
-from workload_generation.sql_features import query_features, workload_metaheuristics
+from workload_generation.shared.sql_features import query_features, workload_metaheuristics
 
 
 # ---------------------------------------------------------------------------
