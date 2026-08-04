@@ -1,1 +1,0 @@
-SELECT ca.ca_address_id, ca.ca_street_number, sr.sr_return_amt, sr.sr_return_ship_cost FROM store_returns sr JOIN customer_address ca ON sr.sr_addr_sk = ca.ca_address_sk WHERE ca.ca_street_type = 'Blvd' AND sr.sr_return_ship_cost > 1000.00 ORDER BY sr.sr_return_amt DESC LIMIT 100
