@@ -21,6 +21,63 @@ def make_openai_client(
 
 _RETRY_TLS = threading.local()
 
+# --- LLM token accounting ---------------------------------------------------
+# Module-level accumulator (mirrors report._RUN_STATS): generate_sql records
+# usage from every completion; report.py drains it once per run. Warm-up is
+# excluded -- it does not call generate_sql.
+_TOKEN_LOCK = threading.Lock()
+
+def _fresh_token_usage() -> dict:
+    return dict(input_tokens=0, output_tokens=0, reasoning_tokens=0,
+                total_tokens=0, calls=0, calls_without_usage=0)
+
+_TOKEN_USAGE: dict = _fresh_token_usage()
+
+def _usage_get(u, *names):
+    """Read a field from an OpenAI usage object OR a plain dict."""
+    for n in names:
+        v = u.get(n) if isinstance(u, dict) else getattr(u, n, None)
+        if v is not None:
+            return v
+    return None
+
+def _record_token_usage(result) -> None:
+    """Accumulate token usage from one completion. Robust to providers that omit
+    usage (tallied under ``calls_without_usage``) and to Responses (input/output)
+    vs Chat (prompt/completion) field names."""
+    u = getattr(result, "usage", None)
+    if u is None and isinstance(result, dict):
+        u = result.get("usage")
+    inp = _usage_get(u, "input_tokens", "prompt_tokens") if u is not None else None
+    out = _usage_get(u, "output_tokens", "completion_tokens") if u is not None else None
+    tot = _usage_get(u, "total_tokens") if u is not None else None
+    details = _usage_get(u, "output_tokens_details", "completion_tokens_details") if u is not None else None
+    reasoning = _usage_get(details, "reasoning_tokens") if details is not None else None
+
+    with _TOKEN_LOCK:
+        tu = _TOKEN_USAGE
+        tu["calls"] += 1
+        if inp is not None:
+            tu["input_tokens"] += int(inp)
+        if out is not None:
+            tu["output_tokens"] += int(out)
+        if reasoning is not None:
+            tu["reasoning_tokens"] += int(reasoning)
+        if tot is not None:
+            tu["total_tokens"] += int(tot)
+        elif inp is not None or out is not None:
+            tu["total_tokens"] += int(inp or 0) + int(out or 0)
+        if inp is None and out is None and tot is None:
+            tu["calls_without_usage"] += 1
+
+def drain_token_usage() -> dict:
+    """Return accumulated token usage and reset, so the next run starts fresh."""
+    with _TOKEN_LOCK:
+        s = dict(_TOKEN_USAGE)
+        _TOKEN_USAGE.clear()
+        _TOKEN_USAGE.update(_fresh_token_usage())
+    return s
+
 _RETRY_OBSERVERS: list = []
 
 _RETRY_OBSERVERS_LOCK = threading.Lock()
@@ -212,5 +269,6 @@ def generate_sql(
         return client.responses.create(**kwargs)
 
     result = call_with_retry(_call)
+    _record_token_usage(result)
     data = json.loads(result.output_text)
     return normalise_sql_result(data)

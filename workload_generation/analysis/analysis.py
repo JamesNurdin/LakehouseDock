@@ -39,7 +39,7 @@ import pandas as pd
 from loader.stats import load_sql_workload
 from workload_generation.sql_features import query_features, workload_metaheuristics
 from trino_stack.config import WORKLOAD_ROOT as _DEFAULT_WORKLOAD_ROOT
-from workload_generation.query_generator import extract_schema_tables, load_schema
+from workload_generation.baselines.query_generator import extract_schema_tables, load_schema
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +237,22 @@ def load_generation_overhead(
             row[f"{prefix}rejection_rate"] = round((rejected or 0) / candidates, 4)
             if num_queries:
                 row[f"{prefix}candidates_per_query"] = round(candidates / num_queries, 4)
+
+    # LLM token usage, where recorded (our generator + baselines). Absent in
+    # older reports -> columns simply omitted, so re-analysing an old workload
+    # never fails; it just leaves these blank.
+    token_usage = report.get("token_usage") or {}
+    if token_usage:
+        row[f"{prefix}input_tokens"] = token_usage.get("input_tokens")
+        row[f"{prefix}output_tokens"] = token_usage.get("output_tokens")
+        row[f"{prefix}reasoning_tokens"] = token_usage.get("reasoning_tokens")
+        row[f"{prefix}total_tokens"] = token_usage.get("total_tokens")
+        row[f"{prefix}llm_calls"] = token_usage.get("calls")
+        row[f"{prefix}calls_without_usage"] = token_usage.get("calls_without_usage")
+        tpq = report.get("tokens_per_query")
+        if tpq is None and token_usage.get("total_tokens") is not None and num_queries:
+            tpq = token_usage["total_tokens"] / num_queries
+        row[f"{prefix}tokens_per_query"] = round(tpq, 2) if tpq is not None else None
 
     return row
 

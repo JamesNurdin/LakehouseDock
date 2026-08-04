@@ -38,9 +38,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from workload_generation.common import BaselineContext, write_baseline_workload
+from workload_generation.baselines.common import BaselineContext, write_baseline_workload
 from workload_generation.sql_features import query_features
-from workload_generation.query_generator import sanitize_sql, get_relevant_relationships
+from workload_generation.baselines.query_generator import sanitize_sql, get_relevant_relationships
 
 
 BASELINE = "bootstrapping_lcm"

@@ -50,8 +50,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from workload_generation.common import BaselineContext, write_baseline_workload
-from workload_generation.query_generator import sanitize_sql
+from workload_generation.baselines.common import BaselineContext, write_baseline_workload
+from workload_generation.baselines.query_generator import sanitize_sql
 
 
 BASELINE = "sqlbarber"

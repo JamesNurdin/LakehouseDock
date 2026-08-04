@@ -40,8 +40,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from workload_generation.common import BaselineContext, write_baseline_workload
-from workload_generation.query_generator import sanitize_sql
+from workload_generation.baselines.common import BaselineContext, write_baseline_workload
+from workload_generation.baselines.query_generator import sanitize_sql
 
 
 BASELINE = "e2etune"

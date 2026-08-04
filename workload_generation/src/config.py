@@ -58,11 +58,6 @@ MIN_TABLES = 2
 MAX_TABLES = 8
 CONNECTED_FRACTION = 0.5         # fraction of draws that use the connected FK walk
                                  # vs a connectivity-guaranteed uniform subset
-# Schema-entropy knobs. Coverage weighting is 1/(1+usage)**POWER; POWER=1.0 is the
-# current linear weighting. POWER>1 penalises over-used tables/edges/columns harder
-# -> flatter usage -> higher table/column/join-edge entropy. Free of Vendi cost.
-COVERAGE_WEIGHT_POWER = 1.0
-VALUE_AID_MAX_COLS = 8           # columns shown in the value aid per query (more -> flatter column usage)
 
 # ============================================================
 # 5. Generation temperature
