@@ -2,7 +2,6 @@
 from __future__ import annotations
 import random, threading, math
 from collections import Counter, defaultdict, deque
-from . import config
 from .schema import (build_relationship_graph, get_relevant_relationships,
                      relationship_to_text, extract_schema_tables)
 from .diversity_tracker import _edge_key, _bare_column_name
@@ -72,7 +71,7 @@ def sample_tables_v2(
     graph = build_relationship_graph(schema)
 
     def table_weight(t: str) -> float:
-        return 1.0 / (1.0 + t_usage.get(t, 0)) ** config.COVERAGE_WEIGHT_POWER
+        return 1.0 / (1.0 + t_usage.get(t, 0))
 
     if n_tables <= 1:
         start = rng.choices(all_tables, weights=[table_weight(t) for t in all_tables], k=1)[0]
@@ -102,7 +101,7 @@ def sample_tables_v2(
             if s in graph.get(t, set())
         ]
         least_used_edge = min(edge_uses) if edge_uses else 0
-        return table_weight(t) / (1.0 + least_used_edge) ** config.COVERAGE_WEIGHT_POWER
+        return table_weight(t) / (1.0 + least_used_edge)
 
     start = rng.choices(all_tables, weights=[table_weight(t) for t in all_tables], k=1)[0]
     selected = {start}
@@ -192,12 +191,10 @@ def build_value_aid(
     value_cache: dict,
     value_cache_lock,
     column_usage: dict[str, int] | None = None,
-    max_cols: int | None = None,
+    max_cols: int = 8,
     max_vals: int = 5,
 ) -> str:
 
-    if max_cols is None:
-        max_cols = config.VALUE_AID_MAX_COLS
     usage = column_usage or {}
     lines: list[str] = []
     budget = max_cols
@@ -210,7 +207,7 @@ def build_value_aid(
         cols = list(columns_by_table.get(table, []))
         if not cols:
             continue
-        weights = [1.0 / (1.0 + usage.get(_bare_column_name(c["name"]), 0)) ** config.COVERAGE_WEIGHT_POWER for c in cols]
+        weights = [1.0 / (1.0 + usage.get(_bare_column_name(c["name"]), 0)) for c in cols]
         picked: list[dict] = []
         pool = list(zip(cols, weights))
         for _ in range(min(3, len(pool))):  # up to 3 columns per table

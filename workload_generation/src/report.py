@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from trino_stack.workload import ensure_dir
 from . import config
+from .llm import drain_token_usage
 from .prompt import (PROMPT_VARIANTS, PLAN_SHAPES, CONSTRUCTS, FINISHERS,
                      INSTRUCTIONS_TEMPLATE, PROMPT_TEMPLATE)
 GENERATOR_VERSION = "query_generator_v8"
@@ -86,6 +87,11 @@ def _write_workload_directory_base(
     plan_shape_mix = Counter(q.get("plan_shape", "none") for q in queries)
 
     generation_stats = _drain_run_stats()
+    token_usage = drain_token_usage()
+    n_written = len(queries)
+    tokens_per_query = (
+        token_usage.get("total_tokens", 0) / n_written if n_written else None
+    )
 
     report = {
         "workload_name": workload_name,
@@ -94,7 +100,9 @@ def _write_workload_directory_base(
         "created_at_utc": started_at.isoformat(),
         "completed_at_utc": ended_at.isoformat(),
         "duration_s": (ended_at - started_at).total_seconds(),
-        "num_queries": len(queries),
+        "num_queries": n_written,
+        "token_usage": token_usage,
+        "tokens_per_query": tokens_per_query,
         "model": {
             "name": model_name,
             "base_url": base_url,

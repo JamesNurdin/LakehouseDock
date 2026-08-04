@@ -1,1 +1,0 @@
-SELECT wp.wp_web_page_id, wp.wp_link_count, SUM(wr.wr_return_amt_inc_tax) AS total_return_amt, COUNT(*) AS return_cnt FROM web_page wp JOIN web_returns wr ON wr.wr_web_page_sk = wp.wp_web_page_sk WHERE wp.wp_link_count >= 15 AND wp.wp_rec_start_date >= DATE '2023-01-01' GROUP BY wp.wp_web_page_id, wp.wp_link_count ORDER BY total_return_amt DESC LIMIT 10

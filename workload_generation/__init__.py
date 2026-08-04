@@ -5,7 +5,7 @@ workload_generation
 SQL workload generation for the Trino / Iceberg lakehouse.
 
 Contains the QueryDock generator itself
-(:mod:`workload_generation.query_generator`) alongside the related-work
+(:mod:`workload_generation.src`) alongside the related-work
 query-generation baselines it is compared against, adapted to the same
 lakehouse context so that they can be compared on equal footing.
 
@@ -22,7 +22,7 @@ Every baseline writes the same on-disk artefacts as QueryDock:
   * ``generation_report.json`` run metadata + per-query metaheuristics
 
 The ``generation_report.json`` mirrors the structure produced by
-``workload_generation.query_generator.write_workload_directory`` (see the sample
+``workload_generation.src.report.write_workload_directory`` (see the sample
 at ``LakehouseDock/Workloads/bigbenchv2/generation_report.json``) and is
 enriched with the static SQL "metaheuristics" computed in
 :mod:`workload_generation.sql_features`.
@@ -36,7 +36,7 @@ Papers implemented (see ``README.md`` for the mapping):
   * SQL-Factory         -- multi-agent large-scale SQL generation
 """
 
-from workload_generation.common import (
+from workload_generation.baselines.common import (
     BaselineContext,
     context_from_factories,
     context_from_lakehouse,
