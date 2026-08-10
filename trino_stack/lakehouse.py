@@ -50,9 +50,7 @@ from trino_stack.profile import NodeProfiler
 from trino_stack.resource_logger import NodeLogger
 from trino_stack.resource_profile import LakehouseResourceProfiler
 
-# query_generator: consolidated src package (v8 diversity design, flattened; one
-# unified budgeted feedback-driven construct selection + adaptive AIMD pool).
-# feedback_enabled=False -> coverage-blind baseline.
+
 from workload_generation.src.main import (
     load_schema,
     make_openai_client,

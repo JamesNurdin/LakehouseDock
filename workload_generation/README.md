@@ -1,16 +1,16 @@
-# workload_generation — QueryDock generator + related-work SQL generation baselines
+# workload_generation — DiverSQL generator + related-work SQL generation baselines
 
 This package lives at `LakehouseDock/workload_generation/` (alongside `trino_stack`
-and `loader`). It contains the QueryDock generator itself
+and `loader`). It contains the DiverSQL generator itself
 (`query_generator.py`) and the SQL-workload-generation baselines it is compared against, adapted
 to the **Trino / Iceberg lakehouse** context so the comparison is fair: every
-baseline reuses the *same* QueryDock infrastructure (schema loading, live DDL
+baseline reuses the *same* DiverSQL infrastructure (schema loading, live DDL
 introspection, the OpenAI client + retry/back-off, and `EXPLAIN`-based
 validation against the deployed Trino coordinator). The **only** thing that
-differs between a baseline and QueryDock is the generation pipeline itself.
+differs between a baseline and DiverSQL is the generation pipeline itself.
 
 Each baseline follows its paper's own pipeline as closely as the lakehouse
-allows, and writes the **same artefacts as QueryDock**:
+allows, and writes the **same artefacts as DiverSQL**:
 
 ```
 <WORKLOAD_ROOT>/<workload_name>/
@@ -28,12 +28,12 @@ allows, and writes the **same artefacts as QueryDock**:
 | `baselines/bootstrapping_lcm.py` | **Bootstrapping-LCM / DiGiT** — Nidd et al., *VLDB AIDB Workshop* 2025 | enumerate **connected FK subschemas** → few-shot `DataBuilder` prompt with **mechanically-generated seed examples** + group-by/order-by bias → validators (dedup + `EXPLAIN`) → **coverage-gap-driven re-biasing** |
 | `baselines/sql_factory.py` | **SQL-Factory** — multi-agent generation | **Generation Team** (table-selection weighted by coverage+complexity; high-reasoning generation agent) + **Expansion Team** (low-reasoning seed mutation) + **Management Team** (Critical Agent: `EXPLAIN` + hybrid token/AST/embedding similarity; Management Agent: exploration/exploitation scheduling) |
 
-QueryDock itself is *not* re-implemented here — it is the existing
+DiverSQL itself is *not* re-implemented here — it is the existing
 `Lakehouse.generate_workload(...)` and serves as the reference method.
 
 ## Metaheuristics (`generation_report.json`)
 
-Mirrors the QueryDock report at
+Mirrors the DiverSQL report at
 `LakehouseDock/Workloads/bigbenchv2/generation_report.json` and adds, via
 `sql_features.py`, static (no-execution) **metaheuristics** for a fair
 cross-generator comparison:
@@ -98,7 +98,7 @@ Per-baseline knobs (e.g. `--extra '{"rewrite_pass": false}'` for SQLStorm, or
 ```
 LakehouseDock/workload_generation/
     __init__.py          # BaselineContext + context builders + write_baseline_workload
-    query_generator.py   # the QueryDock generator (schema sampling, DDL context, LLM generation, workload writer)
+    query_generator.py   # the DiverSQL generator (schema sampling, DDL context, LLM generation, workload writer)
     common.py            # shared context: LLM calls, EXPLAIN validate, cost profiling, value sampling, report writer
     sql_features.py      # static SQL metaheuristics (sqlglot or regex fallback)
     baselines/           # the five baselines + BASELINES registry
@@ -107,7 +107,7 @@ LakehouseDock/workload_generation/
 
 ## Notes / honest limitations
 
-* Validation is single-engine (Trino `EXPLAIN`) — the same signal QueryDock
+* Validation is single-engine (Trino `EXPLAIN`) — the same signal DiverSQL
   uses. SQLStorm's original multi-engine parse-≥2/exec-≥1 rule is reduced to
   this single deployed engine.
 * SQLBarber's Bayesian Optimizer is approximated by random-restart hill

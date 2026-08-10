@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONPATH=/mnt/primary/Main timeout 590 python3 /tmp/claude-0/-mnt-primary-Main/590a2426-5322-4e15-93c8-406193087589/scratchpad/fix_lineorder.py)",
+      "Bash(tee /tmp/claude-0/-mnt-primary-Main/590a2426-5322-4e15-93c8-406193087589/scratchpad/fix_lineorder.log)"
+    ]
+  }
+}
