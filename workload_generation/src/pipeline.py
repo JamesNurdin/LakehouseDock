@@ -1,10 +1,6 @@
 """
 pipeline -- orchestration: one query, and the batch accept-loop.
 
-Combines the v8 diversity design (shape draw + F-1 named-operator deficit hints,
-driven by the DiversityTracker) with the adaptive AIMD concurrency pool. All
-logic is delegated to the concept modules; experiments change behaviour by
-injecting a tracker subclass or a FeedbackPolicy.
 """
 
 from __future__ import annotations
@@ -68,7 +64,7 @@ def generate_query(
     table_sampler=None,
     task_augmenter=None,
 ) -> dict:
-    """One query: v8 shape + deficit-hints (F-1) + coverage-weighted tables +
+    """One query: shape + deficit-hints + coverage-weighted tables +
     grounded prompt + LLM. Hint selection is driven by the tracker.
 
     ``shape_sampler``/``table_sampler``/``task_augmenter`` are injection seams for
@@ -352,7 +348,7 @@ def generate_query_batch(
     except Exception:
         pass
 
-    # v6 overflow filler: backfill from cap-rejected uniques within the budget.
+    # Overflow filler: backfill from cap-rejected uniques within the budget.
     while len(accepted) < num_queries and overflow:
         q = overflow.pop(0)
         if tracker.try_accept(

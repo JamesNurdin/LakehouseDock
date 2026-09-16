@@ -17,9 +17,6 @@ gates acceptance:
 Acceptance verdict order: sql-duplicate, plan-duplicate, plan-family-capped,
 near-duplicate (skeleton+table-set), skeleton-capped, else accepted.
 
-The V8 hint *selection* lives in feedback.py (FeedbackPolicy); this class only
-stores the state it reads (via ``feedback_state``) and records whether hints
-landed. ``feedback_enabled`` only gates hint selection -- tracking always runs.
 """
 
 from __future__ import annotations

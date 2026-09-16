@@ -151,8 +151,8 @@ def _write_workload_directory_base(
             "expanded_plan_shapes": "D-4: 8 plan shapes (v3's 5 + outer_join, rollup, windowed)",
             "strict_plan_cap": "D-5: plan_signature_cap 8 -> 3 (forces more distinct plan families)",
             "plan_novelty_control": (
-                "inherited v3 (A): plan-graph dedup (min-NN > 0) + plan-family cap, "
-                "on top of v2 SQL/skeleton/near-dup control. Attempt budget unchanged (4x)."
+                "inherited: plan-graph dedup (min-NN > 0) + plan-family cap, "
+                "on top of SQL/skeleton/near-dup control. Attempt budget unchanged (4x)."
             ),
             "mixed_table_sampling": "coverage-weighted connected walk / connectivity-guaranteed uniform subset (E2ETune)",
             "coverage_aware_seeding": "1/(1+usage) table + edge weighting (SQL-Factory Eq. 7, DiGiT)",

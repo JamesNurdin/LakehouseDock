@@ -5,11 +5,6 @@ Owns the saturating worker pool, the AIMD concurrency controller (adapts the
 in-flight target to endpoint contention), the wiring to llm's retry observer (the
 real-time contention signal), and the progress-callback signal the caller renders.
 
-PORT FROM:
-  v6: _record_batch_stats / _drain_run_stats (per-run attempt/rejection stats)
-  v9.2: continuous saturating pool (submit -> wait FIRST_COMPLETED -> refill)
-  latest: ConcurrencyController (below) + retry-observer wiring + progress_cb
-
 The ConcurrencyController below is the finished implementation (unit-tested).
 
 Uses: config.CONC_MIN, CONC_START, CONC_BETA, CONC_PROBE_INTERVAL_S,
@@ -25,7 +20,7 @@ from . import config
 
 
 class ConcurrencyController:
-    """AIMD in-flight target: +1 every probe_interval_s when healthy; ×beta on a
+    """AIMD in-flight target: +1 every probe_interval_s when healthy; beta on a
     contention signal, then frozen for cooldown_s so a burst = one cut. The
     caller's worker count is the CEILING (c_max), not a fixed level.
 

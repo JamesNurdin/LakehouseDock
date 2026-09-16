@@ -20,7 +20,7 @@ from trino_stack.config import (
 )
 
 # ============================================================
-# 1. Environment / paths / model  (v1)
+# 1. Environment / paths / model  
 # ============================================================
 DEFAULT_REASONING = "high"       # reasoning effort
 

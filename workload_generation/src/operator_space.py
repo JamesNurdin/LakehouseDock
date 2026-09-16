@@ -12,9 +12,6 @@ Nothing here is learned or probed: the ceiling is enumerated from Trino source
 and the lever map is grounded in SQL relational semantics. See
 ``resources/README.md`` for provenance and column semantics.
 
-This module has no dependency on the rest of ``src`` (or on ``baselines``); it is
-the operator-space kernel the generator's prompt/feedback layers build on.
-
 Typical use
 -----------
     from .operator_space import (
