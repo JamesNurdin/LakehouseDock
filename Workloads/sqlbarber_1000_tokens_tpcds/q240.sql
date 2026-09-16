@@ -1,1 +1,0 @@
-SELECT ib.ib_lower_bound, COUNT(*) AS household_cnt FROM household_demographics hd JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk WHERE hd.hd_buy_potential = '1001-5000      ' GROUP BY ib.ib_lower_bound
