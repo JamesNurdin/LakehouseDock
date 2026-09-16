@@ -1,7 +1,6 @@
 """
 workload_generation.src -- the consolidated QueryDock generator (v8 design),
-factored by concept. See README.md for architecture, the v1->v8 provenance map,
-and the incremental-experiment workflow.
+factored by concept. See README.md for architecture and the v1->v8 provenance map.
 
 Public API is re-exported from .main:
 

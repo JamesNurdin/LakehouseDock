@@ -13,6 +13,7 @@ Workloads/
 workload_generation/motivation/
 workload_generation/hybrid/
 workload_generation/qpp_evaluation/
+workload_generation/analysis/results/
 Datasets/iceberg_tpcds/iceberg-spark-tpcds-benchmark/
 
 # Internal
