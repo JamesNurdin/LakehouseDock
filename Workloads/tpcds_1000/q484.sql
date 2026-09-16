@@ -1,49 +1,39 @@
-with ss as
- (select ca_county,d_qoy, d_year,sum(ss_ext_sales_price) as store_sales
- from store_sales,date_dim,customer_address
- where ss_sold_date_sk = d_date_sk
-  and ss_addr_sk=ca_address_sk
- group by ca_county,d_qoy, d_year),
- ws as
- (select ca_county,d_qoy, d_year,sum(ws_ext_sales_price) as web_sales
- from web_sales,date_dim,customer_address
- where ws_sold_date_sk = d_date_sk
-  and ws_bill_addr_sk=ca_address_sk
- group by ca_county,d_qoy, d_year)
- select /* tt */
-        ss1.ca_county
-       ,ss1.d_year
-       ,ws2.web_sales/ws1.web_sales web_q1_q2_increase
-       ,ss2.store_sales/ss1.store_sales store_q1_q2_increase
-       ,ws3.web_sales/ws2.web_sales web_q2_q3_increase
-       ,ss3.store_sales/ss2.store_sales store_q2_q3_increase
- from
-        ss ss1
-       ,ss ss2
-       ,ss ss3
-       ,ws ws1
-       ,ws ws2
-       ,ws ws3
- where
-    ss1.d_qoy = 1
-    and ss1.d_year = 1998
-    and ss1.ca_county = ss2.ca_county
-    and ss2.d_qoy = 2
-    and ss2.d_year = 1998
- and ss2.ca_county = ss3.ca_county
-    and ss3.d_qoy = 3
-    and ss3.d_year = 1998
-    and ss1.ca_county = ws1.ca_county
-    and ws1.d_qoy = 1
-    and ws1.d_year = 1998
-    and ws1.ca_county = ws2.ca_county
-    and ws2.d_qoy = 2
-    and ws2.d_year = 1998
-    and ws1.ca_county = ws3.ca_county
-    and ws3.d_qoy = 3
-    and ws3.d_year =1998
-    and case when ws1.web_sales > 0 then ws2.web_sales/ws1.web_sales else null end 
-       > case when ss1.store_sales > 0 then ss2.store_sales/ss1.store_sales else null end
-    and case when ws2.web_sales > 0 then ws3.web_sales/ws2.web_sales else null end
-       > case when ss2.store_sales > 0 then ss3.store_sales/ss2.store_sales else null end
- order by store_q2_q3_increase;
+select  c_last_name
+       ,c_first_name
+       ,ca_city
+       ,bought_city
+       ,ss_ticket_number
+       ,extended_price
+       ,extended_tax
+       ,list_price
+ from (select ss_ticket_number
+             ,ss_customer_sk
+             ,ca_city bought_city
+             ,sum(ss_ext_sales_price) extended_price 
+             ,sum(ss_ext_list_price) list_price
+             ,sum(ss_ext_tax) extended_tax 
+       from store_sales
+           ,date_dim
+           ,store
+           ,household_demographics
+           ,customer_address 
+       where store_sales.ss_sold_date_sk = date_dim.d_date_sk
+         and store_sales.ss_store_sk = store.s_store_sk  
+        and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
+        and store_sales.ss_addr_sk = customer_address.ca_address_sk
+        and date_dim.d_dom between 1 and 2 
+        and (household_demographics.hd_dep_count = 4 or
+             household_demographics.hd_vehicle_count= 2)
+        and date_dim.d_year in (1999,1999+1,1999+2)
+        and store.s_city in ('Fairview','Midway')
+       group by ss_ticket_number
+               ,ss_customer_sk
+               ,ss_addr_sk,ca_city) dn
+      ,customer
+      ,customer_address current_addr
+ where ss_customer_sk = c_customer_sk
+   and customer.c_current_addr_sk = current_addr.ca_address_sk
+   and current_addr.ca_city <> bought_city
+ order by c_last_name
+         ,ss_ticket_number
+ limit 100

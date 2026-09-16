@@ -1,18 +1,27 @@
-select  c_customer_id as customer_id
-       ,c_last_name || ', ' || c_first_name as customername
- from customer
-     ,customer_address
-     ,customer_demographics
-     ,household_demographics
-     ,income_band
-     ,store_returns
- where ca_city	        =  'Jackson'
-   and c_current_addr_sk = ca_address_sk
-   and ib_lower_bound   >=  62841
-   and ib_upper_bound   <=  62841 + 50000
-   and ib_income_band_sk = hd_income_band_sk
-   and cd_demo_sk = c_current_cdemo_sk
-   and hd_demo_sk = c_current_hdemo_sk
-   and sr_cdemo_sk = cd_demo_sk
- order by c_customer_id
- limit 100;
+select  
+   sum(ws_ext_discount_amt)  as "Excess Discount Amount" 
+from 
+    web_sales 
+   ,item 
+   ,date_dim
+where
+i_manufact_id = 658
+and i_item_sk = ws_item_sk 
+and d_date between DATE '1998-01-27' and 
+        (cast('1998-01-27' as date) + INTERVAL '90' DAY)
+and d_date_sk = ws_sold_date_sk 
+and ws_ext_discount_amt  
+     > ( 
+         SELECT 
+            1.3 * avg(ws_ext_discount_amt) 
+         FROM 
+            web_sales 
+           ,date_dim
+         WHERE 
+              ws_item_sk = i_item_sk 
+          and d_date between DATE '1998-01-27' and
+                             (cast('1998-01-27' as date) + INTERVAL '90' DAY)
+          and d_date_sk = ws_sold_date_sk 
+      ) 
+order by sum(ws_ext_discount_amt)
+limit 100

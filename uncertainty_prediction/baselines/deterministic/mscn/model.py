@@ -6,8 +6,13 @@ import torch.nn.functional as F
 # Define model architecture
 
 class SetConv(nn.Module):
-    def __init__(self, sample_feats, predicate_feats, join_feats, hid_units):
+    def __init__(self, sample_feats, predicate_feats, join_feats, hid_units, *, bounded_output=True):
         super(SetConv, self).__init__()
+        # bounded_output=True  -> sigmoid head, prediction confined to (0, 1)
+        #                         (pair with normalize_labels / unnormalize_labels)
+        # bounded_output=False -> linear head, unbounded prediction
+        #                         (pair with standardize_labels / destandardize_labels)
+        self.bounded_output = bounded_output
         self.sample_mlp1 = nn.Linear(sample_feats, hid_units)
         self.sample_mlp2 = nn.Linear(hid_units, hid_units)
         self.predicate_mlp1 = nn.Linear(predicate_feats, hid_units)
@@ -45,5 +50,7 @@ class SetConv(nn.Module):
 
         hid = torch.cat((hid_sample, hid_predicate, hid_join), 1)
         hid = F.relu(self.out_mlp1(hid))
-        out = torch.sigmoid(self.out_mlp2(hid))
+        out = self.out_mlp2(hid)
+        if self.bounded_output:
+            out = torch.sigmoid(out)
         return out

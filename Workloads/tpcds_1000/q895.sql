@@ -1,58 +1,41 @@
-with year_total as (
- select c_customer_id customer_id
-       ,c_first_name customer_first_name
-       ,c_last_name customer_last_name
-       ,d_year as year
-       ,min(ss_net_paid) year_total
-       ,'s' sale_type
- from customer
-     ,store_sales
-     ,date_dim
- where c_customer_sk = ss_customer_sk
-   and ss_sold_date_sk = d_date_sk
-   and d_year in (1998,1998+1)
- group by c_customer_id
-         ,c_first_name
-         ,c_last_name
-         ,d_year
- union all
- select c_customer_id customer_id
-       ,c_first_name customer_first_name
-       ,c_last_name customer_last_name
-       ,d_year as year
-       ,min(ws_net_paid) year_total
-       ,'w' sale_type
- from customer
-     ,web_sales
-     ,date_dim
- where c_customer_sk = ws_bill_customer_sk
-   and ws_sold_date_sk = d_date_sk
-   and d_year in (1998,1998+1)
- group by c_customer_id
-         ,c_first_name
-         ,c_last_name
-         ,d_year
-         )
-  select 
-        t_s_secyear.customer_id, t_s_secyear.customer_first_name, t_s_secyear.customer_last_name
- from year_total t_s_firstyear
-     ,year_total t_s_secyear
-     ,year_total t_w_firstyear
-     ,year_total t_w_secyear
- where t_s_secyear.customer_id = t_s_firstyear.customer_id
-         and t_s_firstyear.customer_id = t_w_secyear.customer_id
-         and t_s_firstyear.customer_id = t_w_firstyear.customer_id
-         and t_s_firstyear.sale_type = 's'
-         and t_w_firstyear.sale_type = 'w'
-         and t_s_secyear.sale_type = 's'
-         and t_w_secyear.sale_type = 'w'
-         and t_s_firstyear.year = 1998
-         and t_s_secyear.year = 1998+1
-         and t_w_firstyear.year = 1998
-         and t_w_secyear.year = 1998+1
-         and t_s_firstyear.year_total > 0
-         and t_w_firstyear.year_total > 0
-         and case when t_w_firstyear.year_total > 0 then t_w_secyear.year_total / t_w_firstyear.year_total else null end
-           > case when t_s_firstyear.year_total > 0 then t_s_secyear.year_total / t_s_firstyear.year_total else null end
- order by 3,1,2
-limit 100;
+select  *
+from (select i_category
+            ,i_class
+            ,i_brand
+            ,i_product_name
+            ,d_year
+            ,d_qoy
+            ,d_moy
+            ,s_store_id
+            ,sumsales
+            ,rank() over (partition by i_category order by sumsales desc) rk
+      from (select i_category
+                  ,i_class
+                  ,i_brand
+                  ,i_product_name
+                  ,d_year
+                  ,d_qoy
+                  ,d_moy
+                  ,s_store_id
+                  ,sum(coalesce(ss_sales_price*ss_quantity,0)) sumsales
+            from store_sales
+                ,date_dim
+                ,store
+                ,item
+       where  ss_sold_date_sk=d_date_sk
+          and ss_item_sk=i_item_sk
+          and ss_store_sk = s_store_sk
+          and d_month_seq between 1213 and 1213+11
+       group by  rollup(i_category, i_class, i_brand, i_product_name, d_year, d_qoy, d_moy,s_store_id))dw1) dw2
+where rk <= 100
+order by i_category
+        ,i_class
+        ,i_brand
+        ,i_product_name
+        ,d_year
+        ,d_qoy
+        ,d_moy
+        ,s_store_id
+        ,sumsales
+        ,rk
+limit 100

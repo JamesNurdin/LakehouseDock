@@ -1,11 +1,47 @@
-select  i_brand_id brand_id, i_brand brand,
- 	sum(ss_ext_sales_price) ext_price
- from date_dim, store_sales, item
- where d_date_sk = ss_sold_date_sk
- 	and ss_item_sk = i_item_sk
- 	and i_manager_id=89
- 	and d_moy=11
- 	and d_year=2001
- group by i_brand, i_brand_id
- order by ext_price desc, i_brand_id
-limit 100 ;
+with ssales as
+(select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,ca_state
+      ,s_state
+      ,i_color
+      ,i_current_price
+      ,i_manager_id
+      ,i_units
+      ,i_size
+      ,sum(ss_sales_price) netpaid
+from store_sales
+    ,store_returns
+    ,store
+    ,item
+    ,customer
+    ,customer_address
+where ss_ticket_number = sr_ticket_number
+  and ss_item_sk = sr_item_sk
+  and ss_customer_sk = c_customer_sk
+  and ss_item_sk = i_item_sk
+  and ss_store_sk = s_store_sk
+  and c_birth_country = upper(ca_country)
+  and s_zip = ca_zip
+  and s_market_id = 5
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+        ,ca_state
+        ,s_state
+        ,i_color
+        ,i_current_price
+        ,i_manager_id
+        ,i_units
+        ,i_size)
+select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,sum(netpaid) paid
+from ssales
+where i_color = 'sky'
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+having sum(netpaid) > (select 0.05*avg(netpaid)
+                           from ssales)

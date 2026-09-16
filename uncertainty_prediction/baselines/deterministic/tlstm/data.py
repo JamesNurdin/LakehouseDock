@@ -525,12 +525,23 @@ def get_train_test_datasets_from_trino(
     condition_op_dim=16,
     extra_dim=16,
     sample_dim=32,
+    vocab_qids=None,
 ):
     """
     Returns pre-batched TLSTM datasets that are structurally close to the
     exported notebook pipeline.
+
+    `vocab_qids`, if given, fits the operator vocabulary (and hence the
+    model's `operator_dim`) from this query set instead of `train_qids` --
+    the same mechanism `mscn`'s data pipeline already uses (see its
+    docstring): a model pretrained on one training set and later
+    fine-tuned on a different, smaller increment need identical input dims
+    for `model.load_state_dict(...)` to work, which requires both stages to
+    fit their vocabulary from the same (e.g. pooled/superset) query set
+    rather than each stage's own, possibly narrower, train_qids.
     """
-    train_plans = [plans_by_query[q] for q in train_qids if q in plans_by_query]
+    vocab_source_qids = vocab_qids if vocab_qids is not None else train_qids
+    train_plans = [plans_by_query[q] for q in vocab_source_qids if q in plans_by_query]
     operator_names = set(get_all_operator_names(train_plans))
     operator_names.add("UNKNOWN")
     operator_names.add("FOLD_NODE")

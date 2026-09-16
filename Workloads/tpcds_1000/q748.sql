@@ -1,20 +1,47 @@
-select count(*) 
-from ((select distinct c_last_name, c_first_name, d_date
-       from store_sales, date_dim, customer
-       where store_sales.ss_sold_date_sk = date_dim.d_date_sk
-         and store_sales.ss_customer_sk = customer.c_customer_sk
-         and d_month_seq between 1200 and 1200+11)
-       except
-      (select distinct c_last_name, c_first_name, d_date
-       from catalog_sales, date_dim, customer
-       where catalog_sales.cs_sold_date_sk = date_dim.d_date_sk
-         and catalog_sales.cs_bill_customer_sk = customer.c_customer_sk
-         and d_month_seq between 1200 and 1200+11)
-       except
-      (select distinct c_last_name, c_first_name, d_date
-       from web_sales, date_dim, customer
-       where web_sales.ws_sold_date_sk = date_dim.d_date_sk
-         and web_sales.ws_bill_customer_sk = customer.c_customer_sk
-         and d_month_seq between 1200 and 1200+11)
-) cool_cust
-;
+with ssales as
+(select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,ca_state
+      ,s_state
+      ,i_color
+      ,i_current_price
+      ,i_manager_id
+      ,i_units
+      ,i_size
+      ,sum(ss_sales_price) netpaid
+from store_sales
+    ,store_returns
+    ,store
+    ,item
+    ,customer
+    ,customer_address
+where ss_ticket_number = sr_ticket_number
+  and ss_item_sk = sr_item_sk
+  and ss_customer_sk = c_customer_sk
+  and ss_item_sk = i_item_sk
+  and ss_store_sk = s_store_sk
+  and c_birth_country = upper(ca_country)
+  and s_zip = ca_zip
+  and s_market_id = 7
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+        ,ca_state
+        ,s_state
+        ,i_color
+        ,i_current_price
+        ,i_manager_id
+        ,i_units
+        ,i_size)
+select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,sum(netpaid) paid
+from ssales
+where i_color = 'papaya'
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+having sum(netpaid) > (select 0.05*avg(netpaid)
+                           from ssales)

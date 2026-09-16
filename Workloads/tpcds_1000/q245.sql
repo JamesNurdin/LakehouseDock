@@ -1,14 +1,27 @@
-select  i_item_id
-       ,i_item_desc
-       ,i_current_price
- from item, inventory, date_dim, store_sales
- where i_current_price between 41 and 41+30
- and inv_item_sk = i_item_sk
- and d_date_sk=inv_date_sk
- and d_date between cast('1999-05-23' as date) and (cast('1999-05-23' as date) +  60 days)
- and i_manufact_id in (807,762,537,113)
- and inv_quantity_on_hand between 100 and 500
- and ss_item_sk = i_item_sk
- group by i_item_id,i_item_desc,i_current_price
- order by i_item_id
- limit 100;
+select  
+    sum(ss_net_profit)/sum(ss_ext_sales_price) as gross_margin
+   ,i_category
+   ,i_class
+   ,grouping(i_category)+grouping(i_class) as lochierarchy
+   ,rank() over (
+ 	partition by grouping(i_category)+grouping(i_class),
+ 	case when grouping(i_class) = 0 then i_category end 
+ 	order by sum(ss_net_profit)/sum(ss_ext_sales_price) asc) as rank_within_parent
+ from
+    store_sales
+   ,date_dim       d1
+   ,item
+   ,store
+ where
+    d1.d_year = 2002 
+ and d1.d_date_sk = ss_sold_date_sk
+ and i_item_sk  = ss_item_sk 
+ and s_store_sk  = ss_store_sk
+ and s_state in ('TN','TN','TN','TN',
+                 'TN','TN','TN','TN')
+ group by rollup(i_category,i_class)
+ order by
+   lochierarchy desc
+  ,case when lochierarchy = 0 then i_category end
+  ,rank_within_parent
+  limit 100

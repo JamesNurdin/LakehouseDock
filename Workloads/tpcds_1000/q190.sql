@@ -1,28 +1,64 @@
-select  
-        cc_call_center_id Call_Center,
-        cc_name Call_Center_Name,
-        cc_manager Manager,
-        sum(cr_net_loss) Returns_Loss
-from
-        call_center,
-        catalog_returns,
-        date_dim,
-        customer,
-        customer_address,
-        customer_demographics,
-        household_demographics
-where
-        cr_call_center_sk       = cc_call_center_sk
-and     cr_returned_date_sk     = d_date_sk
-and     cr_returning_customer_sk= c_customer_sk
-and     cd_demo_sk              = c_current_cdemo_sk
-and     hd_demo_sk              = c_current_hdemo_sk
-and     ca_address_sk           = c_current_addr_sk
-and     d_year                  = 2000 
-and     d_moy                   = 12
-and     ( (cd_marital_status       = 'M' and cd_education_status     = 'Unknown')
-        or(cd_marital_status       = 'W' and cd_education_status     = 'Advanced Degree'))
-and     hd_buy_potential like '1001-5000%'
-and     ca_gmt_offset           = -7
-group by cc_call_center_id,cc_name,cc_manager,cd_marital_status,cd_education_status
-order by sum(cr_net_loss) desc;
+with sr_items as
+ (select i_item_id item_id,
+        sum(sr_return_quantity) sr_item_qty
+ from store_returns,
+      item,
+      date_dim
+ where sr_item_sk = i_item_sk
+ and   d_date    in 
+	(select d_date
+	from date_dim
+	where d_week_seq in 
+		(select d_week_seq
+		from date_dim
+	  where d_date in (DATE '1999-05-31',DATE '1999-08-28',DATE '1999-11-20')))
+ and   sr_returned_date_sk   = d_date_sk
+ group by i_item_id),
+ cr_items as
+ (select i_item_id item_id,
+        sum(cr_return_quantity) cr_item_qty
+ from catalog_returns,
+      item,
+      date_dim
+ where cr_item_sk = i_item_sk
+ and   d_date    in 
+	(select d_date
+	from date_dim
+	where d_week_seq in 
+		(select d_week_seq
+		from date_dim
+	  where d_date in (DATE '1999-05-31',DATE '1999-08-28',DATE '1999-11-20')))
+ and   cr_returned_date_sk   = d_date_sk
+ group by i_item_id),
+ wr_items as
+ (select i_item_id item_id,
+        sum(wr_return_quantity) wr_item_qty
+ from web_returns,
+      item,
+      date_dim
+ where wr_item_sk = i_item_sk
+ and   d_date    in 
+	(select d_date
+	from date_dim
+	where d_week_seq in 
+		(select d_week_seq
+		from date_dim
+		where d_date in (DATE '1999-05-31',DATE '1999-08-28',DATE '1999-11-20')))
+ and   wr_returned_date_sk   = d_date_sk
+ group by i_item_id)
+  select  sr_items.item_id
+       ,sr_item_qty
+       ,sr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 sr_dev
+       ,cr_item_qty
+       ,cr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 cr_dev
+       ,wr_item_qty
+       ,wr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 wr_dev
+       ,(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 average
+ from sr_items
+     ,cr_items
+     ,wr_items
+ where sr_items.item_id=cr_items.item_id
+   and sr_items.item_id=wr_items.item_id 
+ order by sr_items.item_id
+         ,sr_item_qty
+ limit 100

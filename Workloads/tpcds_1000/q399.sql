@@ -1,15 +1,23 @@
-select  ss_customer_sk
-            ,sum(act_sales) sumsales
-      from (select ss_item_sk
-                  ,ss_ticket_number
-                  ,ss_customer_sk
-                  ,case when sr_return_quantity is not null then (ss_quantity-sr_return_quantity)*ss_sales_price
-                                                            else (ss_quantity*ss_sales_price) end act_sales
-            from store_sales left outer join store_returns on (sr_item_sk = ss_item_sk
-                                                               and sr_ticket_number = ss_ticket_number)
-                ,reason
-            where sr_reason_sk = r_reason_sk
-              and r_reason_desc = 'reason 31') t
-      group by ss_customer_sk
-      order by sumsales, ss_customer_sk
-limit 100;
+select   
+    sum(ws_net_paid) as total_sum
+   ,i_category
+   ,i_class
+   ,grouping(i_category)+grouping(i_class) as lochierarchy
+   ,rank() over (
+ 	partition by grouping(i_category)+grouping(i_class),
+ 	case when grouping(i_class) = 0 then i_category end 
+ 	order by sum(ws_net_paid) desc) as rank_within_parent
+ from
+    web_sales
+   ,date_dim       d1
+   ,item
+ where
+    d1.d_month_seq between 1189 and 1189+11
+ and d1.d_date_sk = ws_sold_date_sk
+ and i_item_sk  = ws_item_sk
+ group by rollup(i_category,i_class)
+ order by
+   lochierarchy desc,
+   case when lochierarchy = 0 then i_category end,
+   rank_within_parent
+ limit 100

@@ -1,25 +1,19 @@
-select  *
-from(
-select i_category, i_class, i_brand,
-       s_store_name, s_company_name,
-       d_moy,
-       sum(ss_sales_price) sum_sales,
-       avg(sum(ss_sales_price)) over
-         (partition by i_category, i_brand, s_store_name, s_company_name)
-         avg_monthly_sales
-from item, store_sales, date_dim, store
-where ss_item_sk = i_item_sk and
-      ss_sold_date_sk = d_date_sk and
-      ss_store_sk = s_store_sk and
-      d_year in (1999) and
-        ((i_category in ('Music','Women','Sports') and
-          i_class in ('pop','fragrances','pools')
-         )
-      or (i_category in ('Home','Men','Books') and
-          i_class in ('glassware','accessories','arts') 
-        ))
-group by i_category, i_class, i_brand,
-         s_store_name, s_company_name, d_moy) tmp1
-where case when (avg_monthly_sales <> 0) then (abs(sum_sales - avg_monthly_sales) / avg_monthly_sales) else null end > 0.1
-order by sum_sales - avg_monthly_sales, s_store_name
-limit 100;
+select  dt.d_year
+ 	,item.i_brand_id brand_id
+ 	,item.i_brand brand
+ 	,sum(ss_ext_sales_price) ext_price
+ from date_dim dt
+     ,store_sales
+     ,item
+ where dt.d_date_sk = store_sales.ss_sold_date_sk
+    and store_sales.ss_item_sk = item.i_item_sk
+    and item.i_manager_id = 1
+    and dt.d_moy=11
+    and dt.d_year=2001
+ group by dt.d_year
+ 	,item.i_brand
+ 	,item.i_brand_id
+ order by dt.d_year
+ 	,ext_price desc
+ 	,brand_id
+limit 100

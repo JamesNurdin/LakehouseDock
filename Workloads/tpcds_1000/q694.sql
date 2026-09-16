@@ -1,35 +1,28 @@
-select  
-    sum(ss_net_profit) as total_sum
-   ,s_state
-   ,s_county
-   ,grouping(s_state)+grouping(s_county) as lochierarchy
-   ,rank() over (
- 	partition by grouping(s_state)+grouping(s_county),
- 	case when grouping(s_county) = 0 then s_state end 
- 	order by sum(ss_net_profit) desc) as rank_within_parent
- from
-    store_sales
-   ,date_dim       d1
-   ,store
- where
-    d1.d_month_seq between 1184 and 1184+11
- and d1.d_date_sk = ss_sold_date_sk
- and s_store_sk  = ss_store_sk
- and s_state in
-             ( select s_state
-               from  (select s_state as s_state,
- 			    rank() over ( partition by s_state order by sum(ss_net_profit) desc) as ranking
-                      from   store_sales, store, date_dim
-                      where  d_month_seq between 1184 and 1184+11
- 			    and d_date_sk = ss_sold_date_sk
- 			    and s_store_sk  = ss_store_sk
-                      group by s_state
-                     ) tmp1 
-               where ranking <= 5
-             )
- group by rollup(s_state,s_county)
- order by
-   lochierarchy desc
-  ,case when lochierarchy = 0 then s_state end
-  ,rank_within_parent
- limit 100;
+select  i_item_desc
+      ,w_warehouse_name
+      ,d1.d_week_seq
+      ,count(case when p_promo_sk is null then 1 else 0 end) no_promo
+      ,count(case when p_promo_sk is not null then 1 else 0 end) promo
+      ,count(*) total_cnt
+from catalog_sales
+join inventory on (cs_item_sk = inv_item_sk)
+join warehouse on (w_warehouse_sk=inv_warehouse_sk)
+join item on (i_item_sk = cs_item_sk)
+join customer_demographics on (cs_bill_cdemo_sk = cd_demo_sk)
+join household_demographics on (cs_bill_hdemo_sk = hd_demo_sk)
+join date_dim d1 on (cs_sold_date_sk = d1.d_date_sk)
+join date_dim d2 on (inv_date_sk = d2.d_date_sk)
+join date_dim d3 on (cs_ship_date_sk = d3.d_date_sk)
+left outer join promotion on (cs_promo_sk=p_promo_sk)
+left outer join catalog_returns on (cr_item_sk = cs_item_sk and cr_order_number = cs_order_number)
+where d1.d_week_seq = d2.d_week_seq
+  and inv_quantity_on_hand < cs_quantity 
+  and d3.d_date > d1.d_date + INTERVAL '5' DAY
+  and hd_buy_potential = '501-1000'
+  and d1.d_year = 2001
+  and hd_buy_potential = '501-1000'
+  and cd_marital_status = 'M'
+  and d1.d_year = 2001
+group by i_item_desc,w_warehouse_name,d1.d_week_seq
+order by total_cnt desc, i_item_desc, w_warehouse_name, d_week_seq
+limit 100

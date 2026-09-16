@@ -1,31 +1,29 @@
-select  i_item_id,
-        ca_country,
-        ca_state, 
-        ca_county,
-        avg( cast(cs_quantity as numeric(12,2))) agg1,
-        avg( cast(cs_list_price as numeric(12,2))) agg2,
-        avg( cast(cs_coupon_amt as numeric(12,2))) agg3,
-        avg( cast(cs_sales_price as numeric(12,2))) agg4,
-        avg( cast(cs_net_profit as numeric(12,2))) agg5,
-        avg( cast(c_birth_year as numeric(12,2))) agg6,
-        avg( cast(cd1.cd_dep_count as numeric(12,2))) agg7
- from catalog_sales, customer_demographics cd1, 
-      customer_demographics cd2, customer, customer_address, date_dim, item
- where cs_sold_date_sk = d_date_sk and
-       cs_item_sk = i_item_sk and
-       cs_bill_cdemo_sk = cd1.cd_demo_sk and
-       cs_bill_customer_sk = c_customer_sk and
-       cd1.cd_gender = 'F' and 
-       cd1.cd_education_status = 'Advanced Degree' and
-       c_current_cdemo_sk = cd2.cd_demo_sk and
-       c_current_addr_sk = ca_address_sk and
-       c_birth_month in (10,5,9,11,12,4) and
-       d_year = 1999 and
-       ca_state in ('NE','IA','IL'
-                   ,'KY','WY','AR','TX')
- group by rollup (i_item_id, ca_country, ca_state, ca_county)
- order by ca_country,
-        ca_state, 
-        ca_county,
+select i_item_desc 
+      ,i_category 
+      ,i_class 
+      ,i_current_price
+      ,sum(ss_ext_sales_price) as itemrevenue 
+      ,sum(ss_ext_sales_price)*100/sum(sum(ss_ext_sales_price)) over
+          (partition by i_class) as revenueratio
+from	
+	store_sales
+    	,item 
+    	,date_dim
+where 
+	ss_item_sk = i_item_sk 
+  	and i_category in ('Women', 'Music', 'Home')
+  	and ss_sold_date_sk = d_date_sk
+	and d_date between cast('2001-06-02' as date) 
+				and (cast('2001-06-02' as date) + INTERVAL '30' DAY)
+group by 
 	i_item_id
- limit 100;
+        ,i_item_desc 
+        ,i_category
+        ,i_class
+        ,i_current_price
+order by 
+	i_category
+        ,i_class
+        ,i_item_id
+        ,i_item_desc
+        ,revenueratio

@@ -1,41 +1,26 @@
-select  promotions,total,cast(promotions as decimal(15,4))/cast(total as decimal(15,4))*100
-from
-  (select sum(ss_ext_sales_price) promotions
-   from  store_sales
-        ,store
-        ,promotion
-        ,date_dim
-        ,customer
-        ,customer_address 
-        ,item
-   where ss_sold_date_sk = d_date_sk
-   and   ss_store_sk = s_store_sk
-   and   ss_promo_sk = p_promo_sk
-   and   ss_customer_sk= c_customer_sk
-   and   ca_address_sk = c_current_addr_sk
-   and   ss_item_sk = i_item_sk 
-   and   ca_gmt_offset = -6
-   and   i_category = 'Electronics'
-   and   (p_channel_dmail = 'Y' or p_channel_email = 'Y' or p_channel_tv = 'Y')
-   and   s_gmt_offset = -6
-   and   d_year = 2000
-   and   d_moy  = 12) promotional_sales,
-  (select sum(ss_ext_sales_price) total
-   from  store_sales
-        ,store
-        ,date_dim
-        ,customer
-        ,customer_address
-        ,item
-   where ss_sold_date_sk = d_date_sk
-   and   ss_store_sk = s_store_sk
-   and   ss_customer_sk= c_customer_sk
-   and   ca_address_sk = c_current_addr_sk
-   and   ss_item_sk = i_item_sk
-   and   ca_gmt_offset = -6
-   and   i_category = 'Electronics'
-   and   s_gmt_offset = -6
-   and   d_year = 2000
-   and   d_moy  = 12) all_sales
-order by promotions, total
-limit 100;
+select  i_item_desc 
+       ,i_category 
+       ,i_class 
+       ,i_current_price
+       ,sum(cs_ext_sales_price) as itemrevenue 
+       ,sum(cs_ext_sales_price)*100/sum(sum(cs_ext_sales_price)) over
+           (partition by i_class) as revenueratio
+ from	catalog_sales
+     ,item 
+     ,date_dim
+ where cs_item_sk = i_item_sk 
+   and i_category in ('Children', 'Books', 'Music')
+   and cs_sold_date_sk = d_date_sk
+ and d_date between cast('2002-05-06' as date) 
+ 				and (cast('2002-05-06' as date) + INTERVAL '30' DAY)
+ group by i_item_id
+         ,i_item_desc 
+         ,i_category
+         ,i_class
+         ,i_current_price
+ order by i_category
+         ,i_class
+         ,i_item_id
+         ,i_item_desc
+         ,revenueratio
+limit 100

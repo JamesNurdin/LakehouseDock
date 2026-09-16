@@ -1,31 +1,58 @@
-select  i_item_id,
-        ca_country,
-        ca_state, 
-        ca_county,
-        avg( cast(cs_quantity as numeric(12,2))) agg1,
-        avg( cast(cs_list_price as numeric(12,2))) agg2,
-        avg( cast(cs_coupon_amt as numeric(12,2))) agg3,
-        avg( cast(cs_sales_price as numeric(12,2))) agg4,
-        avg( cast(cs_net_profit as numeric(12,2))) agg5,
-        avg( cast(c_birth_year as numeric(12,2))) agg6,
-        avg( cast(cd1.cd_dep_count as numeric(12,2))) agg7
- from catalog_sales, customer_demographics cd1, 
-      customer_demographics cd2, customer, customer_address, date_dim, item
- where cs_sold_date_sk = d_date_sk and
-       cs_item_sk = i_item_sk and
-       cs_bill_cdemo_sk = cd1.cd_demo_sk and
-       cs_bill_customer_sk = c_customer_sk and
-       cd1.cd_gender = 'F' and 
-       cd1.cd_education_status = 'College' and
-       c_current_cdemo_sk = cd2.cd_demo_sk and
-       c_current_addr_sk = ca_address_sk and
-       c_birth_month in (6,10,5,7,12,1) and
-       d_year = 2001 and
-       ca_state in ('LA','IA','GA'
-                   ,'OR','TX','WY','OH')
- group by rollup (i_item_id, ca_country, ca_state, ca_county)
- order by ca_country,
-        ca_state, 
-        ca_county,
-	i_item_id
- limit 100;
+with year_total as (
+ select c_customer_id customer_id
+       ,c_first_name customer_first_name
+       ,c_last_name customer_last_name
+       ,d_year as year
+       ,max(ss_net_paid) year_total
+       ,'s' sale_type
+ from customer
+     ,store_sales
+     ,date_dim
+ where c_customer_sk = ss_customer_sk
+   and ss_sold_date_sk = d_date_sk
+   and d_year in (2001,2001+1)
+ group by c_customer_id
+         ,c_first_name
+         ,c_last_name
+         ,d_year
+ union all
+ select c_customer_id customer_id
+       ,c_first_name customer_first_name
+       ,c_last_name customer_last_name
+       ,d_year as year
+       ,max(ws_net_paid) year_total
+       ,'w' sale_type
+ from customer
+     ,web_sales
+     ,date_dim
+ where c_customer_sk = ws_bill_customer_sk
+   and ws_sold_date_sk = d_date_sk
+   and d_year in (2001,2001+1)
+ group by c_customer_id
+         ,c_first_name
+         ,c_last_name
+         ,d_year
+         )
+  select 
+        t_s_secyear.customer_id, t_s_secyear.customer_first_name, t_s_secyear.customer_last_name
+ from year_total t_s_firstyear
+     ,year_total t_s_secyear
+     ,year_total t_w_firstyear
+     ,year_total t_w_secyear
+ where t_s_secyear.customer_id = t_s_firstyear.customer_id
+         and t_s_firstyear.customer_id = t_w_secyear.customer_id
+         and t_s_firstyear.customer_id = t_w_firstyear.customer_id
+         and t_s_firstyear.sale_type = 's'
+         and t_w_firstyear.sale_type = 'w'
+         and t_s_secyear.sale_type = 's'
+         and t_w_secyear.sale_type = 'w'
+         and t_s_firstyear.year = 2001
+         and t_s_secyear.year = 2001+1
+         and t_w_firstyear.year = 2001
+         and t_w_secyear.year = 2001+1
+         and t_s_firstyear.year_total > 0
+         and t_w_firstyear.year_total > 0
+         and case when t_w_firstyear.year_total > 0 then t_w_secyear.year_total / t_w_firstyear.year_total else null end
+           > case when t_s_firstyear.year_total > 0 then t_s_secyear.year_total / t_s_firstyear.year_total else null end
+ order by 2,3,1
+limit 100

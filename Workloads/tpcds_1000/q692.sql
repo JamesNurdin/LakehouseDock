@@ -1,75 +1,35 @@
-with ss as (
- select
-          i_item_id,sum(ss_ext_sales_price) total_sales
+select  
+    sum(ss_net_profit) as total_sum
+   ,s_state
+   ,s_county
+   ,grouping(s_state)+grouping(s_county) as lochierarchy
+   ,rank() over (
+ 	partition by grouping(s_state)+grouping(s_county),
+ 	case when grouping(s_county) = 0 then s_state end 
+ 	order by sum(ss_net_profit) desc) as rank_within_parent
  from
- 	store_sales,
- 	date_dim,
-         customer_address,
-         item
+    store_sales
+   ,date_dim       d1
+   ,store
  where
-         i_item_id in (select
-  i_item_id
-from
- item
-where i_category in ('Shoes'))
- and     ss_item_sk              = i_item_sk
- and     ss_sold_date_sk         = d_date_sk
- and     d_year                  = 2002
- and     d_moy                   = 10
- and     ss_addr_sk              = ca_address_sk
- and     ca_gmt_offset           = -6 
- group by i_item_id),
- cs as (
- select
-          i_item_id,sum(cs_ext_sales_price) total_sales
- from
- 	catalog_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_item_id               in (select
-  i_item_id
-from
- item
-where i_category in ('Shoes'))
- and     cs_item_sk              = i_item_sk
- and     cs_sold_date_sk         = d_date_sk
- and     d_year                  = 2002
- and     d_moy                   = 10
- and     cs_bill_addr_sk         = ca_address_sk
- and     ca_gmt_offset           = -6 
- group by i_item_id),
- ws as (
- select
-          i_item_id,sum(ws_ext_sales_price) total_sales
- from
- 	web_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_item_id               in (select
-  i_item_id
-from
- item
-where i_category in ('Shoes'))
- and     ws_item_sk              = i_item_sk
- and     ws_sold_date_sk         = d_date_sk
- and     d_year                  = 2002
- and     d_moy                   = 10
- and     ws_bill_addr_sk         = ca_address_sk
- and     ca_gmt_offset           = -6
- group by i_item_id)
-  select   
-  i_item_id
-,sum(total_sales) total_sales
- from  (select * from ss 
-        union all
-        select * from cs 
-        union all
-        select * from ws) tmp1
- group by i_item_id
- order by i_item_id
-      ,total_sales
- limit 100;
+    d1.d_month_seq between 1185 and 1185+11
+ and d1.d_date_sk = ss_sold_date_sk
+ and s_store_sk  = ss_store_sk
+ and s_state in
+             ( select s_state
+               from  (select s_state as s_state,
+ 			    rank() over ( partition by s_state order by sum(ss_net_profit) desc) as ranking
+                      from   store_sales, store, date_dim
+                      where  d_month_seq between 1185 and 1185+11
+ 			    and d_date_sk = ss_sold_date_sk
+ 			    and s_store_sk  = ss_store_sk
+                      group by s_state
+                     ) tmp1 
+               where ranking <= 5
+             )
+ group by rollup(s_state,s_county)
+ order by
+   lochierarchy desc
+  ,case when lochierarchy = 0 then s_state end
+  ,rank_within_parent
+ limit 100

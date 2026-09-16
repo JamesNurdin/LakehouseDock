@@ -1,0 +1,10 @@
+workload,queries,collision_groups,queries_in_collision,collapse_rate,plan_uniqueness_ratio,status
+tpcds,99,12,27,0.273,0.848,ok
+tpcds_1000,1000,87,1000,1.0,0.087,ok
+gpt_generated_1000_tpcds_tokens,1000,0,0,0.0,1.0,ok
+gpt_generated_1000_tpcds_tokens_no_feedback,1000,0,0,0.0,1.0,ok
+sqlbarber_1000_tokens_tpcds,1000,103,995,0.995,0.108,ok
+sql_factory_1000_tokens_tpcds,1000,30,65,0.065,0.965,ok
+sqlstorm_1000_tokens_tpcds,1000,27,237,0.237,0.79,ok
+e2etune_1000_tokens_tpcds,1000,22,46,0.046,0.976,ok
+bootstrapping_lcm_1000_tokens_tpcds,1000,59,143,0.143,0.916,ok

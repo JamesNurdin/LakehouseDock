@@ -1,48 +1,20 @@
-select case when (select count(*) 
-                  from store_sales 
-                  where ss_quantity between 1 and 20) > 38705
-            then (select avg(ss_ext_sales_price) 
-                  from store_sales 
-                  where ss_quantity between 1 and 20) 
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 1 and 20) end bucket1 ,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 21 and 40) > 27773
-            then (select avg(ss_ext_sales_price)
-                  from store_sales
-                  where ss_quantity between 21 and 40) 
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 21 and 40) end bucket2,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 41 and 60) > 43099
-            then (select avg(ss_ext_sales_price)
-                  from store_sales
-                  where ss_quantity between 41 and 60)
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 41 and 60) end bucket3,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 61 and 80) > 23383
-            then (select avg(ss_ext_sales_price)
-                  from store_sales
-                  where ss_quantity between 61 and 80)
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 61 and 80) end bucket4,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 81 and 100) > 168
-            then (select avg(ss_ext_sales_price)
-                  from store_sales
-                  where ss_quantity between 81 and 100)
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 81 and 100) end bucket5
-from reason
-where r_reason_sk = 1
-;
+select  i_item_id,
+        s_state, grouping(s_state) g_state,
+        avg(ss_quantity) agg1,
+        avg(ss_list_price) agg2,
+        avg(ss_coupon_amt) agg3,
+        avg(ss_sales_price) agg4
+ from store_sales, customer_demographics, date_dim, store, item
+ where ss_sold_date_sk = d_date_sk and
+       ss_item_sk = i_item_sk and
+       ss_store_sk = s_store_sk and
+       ss_cdemo_sk = cd_demo_sk and
+       cd_gender = 'F' and
+       cd_marital_status = 'M' and
+       cd_education_status = 'Unknown' and
+       d_year = 2000 and
+       s_state in ('TN','TN', 'TN', 'TN', 'TN', 'TN')
+ group by rollup (i_item_id, s_state)
+ order by i_item_id
+         ,s_state
+ limit 100

@@ -1,45 +1,44 @@
-with v1 as(
- select i_category, i_brand,
-        cc_name,
-        d_year, d_moy,
-        sum(cs_sales_price) sum_sales,
-        avg(sum(cs_sales_price)) over
-          (partition by i_category, i_brand,
-                     cc_name, d_year)
-          avg_monthly_sales,
-        rank() over
-          (partition by i_category, i_brand,
-                     cc_name
-           order by d_year, d_moy) rn
- from item, catalog_sales, date_dim, call_center
- where cs_item_sk = i_item_sk and
-       cs_sold_date_sk = d_date_sk and
-       cc_call_center_sk= cs_call_center_sk and
-       (
-         d_year = 1999 or
-         ( d_year = 1999-1 and d_moy =12) or
-         ( d_year = 1999+1 and d_moy =1)
-       )
- group by i_category, i_brand,
-          cc_name , d_year, d_moy),
- v2 as(
- select v1.i_category, v1.i_brand
-        ,v1.d_year
-        ,v1.avg_monthly_sales
-        ,v1.sum_sales, v1_lag.sum_sales psum, v1_lead.sum_sales nsum
- from v1, v1 v1_lag, v1 v1_lead
- where v1.i_category = v1_lag.i_category and
-       v1.i_category = v1_lead.i_category and
-       v1.i_brand = v1_lag.i_brand and
-       v1.i_brand = v1_lead.i_brand and
-       v1. cc_name = v1_lag. cc_name and
-       v1. cc_name = v1_lead. cc_name and
-       v1.rn = v1_lag.rn + 1 and
-       v1.rn = v1_lead.rn - 1)
-  select  *
- from v2
- where  d_year = 1999 and
-        avg_monthly_sales > 0 and
-        case when avg_monthly_sales > 0 then abs(sum_sales - avg_monthly_sales) / avg_monthly_sales else null end > 0.1
- order by sum_sales - avg_monthly_sales, 3
- limit 100;
+select  
+  cd_gender,
+  cd_marital_status,
+  cd_education_status,
+  count(*) cnt1,
+  cd_purchase_estimate,
+  count(*) cnt2,
+  cd_credit_rating,
+  count(*) cnt3
+ from
+  customer c,customer_address ca,customer_demographics
+ where
+  c.c_current_addr_sk = ca.ca_address_sk and
+  ca_state in ('IL','AR','IA') and
+  cd_demo_sk = c.c_current_cdemo_sk and 
+  exists (select *
+          from store_sales,date_dim
+          where c.c_customer_sk = ss_customer_sk and
+                ss_sold_date_sk = d_date_sk and
+                d_year = 2000 and
+                d_moy between 1 and 1+2) and
+   (not exists (select *
+            from web_sales,date_dim
+            where c.c_customer_sk = ws_bill_customer_sk and
+                  ws_sold_date_sk = d_date_sk and
+                  d_year = 2000 and
+                  d_moy between 1 and 1+2) and
+    not exists (select * 
+            from catalog_sales,date_dim
+            where c.c_customer_sk = cs_ship_customer_sk and
+                  cs_sold_date_sk = d_date_sk and
+                  d_year = 2000 and
+                  d_moy between 1 and 1+2))
+ group by cd_gender,
+          cd_marital_status,
+          cd_education_status,
+          cd_purchase_estimate,
+          cd_credit_rating
+ order by cd_gender,
+          cd_marital_status,
+          cd_education_status,
+          cd_purchase_estimate,
+          cd_credit_rating
+ limit 100

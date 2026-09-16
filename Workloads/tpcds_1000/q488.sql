@@ -1,26 +1,28 @@
-select  
-   count(distinct ws_order_number) as "order count"
-  ,sum(ws_ext_ship_cost) as "total shipping cost"
-  ,sum(ws_net_profit) as "total net profit"
-from
-   web_sales ws1
-  ,date_dim
-  ,customer_address
-  ,web_site
-where
-    d_date between '1999-5-01' and 
-           (cast('1999-5-01' as date) + 60 days)
-and ws1.ws_ship_date_sk = d_date_sk
-and ws1.ws_ship_addr_sk = ca_address_sk
-and ca_state = 'TX'
-and ws1.ws_web_site_sk = web_site_sk
-and web_company_name = 'pri'
-and exists (select *
-            from web_sales ws2
-            where ws1.ws_order_number = ws2.ws_order_number
-              and ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk)
-and not exists(select *
-               from web_returns wr1
-               where ws1.ws_order_number = wr1.wr_order_number)
-order by count(distinct ws_order_number)
-limit 100;
+select  i_item_desc
+      ,w_warehouse_name
+      ,d1.d_week_seq
+      ,count(case when p_promo_sk is null then 1 else 0 end) no_promo
+      ,count(case when p_promo_sk is not null then 1 else 0 end) promo
+      ,count(*) total_cnt
+from catalog_sales
+join inventory on (cs_item_sk = inv_item_sk)
+join warehouse on (w_warehouse_sk=inv_warehouse_sk)
+join item on (i_item_sk = cs_item_sk)
+join customer_demographics on (cs_bill_cdemo_sk = cd_demo_sk)
+join household_demographics on (cs_bill_hdemo_sk = hd_demo_sk)
+join date_dim d1 on (cs_sold_date_sk = d1.d_date_sk)
+join date_dim d2 on (inv_date_sk = d2.d_date_sk)
+join date_dim d3 on (cs_ship_date_sk = d3.d_date_sk)
+left outer join promotion on (cs_promo_sk=p_promo_sk)
+left outer join catalog_returns on (cr_item_sk = cs_item_sk and cr_order_number = cs_order_number)
+where d1.d_week_seq = d2.d_week_seq
+  and inv_quantity_on_hand < cs_quantity 
+  and d3.d_date > d1.d_date + INTERVAL '5' DAY
+  and hd_buy_potential = '>10000'
+  and d1.d_year = 1998
+  and hd_buy_potential = '>10000'
+  and cd_marital_status = 'M'
+  and d1.d_year = 1998
+group by i_item_desc,w_warehouse_name,d1.d_week_seq
+order by total_cnt desc, i_item_desc, w_warehouse_name, d_week_seq
+limit 100

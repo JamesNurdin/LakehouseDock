@@ -1,32 +1,50 @@
-select  c_last_name
-       ,c_first_name
-       ,ca_city
-       ,bought_city
-       ,ss_ticket_number
-       ,amt,profit 
- from
-   (select ss_ticket_number
-          ,ss_customer_sk
-          ,ca_city bought_city
-          ,sum(ss_coupon_amt) amt
-          ,sum(ss_net_profit) profit
-    from store_sales,date_dim,store,household_demographics,customer_address 
-    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
-    and store_sales.ss_store_sk = store.s_store_sk  
-    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
-    and store_sales.ss_addr_sk = customer_address.ca_address_sk
-    and (household_demographics.hd_dep_count = 1 or
-         household_demographics.hd_vehicle_count= -1)
-    and date_dim.d_dow in (6,0)
-    and date_dim.d_year in (1998,1998+1,1998+2) 
-    and store.s_city in ('Fairview','Midway','Fairview','Fairview','Fairview') 
-    group by ss_ticket_number,ss_customer_sk,ss_addr_sk,ca_city) dn,customer,customer_address current_addr
-    where ss_customer_sk = c_customer_sk
-      and customer.c_current_addr_sk = current_addr.ca_address_sk
-      and current_addr.ca_city <> bought_city
-  order by c_last_name
-          ,c_first_name
-          ,ca_city
-          ,bought_city
-          ,ss_ticket_number
-  limit 100;
+select  *
+from (select avg(ss_list_price) B1_LP
+            ,count(ss_list_price) B1_CNT
+            ,count(distinct ss_list_price) B1_CNTD
+      from store_sales
+      where ss_quantity between 0 and 5
+        and (ss_list_price between 10 and 10+10 
+             or ss_coupon_amt between 6609 and 6609+1000
+             or ss_wholesale_cost between 76 and 76+20)) B1,
+     (select avg(ss_list_price) B2_LP
+            ,count(ss_list_price) B2_CNT
+            ,count(distinct ss_list_price) B2_CNTD
+      from store_sales
+      where ss_quantity between 6 and 10
+        and (ss_list_price between 7 and 7+10
+          or ss_coupon_amt between 13686 and 13686+1000
+          or ss_wholesale_cost between 49 and 49+20)) B2,
+     (select avg(ss_list_price) B3_LP
+            ,count(ss_list_price) B3_CNT
+            ,count(distinct ss_list_price) B3_CNTD
+      from store_sales
+      where ss_quantity between 11 and 15
+        and (ss_list_price between 70 and 70+10
+          or ss_coupon_amt between 4109 and 4109+1000
+          or ss_wholesale_cost between 33 and 33+20)) B3,
+     (select avg(ss_list_price) B4_LP
+            ,count(ss_list_price) B4_CNT
+            ,count(distinct ss_list_price) B4_CNTD
+      from store_sales
+      where ss_quantity between 16 and 20
+        and (ss_list_price between 85 and 85+10
+          or ss_coupon_amt between 6110 and 6110+1000
+          or ss_wholesale_cost between 29 and 29+20)) B4,
+     (select avg(ss_list_price) B5_LP
+            ,count(ss_list_price) B5_CNT
+            ,count(distinct ss_list_price) B5_CNTD
+      from store_sales
+      where ss_quantity between 21 and 25
+        and (ss_list_price between 9 and 9+10
+          or ss_coupon_amt between 433 and 433+1000
+          or ss_wholesale_cost between 20 and 20+20)) B5,
+     (select avg(ss_list_price) B6_LP
+            ,count(ss_list_price) B6_CNT
+            ,count(distinct ss_list_price) B6_CNTD
+      from store_sales
+      where ss_quantity between 26 and 30
+        and (ss_list_price between 59 and 59+10
+          or ss_coupon_amt between 8574 and 8574+1000
+          or ss_wholesale_cost between 21 and 21+20)) B6
+limit 100

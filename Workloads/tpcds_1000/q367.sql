@@ -1,29 +1,53 @@
-with ws_wh as
-(select ws1.ws_order_number,ws1.ws_warehouse_sk wh1,ws2.ws_warehouse_sk wh2
- from web_sales ws1,web_sales ws2
- where ws1.ws_order_number = ws2.ws_order_number
-   and ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk)
- select  
-   count(distinct ws_order_number) as "order count"
-  ,sum(ws_ext_ship_cost) as "total shipping cost"
-  ,sum(ws_net_profit) as "total net profit"
-from
-   web_sales ws1
-  ,date_dim
-  ,customer_address
-  ,web_site
-where
-    d_date between '1999-3-01' and 
-           (cast('1999-3-01' as date) + 60 days)
-and ws1.ws_ship_date_sk = d_date_sk
-and ws1.ws_ship_addr_sk = ca_address_sk
-and ca_state = 'KY'
-and ws1.ws_web_site_sk = web_site_sk
-and web_company_name = 'pri'
-and ws1.ws_order_number in (select ws_order_number
-                            from ws_wh)
-and ws1.ws_order_number in (select wr_order_number
-                            from web_returns,ws_wh
-                            where wr_order_number = ws_wh.ws_order_number)
-order by count(distinct ws_order_number)
-limit 100;
+with my_customers as (
+ select distinct c_customer_sk
+        , c_current_addr_sk
+ from   
+        ( select cs_sold_date_sk sold_date_sk,
+                 cs_bill_customer_sk customer_sk,
+                 cs_item_sk item_sk
+          from   catalog_sales
+          union all
+          select ws_sold_date_sk sold_date_sk,
+                 ws_bill_customer_sk customer_sk,
+                 ws_item_sk item_sk
+          from   web_sales
+         ) cs_or_ws_sales,
+         item,
+         date_dim,
+         customer
+ where   sold_date_sk = d_date_sk
+         and item_sk = i_item_sk
+         and i_category = 'Jewelry'
+         and i_class = 'bracelets'
+         and c_customer_sk = cs_or_ws_sales.customer_sk
+         and d_moy = 5
+         and d_year = 2001
+ )
+ , my_revenue as (
+ select c_customer_sk,
+        sum(ss_ext_sales_price) as revenue
+ from   my_customers,
+        store_sales,
+        customer_address,
+        store,
+        date_dim
+ where  c_current_addr_sk = ca_address_sk
+        and ca_county = s_county
+        and ca_state = s_state
+        and ss_sold_date_sk = d_date_sk
+        and c_customer_sk = ss_customer_sk
+        and d_month_seq between (select distinct d_month_seq+1
+                                 from   date_dim where d_year = 2001 and d_moy = 5)
+                           and  (select distinct d_month_seq+3
+                                 from   date_dim where d_year = 2001 and d_moy = 5)
+ group by c_customer_sk
+ )
+ , segments as
+ (select cast((revenue/50) as int) as segment
+  from   my_revenue
+ )
+  select  segment, count(*) as num_customers, segment*50 as segment_base
+ from segments
+ group by segment
+ order by segment, num_customers
+ limit 100

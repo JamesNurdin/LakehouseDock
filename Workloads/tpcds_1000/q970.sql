@@ -1,32 +1,25 @@
-select  c_last_name
-       ,c_first_name
-       ,ca_city
-       ,bought_city
-       ,ss_ticket_number
-       ,amt,profit 
- from
-   (select ss_ticket_number
-          ,ss_customer_sk
-          ,ca_city bought_city
-          ,sum(ss_coupon_amt) amt
-          ,sum(ss_net_profit) profit
-    from store_sales,date_dim,store,household_demographics,customer_address 
-    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
-    and store_sales.ss_store_sk = store.s_store_sk  
-    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
-    and store_sales.ss_addr_sk = customer_address.ca_address_sk
-    and (household_demographics.hd_dep_count = 6 or
-         household_demographics.hd_vehicle_count= 0)
-    and date_dim.d_dow in (6,0)
-    and date_dim.d_year in (1998,1998+1,1998+2) 
-    and store.s_city in ('Fairview','Midway','Fairview','Fairview','Fairview') 
-    group by ss_ticket_number,ss_customer_sk,ss_addr_sk,ca_city) dn,customer,customer_address current_addr
-    where ss_customer_sk = c_customer_sk
-      and customer.c_current_addr_sk = current_addr.ca_address_sk
-      and current_addr.ca_city <> bought_city
-  order by c_last_name
-          ,c_first_name
-          ,ca_city
-          ,bought_city
-          ,ss_ticket_number
-  limit 100;
+with inv as
+(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
+       ,stdev,mean, case mean when 0 then null else stdev/mean end cov
+ from(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
+            ,stddev_samp(inv_quantity_on_hand) stdev,avg(inv_quantity_on_hand) mean
+      from inventory
+          ,item
+          ,warehouse
+          ,date_dim
+      where inv_item_sk = i_item_sk
+        and inv_warehouse_sk = w_warehouse_sk
+        and inv_date_sk = d_date_sk
+        and d_year =1999
+      group by w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy) foo
+ where case mean when 0 then 0 else stdev/mean end > 1)
+select inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean, inv1.cov
+        ,inv2.w_warehouse_sk,inv2.i_item_sk,inv2.d_moy,inv2.mean, inv2.cov
+from inv inv1,inv inv2
+where inv1.i_item_sk = inv2.i_item_sk
+  and inv1.w_warehouse_sk =  inv2.w_warehouse_sk
+  and inv1.d_moy=2
+  and inv2.d_moy=2+1
+  and inv1.cov > 1.5
+order by inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean,inv1.cov
+        ,inv2.d_moy,inv2.mean, inv2.cov

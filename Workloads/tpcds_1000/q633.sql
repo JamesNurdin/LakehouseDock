@@ -1,49 +1,94 @@
-with ss as
- (select ca_county,d_qoy, d_year,sum(ss_ext_sales_price) as store_sales
- from store_sales,date_dim,customer_address
- where ss_sold_date_sk = d_date_sk
-  and ss_addr_sk=ca_address_sk
- group by ca_county,d_qoy, d_year),
- ws as
- (select ca_county,d_qoy, d_year,sum(ws_ext_sales_price) as web_sales
- from web_sales,date_dim,customer_address
- where ws_sold_date_sk = d_date_sk
-  and ws_bill_addr_sk=ca_address_sk
- group by ca_county,d_qoy, d_year)
- select /* tt */
-        ss1.ca_county
-       ,ss1.d_year
-       ,ws2.web_sales/ws1.web_sales web_q1_q2_increase
-       ,ss2.store_sales/ss1.store_sales store_q1_q2_increase
-       ,ws3.web_sales/ws2.web_sales web_q2_q3_increase
-       ,ss3.store_sales/ss2.store_sales store_q2_q3_increase
- from
-        ss ss1
-       ,ss ss2
-       ,ss ss3
-       ,ws ws1
-       ,ws ws2
-       ,ws ws3
- where
-    ss1.d_qoy = 1
-    and ss1.d_year = 1998
-    and ss1.ca_county = ss2.ca_county
-    and ss2.d_qoy = 2
-    and ss2.d_year = 1998
- and ss2.ca_county = ss3.ca_county
-    and ss3.d_qoy = 3
-    and ss3.d_year = 1998
-    and ss1.ca_county = ws1.ca_county
-    and ws1.d_qoy = 1
-    and ws1.d_year = 1998
-    and ws1.ca_county = ws2.ca_county
-    and ws2.d_qoy = 2
-    and ws2.d_year = 1998
-    and ws1.ca_county = ws3.ca_county
-    and ws3.d_qoy = 3
-    and ws3.d_year =1998
-    and case when ws1.web_sales > 0 then ws2.web_sales/ws1.web_sales else null end 
-       > case when ss1.store_sales > 0 then ss2.store_sales/ss1.store_sales else null end
-    and case when ws2.web_sales > 0 then ws3.web_sales/ws2.web_sales else null end
-       > case when ss2.store_sales > 0 then ss3.store_sales/ss2.store_sales else null end
- order by store_q1_q2_increase;
+with  cross_items as
+ (select i_item_sk ss_item_sk
+ from item,
+ (select iss.i_brand_id brand_id
+     ,iss.i_class_id class_id
+     ,iss.i_category_id category_id
+ from store_sales
+     ,item iss
+     ,date_dim d1
+ where ss_item_sk = iss.i_item_sk
+   and ss_sold_date_sk = d1.d_date_sk
+   and d1.d_year between 1999 AND 1999 + 2
+ intersect
+ select ics.i_brand_id
+     ,ics.i_class_id
+     ,ics.i_category_id
+ from catalog_sales
+     ,item ics
+     ,date_dim d2
+ where cs_item_sk = ics.i_item_sk
+   and cs_sold_date_sk = d2.d_date_sk
+   and d2.d_year between 1999 AND 1999 + 2
+ intersect
+ select iws.i_brand_id
+     ,iws.i_class_id
+     ,iws.i_category_id
+ from web_sales
+     ,item iws
+     ,date_dim d3
+ where ws_item_sk = iws.i_item_sk
+   and ws_sold_date_sk = d3.d_date_sk
+   and d3.d_year between 1999 AND 1999 + 2) x
+ where i_brand_id = brand_id
+      and i_class_id = class_id
+      and i_category_id = category_id
+),
+ avg_sales as
+(select avg(quantity*list_price) average_sales
+  from (select ss_quantity quantity
+             ,ss_list_price list_price
+       from store_sales
+           ,date_dim
+       where ss_sold_date_sk = d_date_sk
+         and d_year between 1999 and 1999 + 2
+       union all
+       select cs_quantity quantity
+             ,cs_list_price list_price
+       from catalog_sales
+           ,date_dim
+       where cs_sold_date_sk = d_date_sk
+         and d_year between 1999 and 1999 + 2
+       union all
+       select ws_quantity quantity
+             ,ws_list_price list_price
+       from web_sales
+           ,date_dim
+       where ws_sold_date_sk = d_date_sk
+         and d_year between 1999 and 1999 + 2) x)
+  select  * from
+ (select 'store' channel, i_brand_id,i_class_id,i_category_id
+        ,sum(ss_quantity*ss_list_price) sales, count(*) number_sales
+ from store_sales 
+     ,item
+     ,date_dim
+ where ss_item_sk in (select ss_item_sk from cross_items)
+   and ss_item_sk = i_item_sk
+   and ss_sold_date_sk = d_date_sk
+   and d_week_seq = (select d_week_seq
+                     from date_dim
+                     where d_year = 1999 + 1
+                       and d_moy = 12
+                       and d_dom = 1)
+ group by i_brand_id,i_class_id,i_category_id
+ having sum(ss_quantity*ss_list_price) > (select average_sales from avg_sales)) this_year,
+ (select 'store' channel, i_brand_id,i_class_id
+        ,i_category_id, sum(ss_quantity*ss_list_price) sales, count(*) number_sales
+ from store_sales
+     ,item
+     ,date_dim
+ where ss_item_sk in (select ss_item_sk from cross_items)
+   and ss_item_sk = i_item_sk
+   and ss_sold_date_sk = d_date_sk
+   and d_week_seq = (select d_week_seq
+                     from date_dim
+                     where d_year = 1999
+                       and d_moy = 12
+                       and d_dom = 1)
+ group by i_brand_id,i_class_id,i_category_id
+ having sum(ss_quantity*ss_list_price) > (select average_sales from avg_sales)) last_year
+ where this_year.i_brand_id= last_year.i_brand_id
+   and this_year.i_class_id = last_year.i_class_id
+   and this_year.i_category_id = last_year.i_category_id
+ order by this_year.channel, this_year.i_brand_id, this_year.i_class_id, this_year.i_category_id
+ limit 100

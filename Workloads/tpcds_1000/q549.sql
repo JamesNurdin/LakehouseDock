@@ -1,54 +1,49 @@
-select   
-  ca_state,
-  cd_gender,
-  cd_marital_status,
-  count(*) cnt1,
-  max(cd_dep_count),
-  avg(cd_dep_count),
-  max(cd_dep_count),
-  cd_dep_employed_count,
-  count(*) cnt2,
-  max(cd_dep_employed_count),
-  avg(cd_dep_employed_count),
-  max(cd_dep_employed_count),
-  cd_dep_college_count,
-  count(*) cnt3,
-  max(cd_dep_college_count),
-  avg(cd_dep_college_count),
-  max(cd_dep_college_count)
+with ss as
+ (select ca_county,d_qoy, d_year,sum(ss_ext_sales_price) as store_sales
+ from store_sales,date_dim,customer_address
+ where ss_sold_date_sk = d_date_sk
+  and ss_addr_sk=ca_address_sk
+ group by ca_county,d_qoy, d_year),
+ ws as
+ (select ca_county,d_qoy, d_year,sum(ws_ext_sales_price) as web_sales
+ from web_sales,date_dim,customer_address
+ where ws_sold_date_sk = d_date_sk
+  and ws_bill_addr_sk=ca_address_sk
+ group by ca_county,d_qoy, d_year)
+ select /* tt */
+        ss1.ca_county
+       ,ss1.d_year
+       ,ws2.web_sales/ws1.web_sales web_q1_q2_increase
+       ,ss2.store_sales/ss1.store_sales store_q1_q2_increase
+       ,ws3.web_sales/ws2.web_sales web_q2_q3_increase
+       ,ss3.store_sales/ss2.store_sales store_q2_q3_increase
  from
-  customer c,customer_address ca,customer_demographics
+        ss ss1
+       ,ss ss2
+       ,ss ss3
+       ,ws ws1
+       ,ws ws2
+       ,ws ws3
  where
-  c.c_current_addr_sk = ca.ca_address_sk and
-  cd_demo_sk = c.c_current_cdemo_sk and 
-  exists (select *
-          from store_sales,date_dim
-          where c.c_customer_sk = ss_customer_sk and
-                ss_sold_date_sk = d_date_sk and
-                d_year = 2002 and
-                d_qoy < 4) and
-   (exists (select *
-            from web_sales,date_dim
-            where c.c_customer_sk = ws_bill_customer_sk and
-                  ws_sold_date_sk = d_date_sk and
-                  d_year = 2002 and
-                  d_qoy < 4) or 
-    exists (select * 
-            from catalog_sales,date_dim
-            where c.c_customer_sk = cs_ship_customer_sk and
-                  cs_sold_date_sk = d_date_sk and
-                  d_year = 2002 and
-                  d_qoy < 4))
- group by ca_state,
-          cd_gender,
-          cd_marital_status,
-          cd_dep_count,
-          cd_dep_employed_count,
-          cd_dep_college_count
- order by ca_state,
-          cd_gender,
-          cd_marital_status,
-          cd_dep_count,
-          cd_dep_employed_count,
-          cd_dep_college_count
- limit 100;
+    ss1.d_qoy = 1
+    and ss1.d_year = 2002
+    and ss1.ca_county = ss2.ca_county
+    and ss2.d_qoy = 2
+    and ss2.d_year = 2002
+ and ss2.ca_county = ss3.ca_county
+    and ss3.d_qoy = 3
+    and ss3.d_year = 2002
+    and ss1.ca_county = ws1.ca_county
+    and ws1.d_qoy = 1
+    and ws1.d_year = 2002
+    and ws1.ca_county = ws2.ca_county
+    and ws2.d_qoy = 2
+    and ws2.d_year = 2002
+    and ws1.ca_county = ws3.ca_county
+    and ws3.d_qoy = 3
+    and ws3.d_year =2002
+    and case when ws1.web_sales > 0 then ws2.web_sales/ws1.web_sales else null end 
+       > case when ss1.store_sales > 0 then ss2.store_sales/ss1.store_sales else null end
+    and case when ws2.web_sales > 0 then ws3.web_sales/ws2.web_sales else null end
+       > case when ss2.store_sales > 0 then ss3.store_sales/ss2.store_sales else null end
+ order by ss1.ca_county

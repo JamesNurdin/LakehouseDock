@@ -1,32 +1,56 @@
-select  asceding.rnk, i1.i_product_name best_performing, i2.i_product_name worst_performing
-from(select *
-     from (select item_sk,rank() over (order by rank_col asc) rnk
-           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col 
-                 from store_sales ss1
-                 where ss_store_sk = 1
-                 group by ss_item_sk
-                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
-                                                  from store_sales
-                                                  where ss_store_sk = 1
-                                                    and ss_customer_sk is null
-                                                  group by ss_store_sk))V1)V11
-     where rnk  < 11) asceding,
-    (select *
-     from (select item_sk,rank() over (order by rank_col desc) rnk
-           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col
-                 from store_sales ss1
-                 where ss_store_sk = 1
-                 group by ss_item_sk
-                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
-                                                  from store_sales
-                                                  where ss_store_sk = 1
-                                                    and ss_customer_sk is null
-                                                  group by ss_store_sk))V2)V21
-     where rnk  < 11) descending,
-item i1,
-item i2
-where asceding.rnk = descending.rnk 
-  and i1.i_item_sk=asceding.item_sk
-  and i2.i_item_sk=descending.item_sk
-order by asceding.rnk
-limit 100;
+select  
+   s_store_name
+  ,s_company_id
+  ,s_street_number
+  ,s_street_name
+  ,s_street_type
+  ,s_suite_number
+  ,s_city
+  ,s_county
+  ,s_state
+  ,s_zip
+  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk <= 30 ) then 1 else 0 end)  as "30 days" 
+  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk > 30) and 
+                 (sr_returned_date_sk - ss_sold_date_sk <= 60) then 1 else 0 end )  as "31- INTERVAL '60' DAY" 
+  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk > 60) and 
+                 (sr_returned_date_sk - ss_sold_date_sk <= 90) then 1 else 0 end)  as "61- INTERVAL '90' DAY" 
+  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk > 90) and
+                 (sr_returned_date_sk - ss_sold_date_sk <= 120) then 1 else 0 end)  as "91- INTERVAL '120' DAY" 
+  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk  > 120) then 1 else 0 end)  as ">120 days" 
+from
+   store_sales
+  ,store_returns
+  ,store
+  ,date_dim d1
+  ,date_dim d2
+where
+    d2.d_year = 1999
+and d2.d_moy  = 10
+and ss_ticket_number = sr_ticket_number
+and ss_item_sk = sr_item_sk
+and ss_sold_date_sk   = d1.d_date_sk
+and sr_returned_date_sk   = d2.d_date_sk
+and ss_customer_sk = sr_customer_sk
+and ss_store_sk = s_store_sk
+group by
+   s_store_name
+  ,s_company_id
+  ,s_street_number
+  ,s_street_name
+  ,s_street_type
+  ,s_suite_number
+  ,s_city
+  ,s_county
+  ,s_state
+  ,s_zip
+order by s_store_name
+        ,s_company_id
+        ,s_street_number
+        ,s_street_name
+        ,s_street_type
+        ,s_suite_number
+        ,s_city
+        ,s_county
+        ,s_state
+        ,s_zip
+limit 100

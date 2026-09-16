@@ -1,64 +1,27 @@
-with sr_items as
- (select i_item_id item_id,
-        sum(sr_return_quantity) sr_item_qty
- from store_returns,
-      item,
-      date_dim
- where sr_item_sk = i_item_sk
- and   d_date    in 
-	(select d_date
-	from date_dim
-	where d_week_seq in 
-		(select d_week_seq
-		from date_dim
-	  where d_date in ('2000-02-22','2000-09-07','2000-11-02')))
- and   sr_returned_date_sk   = d_date_sk
- group by i_item_id),
- cr_items as
- (select i_item_id item_id,
-        sum(cr_return_quantity) cr_item_qty
- from catalog_returns,
-      item,
-      date_dim
- where cr_item_sk = i_item_sk
- and   d_date    in 
-	(select d_date
-	from date_dim
-	where d_week_seq in 
-		(select d_week_seq
-		from date_dim
-	  where d_date in ('2000-02-22','2000-09-07','2000-11-02')))
- and   cr_returned_date_sk   = d_date_sk
- group by i_item_id),
- wr_items as
- (select i_item_id item_id,
-        sum(wr_return_quantity) wr_item_qty
- from web_returns,
-      item,
-      date_dim
- where wr_item_sk = i_item_sk
- and   d_date    in 
-	(select d_date
-	from date_dim
-	where d_week_seq in 
-		(select d_week_seq
-		from date_dim
-		where d_date in ('2000-02-22','2000-09-07','2000-11-02')))
- and   wr_returned_date_sk   = d_date_sk
- group by i_item_id)
-  select  sr_items.item_id
-       ,sr_item_qty
-       ,sr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 sr_dev
-       ,cr_item_qty
-       ,cr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 cr_dev
-       ,wr_item_qty
-       ,wr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 wr_dev
-       ,(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 average
- from sr_items
-     ,cr_items
-     ,wr_items
- where sr_items.item_id=cr_items.item_id
-   and sr_items.item_id=wr_items.item_id 
- order by sr_items.item_id
-         ,sr_item_qty
- limit 100;
+select  
+   sum(ws_ext_discount_amt)  as "Excess Discount Amount" 
+from 
+    web_sales 
+   ,item 
+   ,date_dim
+where
+i_manufact_id = 706
+and i_item_sk = ws_item_sk 
+and d_date between DATE '1999-01-10' and 
+        (cast('1999-01-10' as date) + INTERVAL '90' DAY)
+and d_date_sk = ws_sold_date_sk 
+and ws_ext_discount_amt  
+     > ( 
+         SELECT 
+            1.3 * avg(ws_ext_discount_amt) 
+         FROM 
+            web_sales 
+           ,date_dim
+         WHERE 
+              ws_item_sk = i_item_sk 
+          and d_date between DATE '1999-01-10' and
+                             (cast('1999-01-10' as date) + INTERVAL '90' DAY)
+          and d_date_sk = ws_sold_date_sk 
+      ) 
+order by sum(ws_ext_discount_amt)
+limit 100

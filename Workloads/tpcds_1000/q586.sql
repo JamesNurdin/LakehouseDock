@@ -1,28 +1,41 @@
-select  
-        cc_call_center_id Call_Center,
-        cc_name Call_Center_Name,
-        cc_manager Manager,
-        sum(cr_net_loss) Returns_Loss
-from
-        call_center,
-        catalog_returns,
-        date_dim,
-        customer,
-        customer_address,
-        customer_demographics,
-        household_demographics
-where
-        cr_call_center_sk       = cc_call_center_sk
-and     cr_returned_date_sk     = d_date_sk
-and     cr_returning_customer_sk= c_customer_sk
-and     cd_demo_sk              = c_current_cdemo_sk
-and     hd_demo_sk              = c_current_hdemo_sk
-and     ca_address_sk           = c_current_addr_sk
-and     d_year                  = 2000 
-and     d_moy                   = 12
-and     ( (cd_marital_status       = 'M' and cd_education_status     = 'Unknown')
-        or(cd_marital_status       = 'W' and cd_education_status     = 'Advanced Degree'))
-and     hd_buy_potential like '1001-5000%'
-and     ca_gmt_offset           = -7
-group by cc_call_center_id,cc_name,cc_manager,cd_marital_status,cd_education_status
-order by sum(cr_net_loss) desc;
+select  *
+from (select i_category
+            ,i_class
+            ,i_brand
+            ,i_product_name
+            ,d_year
+            ,d_qoy
+            ,d_moy
+            ,s_store_id
+            ,sumsales
+            ,rank() over (partition by i_category order by sumsales desc) rk
+      from (select i_category
+                  ,i_class
+                  ,i_brand
+                  ,i_product_name
+                  ,d_year
+                  ,d_qoy
+                  ,d_moy
+                  ,s_store_id
+                  ,sum(coalesce(ss_sales_price*ss_quantity,0)) sumsales
+            from store_sales
+                ,date_dim
+                ,store
+                ,item
+       where  ss_sold_date_sk=d_date_sk
+          and ss_item_sk=i_item_sk
+          and ss_store_sk = s_store_sk
+          and d_month_seq between 1197 and 1197+11
+       group by  rollup(i_category, i_class, i_brand, i_product_name, d_year, d_qoy, d_moy,s_store_id))dw1) dw2
+where rk <= 100
+order by i_category
+        ,i_class
+        ,i_brand
+        ,i_product_name
+        ,d_year
+        ,d_qoy
+        ,d_moy
+        ,s_store_id
+        ,sumsales
+        ,rk
+limit 100

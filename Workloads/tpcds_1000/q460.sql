@@ -1,65 +1,32 @@
-with ss as (
- select i_item_id,sum(ss_ext_sales_price) total_sales
- from
- 	store_sales,
- 	date_dim,
-         customer_address,
-         item
- where i_item_id in (select
-     i_item_id
-from item
-where i_color in ('ivory','chiffon','floral'))
- and     ss_item_sk              = i_item_sk
- and     ss_sold_date_sk         = d_date_sk
- and     d_year                  = 2002
- and     d_moy                   = 7
- and     ss_addr_sk              = ca_address_sk
- and     ca_gmt_offset           = -5 
- group by i_item_id),
- cs as (
- select i_item_id,sum(cs_ext_sales_price) total_sales
- from
- 	catalog_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_item_id               in (select
-  i_item_id
-from item
-where i_color in ('ivory','chiffon','floral'))
- and     cs_item_sk              = i_item_sk
- and     cs_sold_date_sk         = d_date_sk
- and     d_year                  = 2002
- and     d_moy                   = 7
- and     cs_bill_addr_sk         = ca_address_sk
- and     ca_gmt_offset           = -5 
- group by i_item_id),
- ws as (
- select i_item_id,sum(ws_ext_sales_price) total_sales
- from
- 	web_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_item_id               in (select
-  i_item_id
-from item
-where i_color in ('ivory','chiffon','floral'))
- and     ws_item_sk              = i_item_sk
- and     ws_sold_date_sk         = d_date_sk
- and     d_year                  = 2002
- and     d_moy                   = 7
- and     ws_bill_addr_sk         = ca_address_sk
- and     ca_gmt_offset           = -5
- group by i_item_id)
-  select  i_item_id ,sum(total_sales) total_sales
- from  (select * from ss 
-        union all
-        select * from cs 
-        union all
-        select * from ws) tmp1
- group by i_item_id
- order by total_sales
- limit 100;
+select  asceding.rnk, i1.i_product_name best_performing, i2.i_product_name worst_performing
+from(select *
+     from (select item_sk,rank() over (order by rank_col asc) rnk
+           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col 
+                 from store_sales ss1
+                 where ss_store_sk = 1
+                 group by ss_item_sk
+                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
+                                                  from store_sales
+                                                  where ss_store_sk = 1
+                                                    and ss_promo_sk is null
+                                                  group by ss_store_sk))V1)V11
+     where rnk  < 11) asceding,
+    (select *
+     from (select item_sk,rank() over (order by rank_col desc) rnk
+           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col
+                 from store_sales ss1
+                 where ss_store_sk = 1
+                 group by ss_item_sk
+                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
+                                                  from store_sales
+                                                  where ss_store_sk = 1
+                                                    and ss_promo_sk is null
+                                                  group by ss_store_sk))V2)V21
+     where rnk  < 11) descending,
+item i1,
+item i2
+where asceding.rnk = descending.rnk 
+  and i1.i_item_sk=asceding.item_sk
+  and i2.i_item_sk=descending.item_sk
+order by asceding.rnk
+limit 100

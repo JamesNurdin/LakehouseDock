@@ -1,72 +1,67 @@
-with year_total as (
- select c_customer_id customer_id
-       ,c_first_name customer_first_name
-       ,c_last_name customer_last_name
-       ,c_preferred_cust_flag customer_preferred_cust_flag
-       ,c_birth_country customer_birth_country
-       ,c_login customer_login
-       ,c_email_address customer_email_address
-       ,d_year dyear
-       ,sum(ss_ext_list_price-ss_ext_discount_amt) year_total
-       ,'s' sale_type
- from customer
-     ,store_sales
-     ,date_dim
- where c_customer_sk = ss_customer_sk
-   and ss_sold_date_sk = d_date_sk
- group by c_customer_id
-         ,c_first_name
-         ,c_last_name
-         ,d_year
-         ,c_preferred_cust_flag
-         ,c_birth_country
-         ,c_login
-         ,c_email_address
-         ,d_year 
- union all
- select c_customer_id customer_id
-       ,c_first_name customer_first_name
-       ,c_last_name customer_last_name
-       ,c_preferred_cust_flag customer_preferred_cust_flag
-       ,c_birth_country customer_birth_country
-       ,c_login customer_login
-       ,c_email_address customer_email_address
-       ,d_year dyear
-       ,sum(ws_ext_list_price-ws_ext_discount_amt) year_total
-       ,'w' sale_type
- from customer
-     ,web_sales
-     ,date_dim
- where c_customer_sk = ws_bill_customer_sk
-   and ws_sold_date_sk = d_date_sk
- group by c_customer_id
-         ,c_first_name
-         ,c_last_name
-         ,c_preferred_cust_flag
-         ,c_birth_country
-         ,c_login
-         ,c_email_address
-         ,d_year
-         )
-  select  t_s_secyear.customer_id,t_s_secyear.customer_first_name,t_s_secyear.customer_last_name,t_s_secyear.c_preferred_cust_flag,t_s_secyear.c_birth_country,t_s_secyear.c_login,t_s_secyear.c_email_address
- from year_total t_s_firstyear
-     ,year_total t_s_secyear
-     ,year_total t_w_firstyear
-     ,year_total t_w_secyear
- where t_s_secyear.customer_id = t_s_firstyear.customer_id
-         and t_s_firstyear.customer_id = t_w_secyear.customer_id
-         and t_s_firstyear.customer_id = t_w_firstyear.customer_id
-         and t_s_firstyear.sale_type = 's'
-         and t_w_firstyear.sale_type = 'w'
-         and t_s_secyear.sale_type = 's'
-         and t_w_secyear.sale_type = 'w'
-         and t_s_firstyear.dyear = 1998
-         and t_s_secyear.dyear = 1998+1
-         and t_w_firstyear.dyear = 1998
-         and t_w_secyear.dyear = 1998+1
-         and t_s_firstyear.year_total > 0
-         and t_w_firstyear.year_total > 0
-         and case when t_w_firstyear.year_total > 0 then t_w_secyear.year_total / t_w_firstyear.year_total else null end
-             > case when t_s_firstyear.year_total > 0 then t_s_secyear.year_total / t_s_firstyear.year_total else null end
- order by t_s_secyear.customer_id,t_s_secyear.customer_first_name,t_s_secyear.customer_last_name,t_s_secyear.c_preferred_cust_flag,t_s_secyear.c_birth_country,t_s_secyear.c_login,t_s_secyear.c_email_address
-limit 100;
+WITH all_sales AS (
+ SELECT d_year
+       ,i_brand_id
+       ,i_class_id
+       ,i_category_id
+       ,i_manufact_id
+       ,SUM(sales_cnt) AS sales_cnt
+       ,SUM(sales_amt) AS sales_amt
+ FROM (SELECT d_year
+             ,i_brand_id
+             ,i_class_id
+             ,i_category_id
+             ,i_manufact_id
+             ,cs_quantity - COALESCE(cr_return_quantity,0) AS sales_cnt
+             ,cs_ext_sales_price - COALESCE(cr_return_amount,0.0) AS sales_amt
+       FROM catalog_sales JOIN item ON i_item_sk=cs_item_sk
+                          JOIN date_dim ON d_date_sk=cs_sold_date_sk
+                          LEFT JOIN catalog_returns ON (cs_order_number=cr_order_number 
+                                                    AND cs_item_sk=cr_item_sk)
+       WHERE i_category='Men'
+       UNION
+       SELECT d_year
+             ,i_brand_id
+             ,i_class_id
+             ,i_category_id
+             ,i_manufact_id
+             ,ss_quantity - COALESCE(sr_return_quantity,0) AS sales_cnt
+             ,ss_ext_sales_price - COALESCE(sr_return_amt,0.0) AS sales_amt
+       FROM store_sales JOIN item ON i_item_sk=ss_item_sk
+                        JOIN date_dim ON d_date_sk=ss_sold_date_sk
+                        LEFT JOIN store_returns ON (ss_ticket_number=sr_ticket_number 
+                                                AND ss_item_sk=sr_item_sk)
+       WHERE i_category='Men'
+       UNION
+       SELECT d_year
+             ,i_brand_id
+             ,i_class_id
+             ,i_category_id
+             ,i_manufact_id
+             ,ws_quantity - COALESCE(wr_return_quantity,0) AS sales_cnt
+             ,ws_ext_sales_price - COALESCE(wr_return_amt,0.0) AS sales_amt
+       FROM web_sales JOIN item ON i_item_sk=ws_item_sk
+                      JOIN date_dim ON d_date_sk=ws_sold_date_sk
+                      LEFT JOIN web_returns ON (ws_order_number=wr_order_number 
+                                            AND ws_item_sk=wr_item_sk)
+       WHERE i_category='Men') sales_detail
+ GROUP BY d_year, i_brand_id, i_class_id, i_category_id, i_manufact_id)
+ SELECT  prev_yr.d_year AS prev_year
+                          ,curr_yr.d_year AS year
+                          ,curr_yr.i_brand_id
+                          ,curr_yr.i_class_id
+                          ,curr_yr.i_category_id
+                          ,curr_yr.i_manufact_id
+                          ,prev_yr.sales_cnt AS prev_yr_cnt
+                          ,curr_yr.sales_cnt AS curr_yr_cnt
+                          ,curr_yr.sales_cnt-prev_yr.sales_cnt AS sales_cnt_diff
+                          ,curr_yr.sales_amt-prev_yr.sales_amt AS sales_amt_diff
+ FROM all_sales curr_yr, all_sales prev_yr
+ WHERE curr_yr.i_brand_id=prev_yr.i_brand_id
+   AND curr_yr.i_class_id=prev_yr.i_class_id
+   AND curr_yr.i_category_id=prev_yr.i_category_id
+   AND curr_yr.i_manufact_id=prev_yr.i_manufact_id
+   AND curr_yr.d_year=2001
+   AND prev_yr.d_year=2001-1
+   AND CAST(curr_yr.sales_cnt AS DECIMAL(17,2))/CAST(prev_yr.sales_cnt AS DECIMAL(17,2))<0.9
+ ORDER BY sales_cnt_diff
+ limit 100

@@ -60895,5 +60895,15 @@
         "prompt_id": "P2"
       }
     }
-  ]
+  ],
+  "query_plans": {
+    "path": "plans.json",
+    "captured_at_utc": "2026-08-10T14:04:44.942261+00:00",
+    "instance": "lakehouse-g",
+    "schema": "tpcds",
+    "catalog": "iceberg",
+    "query_count": 1000,
+    "ok": 1000,
+    "failed": 0
+  }
 }

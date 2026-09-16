@@ -1,23 +1,63 @@
-select   
-    sum(ws_net_paid) as total_sum
-   ,i_category
-   ,i_class
-   ,grouping(i_category)+grouping(i_class) as lochierarchy
-   ,rank() over (
- 	partition by grouping(i_category)+grouping(i_class),
- 	case when grouping(i_class) = 0 then i_category end 
- 	order by sum(ws_net_paid) desc) as rank_within_parent
- from
-    web_sales
-   ,date_dim       d1
-   ,item
- where
-    d1.d_month_seq between 1196 and 1196+11
- and d1.d_date_sk = ws_sold_date_sk
- and i_item_sk  = ws_item_sk
- group by rollup(i_category,i_class)
- order by
-   lochierarchy desc,
-   case when lochierarchy = 0 then i_category end,
-   rank_within_parent
- limit 100;
+select sum (ss_quantity)
+ from store_sales, store, customer_demographics, customer_address, date_dim
+ where s_store_sk = ss_store_sk
+ and  ss_sold_date_sk = d_date_sk and d_year = 1999
+ and  
+ (
+  (
+   cd_demo_sk = ss_cdemo_sk
+   and 
+   cd_marital_status = 'D'
+   and 
+   cd_education_status = '4 yr Degree'
+   and 
+   ss_sales_price between 100.00 and 150.00  
+   )
+ or
+  (
+  cd_demo_sk = ss_cdemo_sk
+   and 
+   cd_marital_status = 'D'
+   and 
+   cd_education_status = '4 yr Degree'
+   and 
+   ss_sales_price between 50.00 and 100.00   
+  )
+ or 
+ (
+  cd_demo_sk = ss_cdemo_sk
+  and 
+   cd_marital_status = 'D'
+   and 
+   cd_education_status = '4 yr Degree'
+   and 
+   ss_sales_price between 150.00 and 200.00  
+ )
+ )
+ and
+ (
+  (
+  ss_addr_sk = ca_address_sk
+  and
+  ca_country = 'United States'
+  and
+  ca_state in ('NM', 'MO', 'NE')
+  and ss_net_profit between 0 and 2000  
+  )
+ or
+  (ss_addr_sk = ca_address_sk
+  and
+  ca_country = 'United States'
+  and
+  ca_state in ('GA', 'AK', 'WV')
+  and ss_net_profit between 150 and 3000 
+  )
+ or
+  (ss_addr_sk = ca_address_sk
+  and
+  ca_country = 'United States'
+  and
+  ca_state in ('OH', 'SD', 'TX')
+  and ss_net_profit between 50 and 25000 
+  )
+ )

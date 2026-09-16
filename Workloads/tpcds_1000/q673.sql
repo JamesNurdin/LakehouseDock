@@ -1,29 +1,42 @@
-with ws_wh as
-(select ws1.ws_order_number,ws1.ws_warehouse_sk wh1,ws2.ws_warehouse_sk wh2
- from web_sales ws1,web_sales ws2
- where ws1.ws_order_number = ws2.ws_order_number
-   and ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk)
- select  
-   count(distinct ws_order_number) as "order count"
-  ,sum(ws_ext_ship_cost) as "total shipping cost"
-  ,sum(ws_net_profit) as "total net profit"
-from
-   web_sales ws1
-  ,date_dim
-  ,customer_address
-  ,web_site
-where
-    d_date between '2001-2-01' and 
-           (cast('2001-2-01' as date) + 60 days)
-and ws1.ws_ship_date_sk = d_date_sk
-and ws1.ws_ship_addr_sk = ca_address_sk
-and ca_state = 'SD'
-and ws1.ws_web_site_sk = web_site_sk
-and web_company_name = 'pri'
-and ws1.ws_order_number in (select ws_order_number
-                            from ws_wh)
-and ws1.ws_order_number in (select wr_order_number
-                            from web_returns,ws_wh
-                            where wr_order_number = ws_wh.ws_order_number)
-order by count(distinct ws_order_number)
-limit 100;
+WITH web_v1 as (
+select
+  ws_item_sk item_sk, d_date,
+  sum(sum(ws_sales_price))
+      over (partition by ws_item_sk order by d_date rows between unbounded preceding and current row) cume_sales
+from web_sales
+    ,date_dim
+where ws_sold_date_sk=d_date_sk
+  and d_month_seq between 1219 and 1219+11
+  and ws_item_sk is not NULL
+group by ws_item_sk, d_date),
+store_v1 as (
+select
+  ss_item_sk item_sk, d_date,
+  sum(sum(ss_sales_price))
+      over (partition by ss_item_sk order by d_date rows between unbounded preceding and current row) cume_sales
+from store_sales
+    ,date_dim
+where ss_sold_date_sk=d_date_sk
+  and d_month_seq between 1219 and 1219+11
+  and ss_item_sk is not NULL
+group by ss_item_sk, d_date)
+ select  *
+from (select item_sk
+     ,d_date
+     ,web_sales
+     ,store_sales
+     ,max(web_sales)
+         over (partition by item_sk order by d_date rows between unbounded preceding and current row) web_cumulative
+     ,max(store_sales)
+         over (partition by item_sk order by d_date rows between unbounded preceding and current row) store_cumulative
+     from (select case when web.item_sk is not null then web.item_sk else store.item_sk end item_sk
+                 ,case when web.d_date is not null then web.d_date else store.d_date end d_date
+                 ,web.cume_sales web_sales
+                 ,store.cume_sales store_sales
+           from web_v1 web full outer join store_v1 store on (web.item_sk = store.item_sk
+                                                          and web.d_date = store.d_date)
+          )x )y
+where web_cumulative > store_cumulative
+order by item_sk
+        ,d_date
+limit 100

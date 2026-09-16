@@ -1,0 +1,13 @@
+\begin{table}
+\caption{Structural coverage loss in TPC-DS query plans across generation scale. Plan shapes are counted by exact Trino EXPLAIN plan-graph match (\texttt{canonical\_plan\_graph\_signature}); a query is `collapsed' if its plan shape is shared with another query in the set, i.e. it adds no structural coverage beyond what the set already has. Over a quarter of the official 99-query set is already collapsed, and every query collapses by 1,000 queries -- scaling generation up a further order of magnitude adds no additional coverage, only more copies of the same $\sim$88 plan shapes.}
+\label{tab:tpcds-structural-collapse}
+\begin{tabular}{lrrrr}
+\toprule
+ & Distinct Plan Shapes & Collapsed Queries & Collapsed (\%) & Largest Duplicate Group \\
+\midrule
+99 (official) & 84 & 27 & 27.3 & 4 \\
+1,000 & 87 & 1000 & 100.0 & 39 \\
+10,000 & 88 & 10000 & 100.0 & 388 \\
+\bottomrule
+\end{tabular}
+\end{table}

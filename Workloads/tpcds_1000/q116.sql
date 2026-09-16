@@ -1,32 +1,48 @@
-select  
-   substr(w_warehouse_name,1,20)
-  ,sm_type
-  ,cc_name
-  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk <= 30 ) then 1 else 0 end)  as "30 days" 
-  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk > 30) and 
-                 (cs_ship_date_sk - cs_sold_date_sk <= 60) then 1 else 0 end )  as "31-60 days" 
-  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk > 60) and 
-                 (cs_ship_date_sk - cs_sold_date_sk <= 90) then 1 else 0 end)  as "61-90 days" 
-  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk > 90) and
-                 (cs_ship_date_sk - cs_sold_date_sk <= 120) then 1 else 0 end)  as "91-120 days" 
-  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk  > 120) then 1 else 0 end)  as ">120 days" 
-from
-   catalog_sales
-  ,warehouse
-  ,ship_mode
-  ,call_center
-  ,date_dim
-where
-    d_month_seq between 1184 and 1184 + 11
-and cs_ship_date_sk   = d_date_sk
-and cs_warehouse_sk   = w_warehouse_sk
-and cs_ship_mode_sk   = sm_ship_mode_sk
-and cs_call_center_sk = cc_call_center_sk
-group by
-   substr(w_warehouse_name,1,20)
-  ,sm_type
-  ,cc_name
-order by substr(w_warehouse_name,1,20)
-        ,sm_type
-        ,cc_name
-limit 100;
+select avg(ss_quantity)
+       ,avg(ss_ext_sales_price)
+       ,avg(ss_ext_wholesale_cost)
+       ,sum(ss_ext_wholesale_cost)
+ from store_sales
+     ,store
+     ,customer_demographics
+     ,household_demographics
+     ,customer_address
+     ,date_dim
+ where s_store_sk = ss_store_sk
+ and  ss_sold_date_sk = d_date_sk and d_year = 2001
+ and((ss_hdemo_sk=hd_demo_sk
+  and cd_demo_sk = ss_cdemo_sk
+  and cd_marital_status = 'W'
+  and cd_education_status = 'Unknown'
+  and ss_sales_price between 100.00 and 150.00
+  and hd_dep_count = 3   
+     )or
+     (ss_hdemo_sk=hd_demo_sk
+  and cd_demo_sk = ss_cdemo_sk
+  and cd_marital_status = 'S'
+  and cd_education_status = 'Primary'
+  and ss_sales_price between 50.00 and 100.00   
+  and hd_dep_count = 1
+     ) or 
+     (ss_hdemo_sk=hd_demo_sk
+  and cd_demo_sk = ss_cdemo_sk
+  and cd_marital_status = 'M'
+  and cd_education_status = 'Secondary'
+  and ss_sales_price between 150.00 and 200.00 
+  and hd_dep_count = 1  
+     ))
+ and((ss_addr_sk = ca_address_sk
+  and ca_country = 'United States'
+  and ca_state in ('MI', 'GA', 'MO')
+  and ss_net_profit between 100 and 200  
+     ) or
+     (ss_addr_sk = ca_address_sk
+  and ca_country = 'United States'
+  and ca_state in ('WI', 'TX', 'WV')
+  and ss_net_profit between 150 and 300  
+     ) or
+     (ss_addr_sk = ca_address_sk
+  and ca_country = 'United States'
+  and ca_state in ('NM', 'WY', 'MN')
+  and ss_net_profit between 50 and 250  
+     ))

@@ -1,20 +1,14 @@
-select  count(*) from (
-    select distinct c_last_name, c_first_name, d_date
-    from store_sales, date_dim, customer
-          where store_sales.ss_sold_date_sk = date_dim.d_date_sk
-      and store_sales.ss_customer_sk = customer.c_customer_sk
-      and d_month_seq between 1188 and 1188 + 11
-  intersect
-    select distinct c_last_name, c_first_name, d_date
-    from catalog_sales, date_dim, customer
-          where catalog_sales.cs_sold_date_sk = date_dim.d_date_sk
-      and catalog_sales.cs_bill_customer_sk = customer.c_customer_sk
-      and d_month_seq between 1188 and 1188 + 11
-  intersect
-    select distinct c_last_name, c_first_name, d_date
-    from web_sales, date_dim, customer
-          where web_sales.ws_sold_date_sk = date_dim.d_date_sk
-      and web_sales.ws_bill_customer_sk = customer.c_customer_sk
-      and d_month_seq between 1188 and 1188 + 11
-) hot_cust
-limit 100;
+select  i_item_id
+       ,i_item_desc
+       ,i_current_price
+ from item, inventory, date_dim, catalog_sales
+ where i_current_price between 30 and 30 + 30
+ and inv_item_sk = i_item_sk
+ and d_date_sk=inv_date_sk
+ and d_date between cast('2000-03-14' as date) and (cast('2000-03-14' as date) + INTERVAL '60' DAY)
+ and i_manufact_id in (899,758,924,785)
+ and inv_quantity_on_hand between 100 and 500
+ and cs_item_sk = i_item_sk
+ group by i_item_id,i_item_desc,i_current_price
+ order by i_item_id
+ limit 100

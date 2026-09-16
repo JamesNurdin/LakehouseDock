@@ -1,0 +1,4 @@
+queries,n_queries,distinct_plan_shapes,plan_uniqueness_ratio,redundant_queries,collapse_pct
+99 (official),99,84,0.8485,15,15.2
+"1,000",1000,87,0.087,913,91.3
+"10,000",10000,88,0.0088,9912,99.1

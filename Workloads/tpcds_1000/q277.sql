@@ -1,35 +1,41 @@
-select  
-    sum(ss_net_profit) as total_sum
-   ,s_state
-   ,s_county
-   ,grouping(s_state)+grouping(s_county) as lochierarchy
-   ,rank() over (
- 	partition by grouping(s_state)+grouping(s_county),
- 	case when grouping(s_county) = 0 then s_state end 
- 	order by sum(ss_net_profit) desc) as rank_within_parent
- from
-    store_sales
-   ,date_dim       d1
-   ,store
- where
-    d1.d_month_seq between 1216 and 1216+11
- and d1.d_date_sk = ss_sold_date_sk
- and s_store_sk  = ss_store_sk
- and s_state in
-             ( select s_state
-               from  (select s_state as s_state,
- 			    rank() over ( partition by s_state order by sum(ss_net_profit) desc) as ranking
-                      from   store_sales, store, date_dim
-                      where  d_month_seq between 1216 and 1216+11
- 			    and d_date_sk = ss_sold_date_sk
- 			    and s_store_sk  = ss_store_sk
-                      group by s_state
-                     ) tmp1 
-               where ranking <= 5
-             )
- group by rollup(s_state,s_county)
- order by
-   lochierarchy desc
-  ,case when lochierarchy = 0 then s_state end
-  ,rank_within_parent
- limit 100;
+select  *
+from (select i_category
+            ,i_class
+            ,i_brand
+            ,i_product_name
+            ,d_year
+            ,d_qoy
+            ,d_moy
+            ,s_store_id
+            ,sumsales
+            ,rank() over (partition by i_category order by sumsales desc) rk
+      from (select i_category
+                  ,i_class
+                  ,i_brand
+                  ,i_product_name
+                  ,d_year
+                  ,d_qoy
+                  ,d_moy
+                  ,s_store_id
+                  ,sum(coalesce(ss_sales_price*ss_quantity,0)) sumsales
+            from store_sales
+                ,date_dim
+                ,store
+                ,item
+       where  ss_sold_date_sk=d_date_sk
+          and ss_item_sk=i_item_sk
+          and ss_store_sk = s_store_sk
+          and d_month_seq between 1179 and 1179+11
+       group by  rollup(i_category, i_class, i_brand, i_product_name, d_year, d_qoy, d_moy,s_store_id))dw1) dw2
+where rk <= 100
+order by i_category
+        ,i_class
+        ,i_brand
+        ,i_product_name
+        ,d_year
+        ,d_qoy
+        ,d_moy
+        ,s_store_id
+        ,sumsales
+        ,rk
+limit 100

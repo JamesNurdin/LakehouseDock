@@ -9,7 +9,7 @@ from (select i_manager_id
       where ss_item_sk = i_item_sk
         and ss_sold_date_sk = d_date_sk
         and ss_store_sk = s_store_sk
-        and d_month_seq in (1206,1206+1,1206+2,1206+3,1206+4,1206+5,1206+6,1206+7,1206+8,1206+9,1206+10,1206+11)
+        and d_month_seq in (1218,1218+1,1218+2,1218+3,1218+4,1218+5,1218+6,1218+7,1218+8,1218+9,1218+10,1218+11)
         and ((    i_category in ('Books','Children','Electronics')
               and i_class in ('personal','portable','refernece','self-help')
               and i_brand in ('scholaramalgamalg #14','scholaramalgamalg #7',
@@ -23,4 +23,4 @@ where case when avg_monthly_sales > 0 then abs (sum_sales - avg_monthly_sales) /
 order by i_manager_id
         ,avg_monthly_sales
         ,sum_sales
-limit 100;
+limit 100

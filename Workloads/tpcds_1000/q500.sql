@@ -1,75 +1,18 @@
-with ss as (
- select
-          i_item_id,sum(ss_ext_sales_price) total_sales
- from
- 	store_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_item_id in (select
-  i_item_id
-from
- item
-where i_category in ('Men'))
- and     ss_item_sk              = i_item_sk
- and     ss_sold_date_sk         = d_date_sk
- and     d_year                  = 2001
- and     d_moy                   = 10
- and     ss_addr_sk              = ca_address_sk
- and     ca_gmt_offset           = -6 
- group by i_item_id),
- cs as (
- select
-          i_item_id,sum(cs_ext_sales_price) total_sales
- from
- 	catalog_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_item_id               in (select
-  i_item_id
-from
- item
-where i_category in ('Men'))
- and     cs_item_sk              = i_item_sk
- and     cs_sold_date_sk         = d_date_sk
- and     d_year                  = 2001
- and     d_moy                   = 10
- and     cs_bill_addr_sk         = ca_address_sk
- and     ca_gmt_offset           = -6 
- group by i_item_id),
- ws as (
- select
-          i_item_id,sum(ws_ext_sales_price) total_sales
- from
- 	web_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_item_id               in (select
-  i_item_id
-from
- item
-where i_category in ('Men'))
- and     ws_item_sk              = i_item_sk
- and     ws_sold_date_sk         = d_date_sk
- and     d_year                  = 2001
- and     d_moy                   = 10
- and     ws_bill_addr_sk         = ca_address_sk
- and     ca_gmt_offset           = -6
- group by i_item_id)
-  select   
-  i_item_id
-,sum(total_sales) total_sales
- from  (select * from ss 
-        union all
-        select * from cs 
-        union all
-        select * from ws) tmp1
- group by i_item_id
- order by i_item_id
-      ,total_sales
- limit 100;
+select  c_customer_id as customer_id
+       ,c_last_name || ', ' || c_first_name as customername
+ from customer
+     ,customer_address
+     ,customer_demographics
+     ,household_demographics
+     ,income_band
+     ,store_returns
+ where ca_city	        =  'Midway'
+   and c_current_addr_sk = ca_address_sk
+   and ib_lower_bound   >=  25032
+   and ib_upper_bound   <=  25032 + 50000
+   and ib_income_band_sk = hd_income_band_sk
+   and cd_demo_sk = c_current_cdemo_sk
+   and hd_demo_sk = c_current_hdemo_sk
+   and sr_cdemo_sk = cd_demo_sk
+ order by c_customer_id
+ limit 100

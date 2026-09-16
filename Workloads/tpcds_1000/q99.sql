@@ -1,21 +1,29 @@
-select  channel, col_name, d_year, d_qoy, i_category, COUNT(*) sales_cnt, SUM(ext_sales_price) sales_amt FROM (
-        SELECT 'store' as channel, 'ss_hdemo_sk' col_name, d_year, d_qoy, i_category, ss_ext_sales_price ext_sales_price
-         FROM store_sales, item, date_dim
-         WHERE ss_hdemo_sk IS NULL
-           AND ss_sold_date_sk=d_date_sk
-           AND ss_item_sk=i_item_sk
-        UNION ALL
-        SELECT 'web' as channel, 'ws_ship_addr_sk' col_name, d_year, d_qoy, i_category, ws_ext_sales_price ext_sales_price
-         FROM web_sales, item, date_dim
-         WHERE ws_ship_addr_sk IS NULL
-           AND ws_sold_date_sk=d_date_sk
-           AND ws_item_sk=i_item_sk
-        UNION ALL
-        SELECT 'catalog' as channel, 'cs_ship_customer_sk' col_name, d_year, d_qoy, i_category, cs_ext_sales_price ext_sales_price
-         FROM catalog_sales, item, date_dim
-         WHERE cs_ship_customer_sk IS NULL
-           AND cs_sold_date_sk=d_date_sk
-           AND cs_item_sk=i_item_sk) foo
-GROUP BY channel, col_name, d_year, d_qoy, i_category
-ORDER BY channel, col_name, d_year, d_qoy, i_category
-limit 100;
+with ws_wh as
+(select ws1.ws_order_number,ws1.ws_warehouse_sk wh1,ws2.ws_warehouse_sk wh2
+ from web_sales ws1,web_sales ws2
+ where ws1.ws_order_number = ws2.ws_order_number
+   and ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk)
+ select  
+   count(distinct ws_order_number) as "order count"
+  ,sum(ws_ext_ship_cost) as "total shipping cost"
+  ,sum(ws_net_profit) as "total net profit"
+from
+   web_sales ws1
+  ,date_dim
+  ,customer_address
+  ,web_site
+where
+    d_date between DATE '2001-04-01' and 
+           (cast('2001-04-01' as date) + INTERVAL '60' DAY)
+and ws1.ws_ship_date_sk = d_date_sk
+and ws1.ws_ship_addr_sk = ca_address_sk
+and ca_state = 'OH'
+and ws1.ws_web_site_sk = web_site_sk
+and web_company_name = 'pri'
+and ws1.ws_order_number in (select ws_order_number
+                            from ws_wh)
+and ws1.ws_order_number in (select wr_order_number
+                            from web_returns,ws_wh
+                            where wr_order_number = ws_wh.ws_order_number)
+order by count(distinct ws_order_number)
+limit 100

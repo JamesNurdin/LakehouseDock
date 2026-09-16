@@ -1,28 +1,32 @@
 select  
-   count(distinct cs_order_number) as "order count"
-  ,sum(cs_ext_ship_cost) as "total shipping cost"
-  ,sum(cs_net_profit) as "total net profit"
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,web_name
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk <= 30 ) then 1 else 0 end)  as "30 days" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 30) and 
+                 (ws_ship_date_sk - ws_sold_date_sk <= 60) then 1 else 0 end )  as "31- INTERVAL '60' DAY" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 60) and 
+                 (ws_ship_date_sk - ws_sold_date_sk <= 90) then 1 else 0 end)  as "61- INTERVAL '90' DAY" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 90) and
+                 (ws_ship_date_sk - ws_sold_date_sk <= 120) then 1 else 0 end)  as "91- INTERVAL '120' DAY" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk  > 120) then 1 else 0 end)  as ">120 days" 
 from
-   catalog_sales cs1
+   web_sales
+  ,warehouse
+  ,ship_mode
+  ,web_site
   ,date_dim
-  ,customer_address
-  ,call_center
 where
-    d_date between '1999-2-01' and 
-           (cast('1999-2-01' as date) + 60 days)
-and cs1.cs_ship_date_sk = d_date_sk
-and cs1.cs_ship_addr_sk = ca_address_sk
-and ca_state = 'OH'
-and cs1.cs_call_center_sk = cc_call_center_sk
-and cc_county in ('Williamson County','Williamson County','Williamson County','Williamson County',
-                  'Williamson County'
-)
-and exists (select *
-            from catalog_sales cs2
-            where cs1.cs_order_number = cs2.cs_order_number
-              and cs1.cs_warehouse_sk <> cs2.cs_warehouse_sk)
-and not exists(select *
-               from catalog_returns cr1
-               where cs1.cs_order_number = cr1.cr_order_number)
-order by count(distinct cs_order_number)
-limit 100;
+    d_month_seq between 1209 and 1209 + 11
+and ws_ship_date_sk   = d_date_sk
+and ws_warehouse_sk   = w_warehouse_sk
+and ws_ship_mode_sk   = sm_ship_mode_sk
+and ws_web_site_sk    = web_site_sk
+group by
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,web_name
+order by substr(w_warehouse_name,1,20)
+        ,sm_type
+       ,web_name
+limit 100

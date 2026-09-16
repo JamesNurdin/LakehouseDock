@@ -1,32 +1,28 @@
 select  
-   substr(w_warehouse_name,1,20)
-  ,sm_type
-  ,web_name
-  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk <= 30 ) then 1 else 0 end)  as "30 days" 
-  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 30) and 
-                 (ws_ship_date_sk - ws_sold_date_sk <= 60) then 1 else 0 end )  as "31-60 days" 
-  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 60) and 
-                 (ws_ship_date_sk - ws_sold_date_sk <= 90) then 1 else 0 end)  as "61-90 days" 
-  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 90) and
-                 (ws_ship_date_sk - ws_sold_date_sk <= 120) then 1 else 0 end)  as "91-120 days" 
-  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk  > 120) then 1 else 0 end)  as ">120 days" 
+        cc_call_center_id Call_Center,
+        cc_name Call_Center_Name,
+        cc_manager Manager,
+        sum(cr_net_loss) Returns_Loss
 from
-   web_sales
-  ,warehouse
-  ,ship_mode
-  ,web_site
-  ,date_dim
+        call_center,
+        catalog_returns,
+        date_dim,
+        customer,
+        customer_address,
+        customer_demographics,
+        household_demographics
 where
-    d_month_seq between 1197 and 1197 + 11
-and ws_ship_date_sk   = d_date_sk
-and ws_warehouse_sk   = w_warehouse_sk
-and ws_ship_mode_sk   = sm_ship_mode_sk
-and ws_web_site_sk    = web_site_sk
-group by
-   substr(w_warehouse_name,1,20)
-  ,sm_type
-  ,web_name
-order by substr(w_warehouse_name,1,20)
-        ,sm_type
-       ,web_name
-limit 100;
+        cr_call_center_sk       = cc_call_center_sk
+and     cr_returned_date_sk     = d_date_sk
+and     cr_returning_customer_sk= c_customer_sk
+and     cd_demo_sk              = c_current_cdemo_sk
+and     hd_demo_sk              = c_current_hdemo_sk
+and     ca_address_sk           = c_current_addr_sk
+and     d_year                  = 2001 
+and     d_moy                   = 12
+and     ( (cd_marital_status       = 'M' and cd_education_status     = 'Unknown')
+        or(cd_marital_status       = 'W' and cd_education_status     = 'Advanced Degree'))
+and     hd_buy_potential like '5001-10000%'
+and     ca_gmt_offset           = -6
+group by cc_call_center_id,cc_name,cc_manager,cd_marital_status,cd_education_status
+order by sum(cr_net_loss) desc

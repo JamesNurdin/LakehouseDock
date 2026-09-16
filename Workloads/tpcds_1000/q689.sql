@@ -1,25 +1,41 @@
-select  
-   w_state
-  ,i_item_id
-  ,sum(case when (cast(d_date as date) < cast ('2002-03-07' as date)) 
- 		then cs_sales_price - coalesce(cr_refunded_cash,0) else 0 end) as sales_before
-  ,sum(case when (cast(d_date as date) >= cast ('2002-03-07' as date)) 
- 		then cs_sales_price - coalesce(cr_refunded_cash,0) else 0 end) as sales_after
- from
-   catalog_sales left outer join catalog_returns on
-       (cs_order_number = cr_order_number 
-        and cs_item_sk = cr_item_sk)
-  ,warehouse 
-  ,item
-  ,date_dim
- where
-     i_current_price between 0.99 and 1.49
- and i_item_sk          = cs_item_sk
- and cs_warehouse_sk    = w_warehouse_sk 
- and cs_sold_date_sk    = d_date_sk
- and d_date between (cast ('2002-03-07' as date) - 30 days)
-                and (cast ('2002-03-07' as date) + 30 days) 
- group by
-    w_state,i_item_id
- order by w_state,i_item_id
-limit 100;
+select  *
+from (select i_category
+            ,i_class
+            ,i_brand
+            ,i_product_name
+            ,d_year
+            ,d_qoy
+            ,d_moy
+            ,s_store_id
+            ,sumsales
+            ,rank() over (partition by i_category order by sumsales desc) rk
+      from (select i_category
+                  ,i_class
+                  ,i_brand
+                  ,i_product_name
+                  ,d_year
+                  ,d_qoy
+                  ,d_moy
+                  ,s_store_id
+                  ,sum(coalesce(ss_sales_price*ss_quantity,0)) sumsales
+            from store_sales
+                ,date_dim
+                ,store
+                ,item
+       where  ss_sold_date_sk=d_date_sk
+          and ss_item_sk=i_item_sk
+          and ss_store_sk = s_store_sk
+          and d_month_seq between 1196 and 1196+11
+       group by  rollup(i_category, i_class, i_brand, i_product_name, d_year, d_qoy, d_moy,s_store_id))dw1) dw2
+where rk <= 100
+order by i_category
+        ,i_class
+        ,i_brand
+        ,i_product_name
+        ,d_year
+        ,d_qoy
+        ,d_moy
+        ,s_store_id
+        ,sumsales
+        ,rk
+limit 100

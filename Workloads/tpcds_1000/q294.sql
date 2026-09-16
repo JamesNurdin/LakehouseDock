@@ -1,25 +1,18 @@
-select  *
-from(
-select i_category, i_class, i_brand,
-       s_store_name, s_company_name,
-       d_moy,
-       sum(ss_sales_price) sum_sales,
-       avg(sum(ss_sales_price)) over
-         (partition by i_category, i_brand, s_store_name, s_company_name)
-         avg_monthly_sales
-from item, store_sales, date_dim, store
-where ss_item_sk = i_item_sk and
-      ss_sold_date_sk = d_date_sk and
-      ss_store_sk = s_store_sk and
-      d_year in (2002) and
-        ((i_category in ('Shoes','Children','Home') and
-          i_class in ('mens','toddlers','lighting')
-         )
-      or (i_category in ('Men','Electronics','Music') and
-          i_class in ('pants','scanners','pop') 
-        ))
-group by i_category, i_class, i_brand,
-         s_store_name, s_company_name, d_moy) tmp1
-where case when (avg_monthly_sales <> 0) then (abs(sum_sales - avg_monthly_sales) / avg_monthly_sales) else null end > 0.1
-order by sum_sales - avg_monthly_sales, s_store_name
-limit 100;
+select  c_customer_id as customer_id
+       ,c_last_name || ', ' || c_first_name as customername
+ from customer
+     ,customer_address
+     ,customer_demographics
+     ,household_demographics
+     ,income_band
+     ,store_returns
+ where ca_city	        =  'Oakland'
+   and c_current_addr_sk = ca_address_sk
+   and ib_lower_bound   >=  55030
+   and ib_upper_bound   <=  55030 + 50000
+   and ib_income_band_sk = hd_income_band_sk
+   and cd_demo_sk = c_current_cdemo_sk
+   and hd_demo_sk = c_current_hdemo_sk
+   and sr_cdemo_sk = cd_demo_sk
+ order by c_customer_id
+ limit 100

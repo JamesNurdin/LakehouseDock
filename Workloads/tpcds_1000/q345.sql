@@ -1,28 +1,72 @@
-select  
-   count(distinct cs_order_number) as "order count"
-  ,sum(cs_ext_ship_cost) as "total shipping cost"
-  ,sum(cs_net_profit) as "total net profit"
+with ss as (
+ select
+          i_manufact_id,sum(ss_ext_sales_price) total_sales
+ from
+ 	store_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_manufact_id in (select
+  i_manufact_id
 from
-   catalog_sales cs1
-  ,date_dim
-  ,customer_address
-  ,call_center
-where
-    d_date between '2000-5-01' and 
-           (cast('2000-5-01' as date) + 60 days)
-and cs1.cs_ship_date_sk = d_date_sk
-and cs1.cs_ship_addr_sk = ca_address_sk
-and ca_state = 'MA'
-and cs1.cs_call_center_sk = cc_call_center_sk
-and cc_county in ('Williamson County','Williamson County','Williamson County','Williamson County',
-                  'Williamson County'
-)
-and exists (select *
-            from catalog_sales cs2
-            where cs1.cs_order_number = cs2.cs_order_number
-              and cs1.cs_warehouse_sk <> cs2.cs_warehouse_sk)
-and not exists(select *
-               from catalog_returns cr1
-               where cs1.cs_order_number = cr1.cr_order_number)
-order by count(distinct cs_order_number)
-limit 100;
+ item
+where i_category in ('Jewelry'))
+ and     ss_item_sk              = i_item_sk
+ and     ss_sold_date_sk         = d_date_sk
+ and     d_year                  = 2000
+ and     d_moy                   = 2
+ and     ss_addr_sk              = ca_address_sk
+ and     ca_gmt_offset           = -5 
+ group by i_manufact_id),
+ cs as (
+ select
+          i_manufact_id,sum(cs_ext_sales_price) total_sales
+ from
+ 	catalog_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_manufact_id               in (select
+  i_manufact_id
+from
+ item
+where i_category in ('Jewelry'))
+ and     cs_item_sk              = i_item_sk
+ and     cs_sold_date_sk         = d_date_sk
+ and     d_year                  = 2000
+ and     d_moy                   = 2
+ and     cs_bill_addr_sk         = ca_address_sk
+ and     ca_gmt_offset           = -5 
+ group by i_manufact_id),
+ ws as (
+ select
+          i_manufact_id,sum(ws_ext_sales_price) total_sales
+ from
+ 	web_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_manufact_id               in (select
+  i_manufact_id
+from
+ item
+where i_category in ('Jewelry'))
+ and     ws_item_sk              = i_item_sk
+ and     ws_sold_date_sk         = d_date_sk
+ and     d_year                  = 2000
+ and     d_moy                   = 2
+ and     ws_bill_addr_sk         = ca_address_sk
+ and     ca_gmt_offset           = -5
+ group by i_manufact_id)
+  select  i_manufact_id ,sum(total_sales) total_sales
+ from  (select * from ss 
+        union all
+        select * from cs 
+        union all
+        select * from ws) tmp1
+ group by i_manufact_id
+ order by total_sales
+limit 100

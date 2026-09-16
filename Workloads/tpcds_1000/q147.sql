@@ -1,48 +1,25 @@
-select case when (select count(*) 
-                  from store_sales 
-                  where ss_quantity between 1 and 20) > 22800
-            then (select avg(ss_ext_list_price) 
-                  from store_sales 
-                  where ss_quantity between 1 and 20) 
-            else (select avg(ss_net_profit)
-                  from store_sales
-                  where ss_quantity between 1 and 20) end bucket1 ,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 21 and 40) > 39034
-            then (select avg(ss_ext_list_price)
-                  from store_sales
-                  where ss_quantity between 21 and 40) 
-            else (select avg(ss_net_profit)
-                  from store_sales
-                  where ss_quantity between 21 and 40) end bucket2,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 41 and 60) > 15357
-            then (select avg(ss_ext_list_price)
-                  from store_sales
-                  where ss_quantity between 41 and 60)
-            else (select avg(ss_net_profit)
-                  from store_sales
-                  where ss_quantity between 41 and 60) end bucket3,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 61 and 80) > 1927
-            then (select avg(ss_ext_list_price)
-                  from store_sales
-                  where ss_quantity between 61 and 80)
-            else (select avg(ss_net_profit)
-                  from store_sales
-                  where ss_quantity between 61 and 80) end bucket4,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 81 and 100) > 42611
-            then (select avg(ss_ext_list_price)
-                  from store_sales
-                  where ss_quantity between 81 and 100)
-            else (select avg(ss_net_profit)
-                  from store_sales
-                  where ss_quantity between 81 and 100) end bucket5
-from reason
-where r_reason_sk = 1
-;
+select  
+   w_state
+  ,i_item_id
+  ,sum(case when (cast(d_date as date) < cast (DATE '1998-03-19' as date)) 
+ 		then cs_sales_price - coalesce(cr_refunded_cash,0) else 0 end) as sales_before
+  ,sum(case when (cast(d_date as date) >= cast (DATE '1998-03-19' as date)) 
+ 		then cs_sales_price - coalesce(cr_refunded_cash,0) else 0 end) as sales_after
+ from
+   catalog_sales left outer join catalog_returns on
+       (cs_order_number = cr_order_number 
+        and cs_item_sk = cr_item_sk)
+  ,warehouse 
+  ,item
+  ,date_dim
+ where
+     i_current_price between 0.99 and 1.49
+ and i_item_sk          = cs_item_sk
+ and cs_warehouse_sk    = w_warehouse_sk 
+ and cs_sold_date_sk    = d_date_sk
+ and d_date between (cast (DATE '1998-03-19' as date) - INTERVAL '30' DAY)
+                and (cast (DATE '1998-03-19' as date) + INTERVAL '30' DAY) 
+ group by
+    w_state,i_item_id
+ order by w_state,i_item_id
+limit 100

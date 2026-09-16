@@ -1,21 +1,18 @@
-select  channel, col_name, d_year, d_qoy, i_category, COUNT(*) sales_cnt, SUM(ext_sales_price) sales_amt FROM (
-        SELECT 'store' as channel, 'ss_cdemo_sk' col_name, d_year, d_qoy, i_category, ss_ext_sales_price ext_sales_price
-         FROM store_sales, item, date_dim
-         WHERE ss_cdemo_sk IS NULL
-           AND ss_sold_date_sk=d_date_sk
-           AND ss_item_sk=i_item_sk
-        UNION ALL
-        SELECT 'web' as channel, 'ws_warehouse_sk' col_name, d_year, d_qoy, i_category, ws_ext_sales_price ext_sales_price
-         FROM web_sales, item, date_dim
-         WHERE ws_warehouse_sk IS NULL
-           AND ws_sold_date_sk=d_date_sk
-           AND ws_item_sk=i_item_sk
-        UNION ALL
-        SELECT 'catalog' as channel, 'cs_bill_customer_sk' col_name, d_year, d_qoy, i_category, cs_ext_sales_price ext_sales_price
-         FROM catalog_sales, item, date_dim
-         WHERE cs_bill_customer_sk IS NULL
-           AND cs_sold_date_sk=d_date_sk
-           AND cs_item_sk=i_item_sk) foo
-GROUP BY channel, col_name, d_year, d_qoy, i_category
-ORDER BY channel, col_name, d_year, d_qoy, i_category
-limit 100;
+select  i_item_id, 
+        avg(cs_quantity) agg1,
+        avg(cs_list_price) agg2,
+        avg(cs_coupon_amt) agg3,
+        avg(cs_sales_price) agg4 
+ from catalog_sales, customer_demographics, date_dim, item, promotion
+ where cs_sold_date_sk = d_date_sk and
+       cs_item_sk = i_item_sk and
+       cs_bill_cdemo_sk = cd_demo_sk and
+       cs_promo_sk = p_promo_sk and
+       cd_gender = 'F' and 
+       cd_marital_status = 'W' and
+       cd_education_status = '2 yr Degree' and
+       (p_channel_email = 'N' or p_channel_event = 'N') and
+       d_year = 1999 
+ group by i_item_id
+ order by i_item_id
+ limit 100

@@ -1,125 +1,28 @@
-with ssr as
- (select s_store_id,
-        sum(sales_price) as sales,
-        sum(profit) as profit,
-        sum(return_amt) as returns,
-        sum(net_loss) as profit_loss
- from
-  ( select  ss_store_sk as store_sk,
-            ss_sold_date_sk  as date_sk,
-            ss_ext_sales_price as sales_price,
-            ss_net_profit as profit,
-            cast(0 as decimal(7,2)) as return_amt,
-            cast(0 as decimal(7,2)) as net_loss
-    from store_sales
-    union all
-    select sr_store_sk as store_sk,
-           sr_returned_date_sk as date_sk,
-           cast(0 as decimal(7,2)) as sales_price,
-           cast(0 as decimal(7,2)) as profit,
-           sr_return_amt as return_amt,
-           sr_net_loss as net_loss
-    from store_returns
-   ) salesreturns,
-     date_dim,
-     store
- where date_sk = d_date_sk
-       and d_date between cast('1999-08-07' as date) 
-                  and (cast('1999-08-07' as date) +  14 days)
-       and store_sk = s_store_sk
- group by s_store_id)
- ,
- csr as
- (select cp_catalog_page_id,
-        sum(sales_price) as sales,
-        sum(profit) as profit,
-        sum(return_amt) as returns,
-        sum(net_loss) as profit_loss
- from
-  ( select  cs_catalog_page_sk as page_sk,
-            cs_sold_date_sk  as date_sk,
-            cs_ext_sales_price as sales_price,
-            cs_net_profit as profit,
-            cast(0 as decimal(7,2)) as return_amt,
-            cast(0 as decimal(7,2)) as net_loss
-    from catalog_sales
-    union all
-    select cr_catalog_page_sk as page_sk,
-           cr_returned_date_sk as date_sk,
-           cast(0 as decimal(7,2)) as sales_price,
-           cast(0 as decimal(7,2)) as profit,
-           cr_return_amount as return_amt,
-           cr_net_loss as net_loss
-    from catalog_returns
-   ) salesreturns,
-     date_dim,
-     catalog_page
- where date_sk = d_date_sk
-       and d_date between cast('1999-08-07' as date)
-                  and (cast('1999-08-07' as date) +  14 days)
-       and page_sk = cp_catalog_page_sk
- group by cp_catalog_page_id)
- ,
- wsr as
- (select web_site_id,
-        sum(sales_price) as sales,
-        sum(profit) as profit,
-        sum(return_amt) as returns,
-        sum(net_loss) as profit_loss
- from
-  ( select  ws_web_site_sk as wsr_web_site_sk,
-            ws_sold_date_sk  as date_sk,
-            ws_ext_sales_price as sales_price,
-            ws_net_profit as profit,
-            cast(0 as decimal(7,2)) as return_amt,
-            cast(0 as decimal(7,2)) as net_loss
-    from web_sales
-    union all
-    select ws_web_site_sk as wsr_web_site_sk,
-           wr_returned_date_sk as date_sk,
-           cast(0 as decimal(7,2)) as sales_price,
-           cast(0 as decimal(7,2)) as profit,
-           wr_return_amt as return_amt,
-           wr_net_loss as net_loss
-    from web_returns left outer join web_sales on
-         ( wr_item_sk = ws_item_sk
-           and wr_order_number = ws_order_number)
-   ) salesreturns,
-     date_dim,
-     web_site
- where date_sk = d_date_sk
-       and d_date between cast('1999-08-07' as date)
-                  and (cast('1999-08-07' as date) +  14 days)
-       and wsr_web_site_sk = web_site_sk
- group by web_site_id)
-  select  channel
-        , id
-        , sum(sales) as sales
-        , sum(returns) as returns
-        , sum(profit) as profit
- from 
- (select 'store channel' as channel
-        , 'store' || s_store_id as id
-        , sales
-        , returns
-        , (profit - profit_loss) as profit
- from   ssr
- union all
- select 'catalog channel' as channel
-        , 'catalog_page' || cp_catalog_page_id as id
-        , sales
-        , returns
-        , (profit - profit_loss) as profit
- from  csr
- union all
- select 'web channel' as channel
-        , 'web_site' || web_site_id as id
-        , sales
-        , returns
-        , (profit - profit_loss) as profit
- from   wsr
- ) x
- group by rollup (channel, id)
- order by channel
-         ,id
- limit 100;
+with customer_total_return as
+ (select cr_returning_customer_sk as ctr_customer_sk
+        ,ca_state as ctr_state, 
+ 	sum(cr_return_amt_inc_tax) as ctr_total_return
+ from catalog_returns
+     ,date_dim
+     ,customer_address
+ where cr_returned_date_sk = d_date_sk 
+   and d_year =2001
+   and cr_returning_addr_sk = ca_address_sk 
+ group by cr_returning_customer_sk
+         ,ca_state )
+  select  c_customer_id,c_salutation,c_first_name,c_last_name,ca_street_number,ca_street_name
+                   ,ca_street_type,ca_suite_number,ca_city,ca_county,ca_state,ca_zip,ca_country,ca_gmt_offset
+                  ,ca_location_type,ctr_total_return
+ from customer_total_return ctr1
+     ,customer_address
+     ,customer
+ where ctr1.ctr_total_return > (select avg(ctr_total_return)*1.2
+ 			  from customer_total_return ctr2 
+                  	  where ctr1.ctr_state = ctr2.ctr_state)
+       and ca_address_sk = c_current_addr_sk
+       and ca_state = 'MI'
+       and ctr1.ctr_customer_sk = c_customer_sk
+ order by c_customer_id,c_salutation,c_first_name,c_last_name,ca_street_number,ca_street_name
+                   ,ca_street_type,ca_suite_number,ca_city,ca_county,ca_state,ca_zip,ca_country,ca_gmt_offset
+                  ,ca_location_type,ctr_total_return
+ limit 100

@@ -14,6 +14,36 @@ import loader.stage_config as config
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
+def _existing_instance_roots(schema: str, instance: str) -> List[Path]:
+    """
+    Return <root>/<schema>/<instance> for every configured raw-results root
+    that actually exists, in config.RESULTS_ROOTS priority order.
+    """
+    candidates = [Path(root) / schema / instance for root in config.RESULTS_ROOTS]
+    return [p for p in candidates if p.exists()]
+
+
+def _resolve_run_dir(instance_roots: List[Path], run_id: str) -> Optional[Path]:
+    """
+    Find <instance_root>/<run_id> across instance_roots, in order. A run's
+    data lives entirely under one root, so the first match wins.
+    """
+    for instance_root in instance_roots:
+        run_dir = instance_root / run_id
+        if run_dir.exists():
+            return run_dir
+    return None
+
+
+def find_run_dir(schema: str, instance: str, run_id: str) -> Optional[Path]:
+    """
+    Locate <root>/<schema>/<instance>/<run_id> by searching every configured
+    raw-results root (config.RESULTS_ROOTS) in order. Returns None if the run
+    isn't present under any of them.
+    """
+    return _resolve_run_dir(_existing_instance_roots(schema, instance), run_id)
+
+
 def write_query_runtimes_csv(run_dir: Path, out_dir: Path) -> Optional[Path]:
     """
     Read workload_log.ndjson for a run and write
@@ -345,15 +375,16 @@ def parse_results(
 
     grid_points = int(getattr(config, "GRID_POINTS", 400))
 
-    results_instance_root = Path(config.RESULTS_ROOT) / schema / instance
+    results_instance_roots = _existing_instance_roots(schema, instance)
     out_root = Path(config.PARSED_ROOT) / collection / schema / instance
 
-    if not results_instance_root.exists():
-        raise SystemExit(f"Missing Results instance dir: {results_instance_root}")
+    if not results_instance_roots:
+        searched = [Path(root) / schema / instance for root in config.RESULTS_ROOTS]
+        raise SystemExit(f"Missing Results instance dir in any root: {searched}")
 
     out_root.mkdir(parents=True, exist_ok=True)
 
-    logging.info("Results: %s", results_instance_root)
+    logging.info("Results roots: %s", results_instance_roots)
     logging.info("Output : %s", out_root)
     logging.info("Node glob: %s", node_glob)
     logging.info("Coord glob: %s", coord_glob)
@@ -364,10 +395,14 @@ def parse_results(
     logging.info("Grid points per query: %d", grid_points)
 
     for run_id in run_ids:
-        run_dir = results_instance_root / run_id
+        run_dir = _resolve_run_dir(results_instance_roots, run_id)
 
-        if not run_dir.exists():
-            logging.warning("Skipping missing run dir: %s", run_dir)
+        if run_dir is None:
+            logging.warning(
+                "Skipping missing run dir %r in any root: %s",
+                run_id,
+                results_instance_roots,
+            )
             continue
 
         run_out = out_root / run_id / "queries"
@@ -421,9 +456,16 @@ def parse_results(
         has_profiles = not profiles_df.empty
 
         if not has_metrics and not has_profiles:
+            # No continuous metrics/profiles for this run (e.g. profiler was
+            # disabled) -- still stage the one thing workload_log.ndjson can
+            # always give us: total per-query wall-clock runtime.
+            rt_csv = write_query_runtimes_csv(run_dir, run_out)
+            if rt_csv:
+                logging.info("Wrote query runtimes -> %s", rt_csv)
+
             logging.warning(
-                "Skipping run %s because no enabled input data was found "
-                "(metrics=%s, profiles=%s)",
+                "Run %s -> no metrics/profiles data found (metrics=%s, profiles=%s); "
+                "wrote runtimes.csv only",
                 run_id,
                 parse_metrics,
                 parse_profiles,

@@ -1,50 +1,81 @@
-select  *
-from (select avg(ss_list_price) B1_LP
-            ,count(ss_list_price) B1_CNT
-            ,count(distinct ss_list_price) B1_CNTD
-      from store_sales
-      where ss_quantity between 0 and 5
-        and (ss_list_price between 6 and 6+10 
-             or ss_coupon_amt between 3500 and 3500+1000
-             or ss_wholesale_cost between 70 and 70+20)) B1,
-     (select avg(ss_list_price) B2_LP
-            ,count(ss_list_price) B2_CNT
-            ,count(distinct ss_list_price) B2_CNTD
-      from store_sales
-      where ss_quantity between 6 and 10
-        and (ss_list_price between 165 and 165+10
-          or ss_coupon_amt between 3975 and 3975+1000
-          or ss_wholesale_cost between 20 and 20+20)) B2,
-     (select avg(ss_list_price) B3_LP
-            ,count(ss_list_price) B3_CNT
-            ,count(distinct ss_list_price) B3_CNTD
-      from store_sales
-      where ss_quantity between 11 and 15
-        and (ss_list_price between 58 and 58+10
-          or ss_coupon_amt between 13160 and 13160+1000
-          or ss_wholesale_cost between 10 and 10+20)) B3,
-     (select avg(ss_list_price) B4_LP
-            ,count(ss_list_price) B4_CNT
-            ,count(distinct ss_list_price) B4_CNTD
-      from store_sales
-      where ss_quantity between 16 and 20
-        and (ss_list_price between 188 and 188+10
-          or ss_coupon_amt between 6838 and 6838+1000
-          or ss_wholesale_cost between 47 and 47+20)) B4,
-     (select avg(ss_list_price) B5_LP
-            ,count(ss_list_price) B5_CNT
-            ,count(distinct ss_list_price) B5_CNTD
-      from store_sales
-      where ss_quantity between 21 and 25
-        and (ss_list_price between 36 and 36+10
-          or ss_coupon_amt between 6005 and 6005+1000
-          or ss_wholesale_cost between 64 and 64+20)) B5,
-     (select avg(ss_list_price) B6_LP
-            ,count(ss_list_price) B6_CNT
-            ,count(distinct ss_list_price) B6_CNTD
-      from store_sales
-      where ss_quantity between 26 and 30
-        and (ss_list_price between 187 and 187+10
-          or ss_coupon_amt between 15823 and 15823+1000
-          or ss_wholesale_cost between 51 and 51+20)) B6
-limit 100;
+select  substr(r_reason_desc,1,20)
+       ,avg(ws_quantity)
+       ,avg(wr_refunded_cash)
+       ,avg(wr_fee)
+ from web_sales, web_returns, web_page, customer_demographics cd1,
+      customer_demographics cd2, customer_address, date_dim, reason 
+ where ws_web_page_sk = wp_web_page_sk
+   and ws_item_sk = wr_item_sk
+   and ws_order_number = wr_order_number
+   and ws_sold_date_sk = d_date_sk and d_year = 2000
+   and cd1.cd_demo_sk = wr_refunded_cdemo_sk 
+   and cd2.cd_demo_sk = wr_returning_cdemo_sk
+   and ca_address_sk = wr_refunded_addr_sk
+   and r_reason_sk = wr_reason_sk
+   and
+   (
+    (
+     cd1.cd_marital_status = 'M'
+     and
+     cd1.cd_marital_status = cd2.cd_marital_status
+     and
+     cd1.cd_education_status = 'College'
+     and 
+     cd1.cd_education_status = cd2.cd_education_status
+     and
+     ws_sales_price between 100.00 and 150.00
+    )
+   or
+    (
+     cd1.cd_marital_status = 'U'
+     and
+     cd1.cd_marital_status = cd2.cd_marital_status
+     and
+     cd1.cd_education_status = '4 yr Degree' 
+     and
+     cd1.cd_education_status = cd2.cd_education_status
+     and
+     ws_sales_price between 50.00 and 100.00
+    )
+   or
+    (
+     cd1.cd_marital_status = 'D'
+     and
+     cd1.cd_marital_status = cd2.cd_marital_status
+     and
+     cd1.cd_education_status = 'Secondary'
+     and
+     cd1.cd_education_status = cd2.cd_education_status
+     and
+     ws_sales_price between 150.00 and 200.00
+    )
+   )
+   and
+   (
+    (
+     ca_country = 'United States'
+     and
+     ca_state in ('KS', 'TX', 'NC')
+     and ws_net_profit between 100 and 200  
+    )
+    or
+    (
+     ca_country = 'United States'
+     and
+     ca_state in ('WV', 'ID', 'WA')
+     and ws_net_profit between 150 and 300  
+    )
+    or
+    (
+     ca_country = 'United States'
+     and
+     ca_state in ('MO', 'CO', 'MN')
+     and ws_net_profit between 50 and 250  
+    )
+   )
+group by r_reason_desc
+order by substr(r_reason_desc,1,20)
+        ,avg(ws_quantity)
+        ,avg(wr_refunded_cash)
+        ,avg(wr_fee)
+limit 100

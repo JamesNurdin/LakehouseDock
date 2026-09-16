@@ -1,25 +1,25 @@
-select  sum(cs_ext_discount_amt)  as "excess discount amount" 
-from 
-   catalog_sales 
-   ,item 
-   ,date_dim
-where
-i_manufact_id = 64
-and i_item_sk = cs_item_sk 
-and d_date between '2001-02-11' and 
-        (cast('2001-02-11' as date) + 90 days)
-and d_date_sk = cs_sold_date_sk 
-and cs_ext_discount_amt  
-     > ( 
-         select 
-            1.3 * avg(cs_ext_discount_amt) 
-         from 
-            catalog_sales 
-           ,date_dim
-         where 
-              cs_item_sk = i_item_sk 
-          and d_date between '2001-02-11' and
-                             (cast('2001-02-11' as date) + 90 days)
-          and d_date_sk = cs_sold_date_sk 
-      ) 
-limit 100;
+select  *
+from(
+select i_category, i_class, i_brand,
+       s_store_name, s_company_name,
+       d_moy,
+       sum(ss_sales_price) sum_sales,
+       avg(sum(ss_sales_price)) over
+         (partition by i_category, i_brand, s_store_name, s_company_name)
+         avg_monthly_sales
+from item, store_sales, date_dim, store
+where ss_item_sk = i_item_sk and
+      ss_sold_date_sk = d_date_sk and
+      ss_store_sk = s_store_sk and
+      d_year in (1999) and
+        ((i_category in ('Music','Home','Children') and
+          i_class in ('classical','curtains/drapes','infants')
+         )
+      or (i_category in ('Jewelry','Women','Electronics') and
+          i_class in ('birdal','maternity','camcorders') 
+        ))
+group by i_category, i_class, i_brand,
+         s_store_name, s_company_name, d_moy) tmp1
+where case when (avg_monthly_sales <> 0) then (abs(sum_sales - avg_monthly_sales) / avg_monthly_sales) else null end > 0.1
+order by sum_sales - avg_monthly_sales, s_store_name
+limit 100

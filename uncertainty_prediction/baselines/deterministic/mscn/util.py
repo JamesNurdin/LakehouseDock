@@ -180,3 +180,28 @@ def unnormalize_labels(labels_norm, min_val, max_val):
     labels_log = labels_norm * (max_val - min_val) + min_val
     labels_log = np.clip(labels_log, -50.0, 50.0)
     return np.exp(labels_log).astype(np.float32)
+
+
+def standardize_labels(labels, mean=None, std=None):
+    """Log-space z-score of the runtime labels: ``(log(y) - mean) / std``.
+
+    Unlike ``normalize_labels`` this does not squash into ``[0, 1]`` and is not
+    clipped, so the target range does not depend on the min/max of whatever
+    subset it is fitted on. Pair with ``SetConv(bounded_output=False)`` and
+    ``destandardize_labels`` for the inverse.
+    """
+    labels = np.array([np.log(float(l)) for l in labels], dtype=np.float32)
+    if mean is None:
+        mean = float(labels.mean())
+    if std is None:
+        std = float(labels.std())
+    std = max(std, 1e-6)
+    labels_std = (labels - mean) / std
+    return labels_std.astype(np.float32), float(mean), float(std)
+
+
+def destandardize_labels(labels_std, mean, std):
+    labels_std = np.asarray(labels_std, dtype=np.float32)
+    labels_log = labels_std * std + mean
+    labels_log = np.clip(labels_log, -50.0, 50.0)
+    return np.exp(labels_log).astype(np.float32)

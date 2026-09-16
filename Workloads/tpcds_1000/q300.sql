@@ -1,19 +1,19 @@
-select  dt.d_year
- 	,item.i_brand_id brand_id
- 	,item.i_brand brand
- 	,sum(ss_ext_sales_price) ext_price
- from date_dim dt
-     ,store_sales
-     ,item
- where dt.d_date_sk = store_sales.ss_sold_date_sk
-    and store_sales.ss_item_sk = item.i_item_sk
-    and item.i_manager_id = 1
-    and dt.d_moy=12
-    and dt.d_year=1998
- group by dt.d_year
- 	,item.i_brand
- 	,item.i_brand_id
- order by dt.d_year
- 	,ext_price desc
- 	,brand_id
-limit 100 ;
+select  cast(amc as decimal(15,4))/cast(pmc as decimal(15,4)) am_pm_ratio
+ from ( select count(*) amc
+       from web_sales, household_demographics , time_dim, web_page
+       where ws_sold_time_sk = time_dim.t_time_sk
+         and ws_ship_hdemo_sk = household_demographics.hd_demo_sk
+         and ws_web_page_sk = web_page.wp_web_page_sk
+         and time_dim.t_hour between 7 and 7+1
+         and household_demographics.hd_dep_count = 8
+         and web_page.wp_char_count between 5000 and 5200) at,
+      ( select count(*) pmc
+       from web_sales, household_demographics , time_dim, web_page
+       where ws_sold_time_sk = time_dim.t_time_sk
+         and ws_ship_hdemo_sk = household_demographics.hd_demo_sk
+         and ws_web_page_sk = web_page.wp_web_page_sk
+         and time_dim.t_hour between 20 and 20+1
+         and household_demographics.hd_dep_count = 8
+         and web_page.wp_char_count between 5000 and 5200) pt
+ order by am_pm_ratio
+ limit 100

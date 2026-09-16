@@ -1,37 +1,39 @@
-select i_brand_id brand_id, i_brand brand,t_hour,t_minute,
- 	sum(ext_price) ext_price
- from item, (select ws_ext_sales_price as ext_price, 
-                        ws_sold_date_sk as sold_date_sk,
-                        ws_item_sk as sold_item_sk,
-                        ws_sold_time_sk as time_sk  
-                 from web_sales,date_dim
-                 where d_date_sk = ws_sold_date_sk
-                   and d_moy=11
-                   and d_year=1998
-                 union all
-                 select cs_ext_sales_price as ext_price,
-                        cs_sold_date_sk as sold_date_sk,
-                        cs_item_sk as sold_item_sk,
-                        cs_sold_time_sk as time_sk
-                 from catalog_sales,date_dim
-                 where d_date_sk = cs_sold_date_sk
-                   and d_moy=11
-                   and d_year=1998
-                 union all
-                 select ss_ext_sales_price as ext_price,
-                        ss_sold_date_sk as sold_date_sk,
-                        ss_item_sk as sold_item_sk,
-                        ss_sold_time_sk as time_sk
-                 from store_sales,date_dim
-                 where d_date_sk = ss_sold_date_sk
-                   and d_moy=11
-                   and d_year=1998
-                 ) as tmp,time_dim
- where
-   sold_item_sk = i_item_sk
-   and i_manager_id=1
-   and time_sk = t_time_sk
-   and (t_meal_time = 'breakfast' or t_meal_time = 'dinner')
- group by i_brand, i_brand_id,t_hour,t_minute
- order by ext_price desc, i_brand_id
- ;
+select  c_last_name
+       ,c_first_name
+       ,ca_city
+       ,bought_city
+       ,ss_ticket_number
+       ,extended_price
+       ,extended_tax
+       ,list_price
+ from (select ss_ticket_number
+             ,ss_customer_sk
+             ,ca_city bought_city
+             ,sum(ss_ext_sales_price) extended_price 
+             ,sum(ss_ext_list_price) list_price
+             ,sum(ss_ext_tax) extended_tax 
+       from store_sales
+           ,date_dim
+           ,store
+           ,household_demographics
+           ,customer_address 
+       where store_sales.ss_sold_date_sk = date_dim.d_date_sk
+         and store_sales.ss_store_sk = store.s_store_sk  
+        and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
+        and store_sales.ss_addr_sk = customer_address.ca_address_sk
+        and date_dim.d_dom between 1 and 2 
+        and (household_demographics.hd_dep_count = 3 or
+             household_demographics.hd_vehicle_count= 0)
+        and date_dim.d_year in (2000,2000+1,2000+2)
+        and store.s_city in ('Midway','Fairview')
+       group by ss_ticket_number
+               ,ss_customer_sk
+               ,ss_addr_sk,ca_city) dn
+      ,customer
+      ,customer_address current_addr
+ where ss_customer_sk = c_customer_sk
+   and customer.c_current_addr_sk = current_addr.ca_address_sk
+   and current_addr.ca_city <> bought_city
+ order by c_last_name
+         ,ss_ticket_number
+ limit 100

@@ -1,20 +1,26 @@
-select  i_item_id,
-        s_state, grouping(s_state) g_state,
-        avg(ss_quantity) agg1,
-        avg(ss_list_price) agg2,
-        avg(ss_coupon_amt) agg3,
-        avg(ss_sales_price) agg4
- from store_sales, customer_demographics, date_dim, store, item
- where ss_sold_date_sk = d_date_sk and
-       ss_item_sk = i_item_sk and
-       ss_store_sk = s_store_sk and
-       ss_cdemo_sk = cd_demo_sk and
-       cd_gender = 'F' and
-       cd_marital_status = 'W' and
-       cd_education_status = 'Secondary' and
-       d_year = 1999 and
-       s_state in ('TN','TN', 'TN', 'TN', 'TN', 'TN')
- group by rollup (i_item_id, s_state)
- order by i_item_id
-         ,s_state
- limit 100;
+select  i_item_desc 
+       ,i_category 
+       ,i_class 
+       ,i_current_price
+       ,sum(cs_ext_sales_price) as itemrevenue 
+       ,sum(cs_ext_sales_price)*100/sum(sum(cs_ext_sales_price)) over
+           (partition by i_class) as revenueratio
+ from	catalog_sales
+     ,item 
+     ,date_dim
+ where cs_item_sk = i_item_sk 
+   and i_category in ('Women', 'Music', 'Electronics')
+   and cs_sold_date_sk = d_date_sk
+ and d_date between cast('2001-03-15' as date) 
+ 				and (cast('2001-03-15' as date) + INTERVAL '30' DAY)
+ group by i_item_id
+         ,i_item_desc 
+         ,i_category
+         ,i_class
+         ,i_current_price
+ order by i_category
+         ,i_class
+         ,i_item_id
+         ,i_item_desc
+         ,revenueratio
+limit 100

@@ -1,14 +1,47 @@
-select  i_item_id
-       ,i_item_desc
-       ,i_current_price
- from item, inventory, date_dim, store_sales
- where i_current_price between 0 and 0+30
- and inv_item_sk = i_item_sk
- and d_date_sk=inv_date_sk
- and d_date between cast('2000-03-12' as date) and (cast('2000-03-12' as date) +  60 days)
- and i_manufact_id in (783,749,478,13)
- and inv_quantity_on_hand between 100 and 500
- and ss_item_sk = i_item_sk
- group by i_item_id,i_item_desc,i_current_price
- order by i_item_id
- limit 100;
+with ssales as
+(select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,ca_state
+      ,s_state
+      ,i_color
+      ,i_current_price
+      ,i_manager_id
+      ,i_units
+      ,i_size
+      ,sum(ss_sales_price) netpaid
+from store_sales
+    ,store_returns
+    ,store
+    ,item
+    ,customer
+    ,customer_address
+where ss_ticket_number = sr_ticket_number
+  and ss_item_sk = sr_item_sk
+  and ss_customer_sk = c_customer_sk
+  and ss_item_sk = i_item_sk
+  and ss_store_sk = s_store_sk
+  and c_birth_country = upper(ca_country)
+  and s_zip = ca_zip
+and s_market_id=7
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+        ,ca_state
+        ,s_state
+        ,i_color
+        ,i_current_price
+        ,i_manager_id
+        ,i_units
+        ,i_size)
+select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,sum(netpaid) paid
+from ssales
+where i_color = 'powder'
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+having sum(netpaid) > (select 0.05*avg(netpaid)
+                                 from ssales)

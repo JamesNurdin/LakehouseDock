@@ -1,64 +1,29 @@
-select sum (ss_quantity)
- from store_sales, store, customer_demographics, customer_address, date_dim
- where s_store_sk = ss_store_sk
- and  ss_sold_date_sk = d_date_sk and d_year = 1998
- and  
- (
-  (
-   cd_demo_sk = ss_cdemo_sk
-   and 
-   cd_marital_status = 'U'
-   and 
-   cd_education_status = 'Primary'
-   and 
-   ss_sales_price between 100.00 and 150.00  
-   )
- or
-  (
-  cd_demo_sk = ss_cdemo_sk
-   and 
-   cd_marital_status = 'U'
-   and 
-   cd_education_status = 'Primary'
-   and 
-   ss_sales_price between 50.00 and 100.00   
-  )
- or 
- (
-  cd_demo_sk = ss_cdemo_sk
-  and 
-   cd_marital_status = 'U'
-   and 
-   cd_education_status = 'Primary'
-   and 
-   ss_sales_price between 150.00 and 200.00  
- )
- )
- and
- (
-  (
-  ss_addr_sk = ca_address_sk
-  and
-  ca_country = 'United States'
-  and
-  ca_state in ('IL', 'LA', 'ND')
-  and ss_net_profit between 0 and 2000  
-  )
- or
-  (ss_addr_sk = ca_address_sk
-  and
-  ca_country = 'United States'
-  and
-  ca_state in ('IN', 'KS', 'GA')
-  and ss_net_profit between 150 and 3000 
-  )
- or
-  (ss_addr_sk = ca_address_sk
-  and
-  ca_country = 'United States'
-  and
-  ca_state in ('ID', 'CO', 'VT')
-  and ss_net_profit between 50 and 25000 
-  )
- )
-;
+with ws_wh as
+(select ws1.ws_order_number,ws1.ws_warehouse_sk wh1,ws2.ws_warehouse_sk wh2
+ from web_sales ws1,web_sales ws2
+ where ws1.ws_order_number = ws2.ws_order_number
+   and ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk)
+ select  
+   count(distinct ws_order_number) as "order count"
+  ,sum(ws_ext_ship_cost) as "total shipping cost"
+  ,sum(ws_net_profit) as "total net profit"
+from
+   web_sales ws1
+  ,date_dim
+  ,customer_address
+  ,web_site
+where
+    d_date between DATE '2000-05-01' and 
+           (cast('2000-05-01' as date) + INTERVAL '60' DAY)
+and ws1.ws_ship_date_sk = d_date_sk
+and ws1.ws_ship_addr_sk = ca_address_sk
+and ca_state = 'KS'
+and ws1.ws_web_site_sk = web_site_sk
+and web_company_name = 'pri'
+and ws1.ws_order_number in (select ws_order_number
+                            from ws_wh)
+and ws1.ws_order_number in (select wr_order_number
+                            from web_returns,ws_wh
+                            where wr_order_number = ws_wh.ws_order_number)
+order by count(distinct ws_order_number)
+limit 100

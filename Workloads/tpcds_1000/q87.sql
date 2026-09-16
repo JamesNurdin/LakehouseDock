@@ -1,28 +1,64 @@
-select  i_item_desc
-      ,w_warehouse_name
-      ,d1.d_week_seq
-      ,count(case when p_promo_sk is null then 1 else 0 end) no_promo
-      ,count(case when p_promo_sk is not null then 1 else 0 end) promo
-      ,count(*) total_cnt
-from catalog_sales
-join inventory on (cs_item_sk = inv_item_sk)
-join warehouse on (w_warehouse_sk=inv_warehouse_sk)
-join item on (i_item_sk = cs_item_sk)
-join customer_demographics on (cs_bill_cdemo_sk = cd_demo_sk)
-join household_demographics on (cs_bill_hdemo_sk = hd_demo_sk)
-join date_dim d1 on (cs_sold_date_sk = d1.d_date_sk)
-join date_dim d2 on (inv_date_sk = d2.d_date_sk)
-join date_dim d3 on (cs_ship_date_sk = d3.d_date_sk)
-left outer join promotion on (cs_promo_sk=p_promo_sk)
-left outer join catalog_returns on (cr_item_sk = cs_item_sk and cr_order_number = cs_order_number)
-where d1.d_week_seq = d2.d_week_seq
-  and inv_quantity_on_hand < cs_quantity 
-  and d3.d_date > d1.d_date + 5
-  and hd_buy_potential = '501-1000'
-  and d1.d_year = 2001
-  and hd_buy_potential = '501-1000'
-  and cd_marital_status = 'M'
-  and d1.d_year = 2001
-group by i_item_desc,w_warehouse_name,d1.d_week_seq
-order by total_cnt desc, i_item_desc, w_warehouse_name, d_week_seq
-limit 100;
+with sr_items as
+ (select i_item_id item_id,
+        sum(sr_return_quantity) sr_item_qty
+ from store_returns,
+      item,
+      date_dim
+ where sr_item_sk = i_item_sk
+ and   d_date    in 
+	(select d_date
+	from date_dim
+	where d_week_seq in 
+		(select d_week_seq
+		from date_dim
+	  where d_date in (DATE '2002-02-20',DATE '2002-08-25',DATE '2002-11-07')))
+ and   sr_returned_date_sk   = d_date_sk
+ group by i_item_id),
+ cr_items as
+ (select i_item_id item_id,
+        sum(cr_return_quantity) cr_item_qty
+ from catalog_returns,
+      item,
+      date_dim
+ where cr_item_sk = i_item_sk
+ and   d_date    in 
+	(select d_date
+	from date_dim
+	where d_week_seq in 
+		(select d_week_seq
+		from date_dim
+	  where d_date in (DATE '2002-02-20',DATE '2002-08-25',DATE '2002-11-07')))
+ and   cr_returned_date_sk   = d_date_sk
+ group by i_item_id),
+ wr_items as
+ (select i_item_id item_id,
+        sum(wr_return_quantity) wr_item_qty
+ from web_returns,
+      item,
+      date_dim
+ where wr_item_sk = i_item_sk
+ and   d_date    in 
+	(select d_date
+	from date_dim
+	where d_week_seq in 
+		(select d_week_seq
+		from date_dim
+		where d_date in (DATE '2002-02-20',DATE '2002-08-25',DATE '2002-11-07')))
+ and   wr_returned_date_sk   = d_date_sk
+ group by i_item_id)
+  select  sr_items.item_id
+       ,sr_item_qty
+       ,sr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 sr_dev
+       ,cr_item_qty
+       ,cr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 cr_dev
+       ,wr_item_qty
+       ,wr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 wr_dev
+       ,(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 average
+ from sr_items
+     ,cr_items
+     ,wr_items
+ where sr_items.item_id=cr_items.item_id
+   and sr_items.item_id=wr_items.item_id 
+ order by sr_items.item_id
+         ,sr_item_qty
+ limit 100

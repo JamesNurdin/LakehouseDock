@@ -1,30 +1,25 @@
-select  i_item_desc 
-      ,i_category 
-      ,i_class 
-      ,i_current_price
-      ,sum(ws_ext_sales_price) as itemrevenue 
-      ,sum(ws_ext_sales_price)*100/sum(sum(ws_ext_sales_price)) over
-          (partition by i_class) as revenueratio
-from	
-	web_sales
-    	,item 
-    	,date_dim
-where 
-	ws_item_sk = i_item_sk 
-  	and i_category in ('Music', 'Sports', 'Men')
-  	and ws_sold_date_sk = d_date_sk
-	and d_date between cast('1999-01-21' as date) 
-				and (cast('1999-01-21' as date) + 30 days)
-group by 
-	i_item_id
-        ,i_item_desc 
-        ,i_category
-        ,i_class
-        ,i_current_price
-order by 
-	i_category
-        ,i_class
-        ,i_item_id
-        ,i_item_desc
-        ,revenueratio
-limit 100;
+select  *
+from(
+select i_category, i_class, i_brand,
+       s_store_name, s_company_name,
+       d_moy,
+       sum(ss_sales_price) sum_sales,
+       avg(sum(ss_sales_price)) over
+         (partition by i_category, i_brand, s_store_name, s_company_name)
+         avg_monthly_sales
+from item, store_sales, date_dim, store
+where ss_item_sk = i_item_sk and
+      ss_sold_date_sk = d_date_sk and
+      ss_store_sk = s_store_sk and
+      d_year in (2002) and
+        ((i_category in ('Women','Music','Men') and
+          i_class in ('maternity','rock','shirts')
+         )
+      or (i_category in ('Home','Sports','Electronics') and
+          i_class in ('bedding','sailing','audio') 
+        ))
+group by i_category, i_class, i_brand,
+         s_store_name, s_company_name, d_moy) tmp1
+where case when (avg_monthly_sales <> 0) then (abs(sum_sales - avg_monthly_sales) / avg_monthly_sales) else null end > 0.1
+order by sum_sales - avg_monthly_sales, s_store_name
+limit 100

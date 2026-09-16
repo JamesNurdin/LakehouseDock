@@ -1,96 +1,23 @@
-with ssales as
-(select c_last_name
-      ,c_first_name
-      ,s_store_name
-      ,ca_state
-      ,s_state
-      ,i_color
-      ,i_current_price
-      ,i_manager_id
-      ,i_units
-      ,i_size
-      ,sum(ss_net_paid) netpaid
-from store_sales
-    ,store_returns
-    ,store
-    ,item
-    ,customer
-    ,customer_address
-where ss_ticket_number = sr_ticket_number
-  and ss_item_sk = sr_item_sk
-  and ss_customer_sk = c_customer_sk
-  and ss_item_sk = i_item_sk
-  and ss_store_sk = s_store_sk
-  and c_birth_country = upper(ca_country)
-  and s_zip = ca_zip
-and s_market_id=5
-group by c_last_name
-        ,c_first_name
-        ,s_store_name
-        ,ca_state
-        ,s_state
-        ,i_color
-        ,i_current_price
-        ,i_manager_id
-        ,i_units
-        ,i_size)
-select c_last_name
-      ,c_first_name
-      ,s_store_name
-      ,sum(netpaid) paid
-from ssales
-where i_color = 'pale'
-group by c_last_name
-        ,c_first_name
-        ,s_store_name
-having sum(netpaid) > (select 0.05*avg(netpaid)
-                                 from ssales)
-;
-with ssales as
-(select c_last_name
-      ,c_first_name
-      ,s_store_name
-      ,ca_state
-      ,s_state
-      ,i_color
-      ,i_current_price
-      ,i_manager_id
-      ,i_units
-      ,i_size
-      ,sum(ss_net_paid) netpaid
-from store_sales
-    ,store_returns
-    ,store
-    ,item
-    ,customer
-    ,customer_address
-where ss_ticket_number = sr_ticket_number
-  and ss_item_sk = sr_item_sk
-  and ss_customer_sk = c_customer_sk
-  and ss_item_sk = i_item_sk
-  and ss_store_sk = s_store_sk
-  and c_birth_country = upper(ca_country)
-  and s_zip = ca_zip
-  and s_market_id = 5
-group by c_last_name
-        ,c_first_name
-        ,s_store_name
-        ,ca_state
-        ,s_state
-        ,i_color
-        ,i_current_price
-        ,i_manager_id
-        ,i_units
-        ,i_size)
-select c_last_name
-      ,c_first_name
-      ,s_store_name
-      ,sum(netpaid) paid
-from ssales
-where i_color = 'lemon'
-group by c_last_name
-        ,c_first_name
-        ,s_store_name
-having sum(netpaid) > (select 0.05*avg(netpaid)
-                           from ssales)
-;
+select  a.ca_state state, count(*) cnt
+ from customer_address a
+     ,customer c
+     ,store_sales s
+     ,date_dim d
+     ,item i
+ where       a.ca_address_sk = c.c_current_addr_sk
+ 	and c.c_customer_sk = s.ss_customer_sk
+ 	and s.ss_sold_date_sk = d.d_date_sk
+ 	and s.ss_item_sk = i.i_item_sk
+ 	and d.d_month_seq = 
+ 	     (select distinct (d_month_seq)
+ 	      from date_dim
+               where d_year = 2000
+ 	        and d_moy = 2 )
+ 	and i.i_current_price > 1.2 * 
+             (select avg(j.i_current_price) 
+ 	     from item j 
+ 	     where j.i_category = i.i_category)
+ group by a.ca_state
+ having count(*) >= 10
+ order by cnt 
+ limit 100

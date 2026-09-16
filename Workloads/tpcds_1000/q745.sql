@@ -1,42 +1,49 @@
-select  i_item_id
-       ,i_item_desc
-       ,s_state
-       ,count(ss_quantity) as store_sales_quantitycount
-       ,avg(ss_quantity) as store_sales_quantityave
-       ,stddev_samp(ss_quantity) as store_sales_quantitystdev
-       ,stddev_samp(ss_quantity)/avg(ss_quantity) as store_sales_quantitycov
-       ,count(sr_return_quantity) as_store_returns_quantitycount
-       ,avg(sr_return_quantity) as_store_returns_quantityave
-       ,stddev_samp(sr_return_quantity) as_store_returns_quantitystdev
-       ,stddev_samp(sr_return_quantity)/avg(sr_return_quantity) as store_returns_quantitycov
-       ,count(cs_quantity) as catalog_sales_quantitycount ,avg(cs_quantity) as catalog_sales_quantityave
-       ,stddev_samp(cs_quantity)/avg(cs_quantity) as catalog_sales_quantitystdev
-       ,stddev_samp(cs_quantity)/avg(cs_quantity) as catalog_sales_quantitycov
- from store_sales
-     ,store_returns
-     ,catalog_sales
-     ,date_dim d1
-     ,date_dim d2
-     ,date_dim d3
-     ,store
-     ,item
- where d1.d_quarter_name = '1999Q1'
-   and d1.d_date_sk = ss_sold_date_sk
-   and i_item_sk = ss_item_sk
-   and s_store_sk = ss_store_sk
-   and ss_customer_sk = sr_customer_sk
-   and ss_item_sk = sr_item_sk
-   and ss_ticket_number = sr_ticket_number
-   and sr_returned_date_sk = d2.d_date_sk
-   and d2.d_quarter_name in ('1999Q1','1999Q2','1999Q3')
-   and sr_customer_sk = cs_bill_customer_sk
-   and sr_item_sk = cs_item_sk
-   and cs_sold_date_sk = d3.d_date_sk
-   and d3.d_quarter_name in ('1999Q1','1999Q2','1999Q3')
- group by i_item_id
-         ,i_item_desc
-         ,s_state
- order by i_item_id
-         ,i_item_desc
-         ,s_state
-limit 100;
+with frequent_ss_items as 
+ (select substr(i_item_desc,1,30) itemdesc,i_item_sk item_sk,d_date solddate,count(*) cnt
+  from store_sales
+      ,date_dim 
+      ,item
+  where ss_sold_date_sk = d_date_sk
+    and ss_item_sk = i_item_sk 
+    and d_year in (2000,2000+1,2000+2,2000+3)
+  group by substr(i_item_desc,1,30),i_item_sk,d_date
+  having count(*) >4),
+ max_store_sales as
+ (select max(csales) tpcds_cmax 
+  from (select c_customer_sk,sum(ss_quantity*ss_sales_price) csales
+        from store_sales
+            ,customer
+            ,date_dim 
+        where ss_customer_sk = c_customer_sk
+         and ss_sold_date_sk = d_date_sk
+         and d_year in (2000,2000+1,2000+2,2000+3) 
+        group by c_customer_sk) x),
+ best_ss_customer as
+ (select c_customer_sk,sum(ss_quantity*ss_sales_price) ssales
+  from store_sales
+      ,customer
+  where ss_customer_sk = c_customer_sk
+  group by c_customer_sk
+  having sum(ss_quantity*ss_sales_price) > (95/100.0) * (select
+  *
+from
+ max_store_sales))
+  select  sum(sales)
+ from ((select cs_quantity*cs_list_price sales
+       from catalog_sales
+           ,date_dim 
+       where d_year = 2000 
+         and d_moy = 6 
+         and cs_sold_date_sk = d_date_sk 
+         and cs_item_sk in (select item_sk from frequent_ss_items)
+         and cs_bill_customer_sk in (select c_customer_sk from best_ss_customer))
+      union all
+      (select ws_quantity*ws_list_price sales
+       from web_sales 
+           ,date_dim 
+       where d_year = 2000 
+         and d_moy = 6 
+         and ws_sold_date_sk = d_date_sk 
+         and ws_item_sk in (select item_sk from frequent_ss_items)
+         and ws_bill_customer_sk in (select c_customer_sk from best_ss_customer))) y
+ limit 100

@@ -1,42 +1,31 @@
-WITH web_v1 as (
-select
-  ws_item_sk item_sk, d_date,
-  sum(sum(ws_sales_price))
-      over (partition by ws_item_sk order by d_date rows between unbounded preceding and current row) cume_sales
-from web_sales
-    ,date_dim
-where ws_sold_date_sk=d_date_sk
-  and d_month_seq between 1222 and 1222+11
-  and ws_item_sk is not NULL
-group by ws_item_sk, d_date),
-store_v1 as (
-select
-  ss_item_sk item_sk, d_date,
-  sum(sum(ss_sales_price))
-      over (partition by ss_item_sk order by d_date rows between unbounded preceding and current row) cume_sales
-from store_sales
-    ,date_dim
-where ss_sold_date_sk=d_date_sk
-  and d_month_seq between 1222 and 1222+11
-  and ss_item_sk is not NULL
-group by ss_item_sk, d_date)
- select  *
-from (select item_sk
-     ,d_date
-     ,web_sales
-     ,store_sales
-     ,max(web_sales)
-         over (partition by item_sk order by d_date rows between unbounded preceding and current row) web_cumulative
-     ,max(store_sales)
-         over (partition by item_sk order by d_date rows between unbounded preceding and current row) store_cumulative
-     from (select case when web.item_sk is not null then web.item_sk else store.item_sk end item_sk
-                 ,case when web.d_date is not null then web.d_date else store.d_date end d_date
-                 ,web.cume_sales web_sales
-                 ,store.cume_sales store_sales
-           from web_v1 web full outer join store_v1 store on (web.item_sk = store.item_sk
-                                                          and web.d_date = store.d_date)
-          )x )y
-where web_cumulative > store_cumulative
-order by item_sk
-        ,d_date
-limit 100;
+select  i_item_id,
+        ca_country,
+        ca_state, 
+        ca_county,
+        avg( cast(cs_quantity as decimal(12,2))) agg1,
+        avg( cast(cs_list_price as decimal(12,2))) agg2,
+        avg( cast(cs_coupon_amt as decimal(12,2))) agg3,
+        avg( cast(cs_sales_price as decimal(12,2))) agg4,
+        avg( cast(cs_net_profit as decimal(12,2))) agg5,
+        avg( cast(c_birth_year as decimal(12,2))) agg6,
+        avg( cast(cd1.cd_dep_count as decimal(12,2))) agg7
+ from catalog_sales, customer_demographics cd1, 
+      customer_demographics cd2, customer, customer_address, date_dim, item
+ where cs_sold_date_sk = d_date_sk and
+       cs_item_sk = i_item_sk and
+       cs_bill_cdemo_sk = cd1.cd_demo_sk and
+       cs_bill_customer_sk = c_customer_sk and
+       cd1.cd_gender = 'M' and 
+       cd1.cd_education_status = 'College' and
+       c_current_cdemo_sk = cd2.cd_demo_sk and
+       c_current_addr_sk = ca_address_sk and
+       c_birth_month in (7,2,4,9,1,8) and
+       d_year = 2001 and
+       ca_state in ('GA','AR','NE'
+                   ,'IN','WA','CO','SD')
+ group by rollup (i_item_id, ca_country, ca_state, ca_county)
+ order by ca_country,
+        ca_state, 
+        ca_county,
+	i_item_id
+ limit 100

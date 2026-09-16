@@ -1,48 +1,19 @@
-select case when (select count(*) 
-                  from store_sales 
-                  where ss_quantity between 1 and 20) > 38657
-            then (select avg(ss_ext_tax) 
-                  from store_sales 
-                  where ss_quantity between 1 and 20) 
-            else (select avg(ss_net_paid_inc_tax)
-                  from store_sales
-                  where ss_quantity between 1 and 20) end bucket1 ,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 21 and 40) > 39080
-            then (select avg(ss_ext_tax)
-                  from store_sales
-                  where ss_quantity between 21 and 40) 
-            else (select avg(ss_net_paid_inc_tax)
-                  from store_sales
-                  where ss_quantity between 21 and 40) end bucket2,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 41 and 60) > 22018
-            then (select avg(ss_ext_tax)
-                  from store_sales
-                  where ss_quantity between 41 and 60)
-            else (select avg(ss_net_paid_inc_tax)
-                  from store_sales
-                  where ss_quantity between 41 and 60) end bucket3,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 61 and 80) > 23492
-            then (select avg(ss_ext_tax)
-                  from store_sales
-                  where ss_quantity between 61 and 80)
-            else (select avg(ss_net_paid_inc_tax)
-                  from store_sales
-                  where ss_quantity between 61 and 80) end bucket4,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 81 and 100) > 24917
-            then (select avg(ss_ext_tax)
-                  from store_sales
-                  where ss_quantity between 81 and 100)
-            else (select avg(ss_net_paid_inc_tax)
-                  from store_sales
-                  where ss_quantity between 81 and 100) end bucket5
-from reason
-where r_reason_sk = 1
-;
+select count(*) 
+from ((select distinct c_last_name, c_first_name, d_date
+       from store_sales, date_dim, customer
+       where store_sales.ss_sold_date_sk = date_dim.d_date_sk
+         and store_sales.ss_customer_sk = customer.c_customer_sk
+         and d_month_seq between 1215 and 1215+11)
+       except
+      (select distinct c_last_name, c_first_name, d_date
+       from catalog_sales, date_dim, customer
+       where catalog_sales.cs_sold_date_sk = date_dim.d_date_sk
+         and catalog_sales.cs_bill_customer_sk = customer.c_customer_sk
+         and d_month_seq between 1215 and 1215+11)
+       except
+      (select distinct c_last_name, c_first_name, d_date
+       from web_sales, date_dim, customer
+       where web_sales.ws_sold_date_sk = date_dim.d_date_sk
+         and web_sales.ws_bill_customer_sk = customer.c_customer_sk
+         and d_month_seq between 1215 and 1215+11)
+) cool_cust

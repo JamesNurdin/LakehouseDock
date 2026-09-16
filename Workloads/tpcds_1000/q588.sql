@@ -1,49 +1,44 @@
-select  distinct(i_product_name)
- from item i1
- where i_manufact_id between 680 and 680+40 
-   and (select count(*) as item_cnt
-        from item
-        where (i_manufact = i1.i_manufact and
-        ((i_category = 'Women' and 
-        (i_color = 'hot' or i_color = 'dim') and 
-        (i_units = 'Tbl' or i_units = 'Each') and
-        (i_size = 'small' or i_size = 'N/A')
-        ) or
-        (i_category = 'Women' and
-        (i_color = 'powder' or i_color = 'cream') and
-        (i_units = 'Dram' or i_units = 'Unknown') and
-        (i_size = 'extra large' or i_size = 'economy')
-        ) or
-        (i_category = 'Men' and
-        (i_color = 'rose' or i_color = 'peru') and
-        (i_units = 'Case' or i_units = 'Bundle') and
-        (i_size = 'medium' or i_size = 'large')
-        ) or
-        (i_category = 'Men' and
-        (i_color = 'ghost' or i_color = 'saddle') and
-        (i_units = 'Dozen' or i_units = 'Lb') and
-        (i_size = 'small' or i_size = 'N/A')
-        ))) or
-       (i_manufact = i1.i_manufact and
-        ((i_category = 'Women' and 
-        (i_color = 'grey' or i_color = 'light') and 
-        (i_units = 'Cup' or i_units = 'Oz') and
-        (i_size = 'small' or i_size = 'N/A')
-        ) or
-        (i_category = 'Women' and
-        (i_color = 'rosy' or i_color = 'bisque') and
-        (i_units = 'Bunch' or i_units = 'Pallet') and
-        (i_size = 'extra large' or i_size = 'economy')
-        ) or
-        (i_category = 'Men' and
-        (i_color = 'firebrick' or i_color = 'salmon') and
-        (i_units = 'Gram' or i_units = 'N/A') and
-        (i_size = 'medium' or i_size = 'large')
-        ) or
-        (i_category = 'Men' and
-        (i_color = 'cyan' or i_color = 'khaki') and
-        (i_units = 'Box' or i_units = 'Gross') and
-        (i_size = 'small' or i_size = 'N/A')
-        )))) > 0
- order by i_product_name
- limit 100;
+select  
+  cd_gender,
+  cd_marital_status,
+  cd_education_status,
+  count(*) cnt1,
+  cd_purchase_estimate,
+  count(*) cnt2,
+  cd_credit_rating,
+  count(*) cnt3
+ from
+  customer c,customer_address ca,customer_demographics
+ where
+  c.c_current_addr_sk = ca.ca_address_sk and
+  ca_state in ('FL','AR','MT') and
+  cd_demo_sk = c.c_current_cdemo_sk and 
+  exists (select *
+          from store_sales,date_dim
+          where c.c_customer_sk = ss_customer_sk and
+                ss_sold_date_sk = d_date_sk and
+                d_year = 2000 and
+                d_moy between 1 and 1+2) and
+   (not exists (select *
+            from web_sales,date_dim
+            where c.c_customer_sk = ws_bill_customer_sk and
+                  ws_sold_date_sk = d_date_sk and
+                  d_year = 2000 and
+                  d_moy between 1 and 1+2) and
+    not exists (select * 
+            from catalog_sales,date_dim
+            where c.c_customer_sk = cs_ship_customer_sk and
+                  cs_sold_date_sk = d_date_sk and
+                  d_year = 2000 and
+                  d_moy between 1 and 1+2))
+ group by cd_gender,
+          cd_marital_status,
+          cd_education_status,
+          cd_purchase_estimate,
+          cd_credit_rating
+ order by cd_gender,
+          cd_marital_status,
+          cd_education_status,
+          cd_purchase_estimate,
+          cd_credit_rating
+ limit 100

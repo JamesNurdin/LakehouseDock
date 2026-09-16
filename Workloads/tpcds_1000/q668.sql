@@ -1,26 +1,32 @@
-select  * 
-from (select i_manager_id
-             ,sum(ss_sales_price) sum_sales
-             ,avg(sum(ss_sales_price)) over (partition by i_manager_id) avg_monthly_sales
-      from item
-          ,store_sales
-          ,date_dim
-          ,store
-      where ss_item_sk = i_item_sk
-        and ss_sold_date_sk = d_date_sk
-        and ss_store_sk = s_store_sk
-        and d_month_seq in (1218,1218+1,1218+2,1218+3,1218+4,1218+5,1218+6,1218+7,1218+8,1218+9,1218+10,1218+11)
-        and ((    i_category in ('Books','Children','Electronics')
-              and i_class in ('personal','portable','refernece','self-help')
-              and i_brand in ('scholaramalgamalg #14','scholaramalgamalg #7',
-		                  'exportiunivamalg #9','scholaramalgamalg #9'))
-           or(    i_category in ('Women','Music','Men')
-              and i_class in ('accessories','classical','fragrances','pants')
-              and i_brand in ('amalgimporto #1','edu packscholar #1','exportiimporto #1',
-		                 'importoamalg #1')))
-group by i_manager_id, d_moy) tmp1
-where case when avg_monthly_sales > 0 then abs (sum_sales - avg_monthly_sales) / avg_monthly_sales else null end > 0.1
-order by i_manager_id
-        ,avg_monthly_sales
-        ,sum_sales
-limit 100;
+select  c_last_name
+       ,c_first_name
+       ,ca_city
+       ,bought_city
+       ,ss_ticket_number
+       ,amt,profit 
+ from
+   (select ss_ticket_number
+          ,ss_customer_sk
+          ,ca_city bought_city
+          ,sum(ss_coupon_amt) amt
+          ,sum(ss_net_profit) profit
+    from store_sales,date_dim,store,household_demographics,customer_address 
+    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
+    and store_sales.ss_store_sk = store.s_store_sk  
+    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
+    and store_sales.ss_addr_sk = customer_address.ca_address_sk
+    and (household_demographics.hd_dep_count = 4 or
+         household_demographics.hd_vehicle_count= 3)
+    and date_dim.d_dow in (6,0)
+    and date_dim.d_year in (2000,2000+1,2000+2) 
+    and store.s_city in ('Midway','Fairview','Fairview','Fairview','Fairview') 
+    group by ss_ticket_number,ss_customer_sk,ss_addr_sk,ca_city) dn,customer,customer_address current_addr
+    where ss_customer_sk = c_customer_sk
+      and customer.c_current_addr_sk = current_addr.ca_address_sk
+      and current_addr.ca_city <> bought_city
+  order by c_last_name
+          ,c_first_name
+          ,ca_city
+          ,bought_city
+          ,ss_ticket_number
+  limit 100

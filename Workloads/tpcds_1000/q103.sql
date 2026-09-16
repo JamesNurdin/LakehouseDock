@@ -1,27 +1,32 @@
 select  
-   sum(ws_ext_discount_amt)  as "Excess Discount Amount" 
-from 
-    web_sales 
-   ,item 
-   ,date_dim
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,cc_name
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk <= 30 ) then 1 else 0 end)  as "30 days" 
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk > 30) and 
+                 (cs_ship_date_sk - cs_sold_date_sk <= 60) then 1 else 0 end )  as "31- INTERVAL '60' DAY" 
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk > 60) and 
+                 (cs_ship_date_sk - cs_sold_date_sk <= 90) then 1 else 0 end)  as "61- INTERVAL '90' DAY" 
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk > 90) and
+                 (cs_ship_date_sk - cs_sold_date_sk <= 120) then 1 else 0 end)  as "91- INTERVAL '120' DAY" 
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk  > 120) then 1 else 0 end)  as ">120 days" 
+from
+   catalog_sales
+  ,warehouse
+  ,ship_mode
+  ,call_center
+  ,date_dim
 where
-i_manufact_id = 773
-and i_item_sk = ws_item_sk 
-and d_date between '1998-02-02' and 
-        (cast('1998-02-02' as date) + 90 days)
-and d_date_sk = ws_sold_date_sk 
-and ws_ext_discount_amt  
-     > ( 
-         SELECT 
-            1.3 * avg(ws_ext_discount_amt) 
-         FROM 
-            web_sales 
-           ,date_dim
-         WHERE 
-              ws_item_sk = i_item_sk 
-          and d_date between '1998-02-02' and
-                             (cast('1998-02-02' as date) + 90 days)
-          and d_date_sk = ws_sold_date_sk 
-      ) 
-order by sum(ws_ext_discount_amt)
-limit 100;
+    d_month_seq between 1215 and 1215 + 11
+and cs_ship_date_sk   = d_date_sk
+and cs_warehouse_sk   = w_warehouse_sk
+and cs_ship_mode_sk   = sm_ship_mode_sk
+and cs_call_center_sk = cc_call_center_sk
+group by
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,cc_name
+order by substr(w_warehouse_name,1,20)
+        ,sm_type
+        ,cc_name
+limit 100

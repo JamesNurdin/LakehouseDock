@@ -1,20 +1,56 @@
-select  count(*) from (
-    select distinct c_last_name, c_first_name, d_date
-    from store_sales, date_dim, customer
-          where store_sales.ss_sold_date_sk = date_dim.d_date_sk
-      and store_sales.ss_customer_sk = customer.c_customer_sk
-      and d_month_seq between 1192 and 1192 + 11
-  intersect
-    select distinct c_last_name, c_first_name, d_date
-    from catalog_sales, date_dim, customer
-          where catalog_sales.cs_sold_date_sk = date_dim.d_date_sk
-      and catalog_sales.cs_bill_customer_sk = customer.c_customer_sk
-      and d_month_seq between 1192 and 1192 + 11
-  intersect
-    select distinct c_last_name, c_first_name, d_date
-    from web_sales, date_dim, customer
-          where web_sales.ws_sold_date_sk = date_dim.d_date_sk
-      and web_sales.ws_bill_customer_sk = customer.c_customer_sk
-      and d_month_seq between 1192 and 1192 + 11
-) hot_cust
-limit 100;
+select  
+   s_store_name
+  ,s_company_id
+  ,s_street_number
+  ,s_street_name
+  ,s_street_type
+  ,s_suite_number
+  ,s_city
+  ,s_county
+  ,s_state
+  ,s_zip
+  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk <= 30 ) then 1 else 0 end)  as "30 days" 
+  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk > 30) and 
+                 (sr_returned_date_sk - ss_sold_date_sk <= 60) then 1 else 0 end )  as "31- INTERVAL '60' DAY" 
+  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk > 60) and 
+                 (sr_returned_date_sk - ss_sold_date_sk <= 90) then 1 else 0 end)  as "61- INTERVAL '90' DAY" 
+  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk > 90) and
+                 (sr_returned_date_sk - ss_sold_date_sk <= 120) then 1 else 0 end)  as "91- INTERVAL '120' DAY" 
+  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk  > 120) then 1 else 0 end)  as ">120 days" 
+from
+   store_sales
+  ,store_returns
+  ,store
+  ,date_dim d1
+  ,date_dim d2
+where
+    d2.d_year = 1998
+and d2.d_moy  = 10
+and ss_ticket_number = sr_ticket_number
+and ss_item_sk = sr_item_sk
+and ss_sold_date_sk   = d1.d_date_sk
+and sr_returned_date_sk   = d2.d_date_sk
+and ss_customer_sk = sr_customer_sk
+and ss_store_sk = s_store_sk
+group by
+   s_store_name
+  ,s_company_id
+  ,s_street_number
+  ,s_street_name
+  ,s_street_type
+  ,s_suite_number
+  ,s_city
+  ,s_county
+  ,s_state
+  ,s_zip
+order by s_store_name
+        ,s_company_id
+        ,s_street_number
+        ,s_street_name
+        ,s_street_type
+        ,s_suite_number
+        ,s_city
+        ,s_county
+        ,s_state
+        ,s_zip
+limit 100

@@ -1,48 +1,75 @@
-select case when (select count(*) 
-                  from store_sales 
-                  where ss_quantity between 1 and 20) > 24212
-            then (select avg(ss_ext_sales_price) 
-                  from store_sales 
-                  where ss_quantity between 1 and 20) 
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 1 and 20) end bucket1 ,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 21 and 40) > 44384
-            then (select avg(ss_ext_sales_price)
-                  from store_sales
-                  where ss_quantity between 21 and 40) 
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 21 and 40) end bucket2,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 41 and 60) > 45573
-            then (select avg(ss_ext_sales_price)
-                  from store_sales
-                  where ss_quantity between 41 and 60)
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 41 and 60) end bucket3,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 61 and 80) > 44080
-            then (select avg(ss_ext_sales_price)
-                  from store_sales
-                  where ss_quantity between 61 and 80)
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 61 and 80) end bucket4,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 81 and 100) > 43629
-            then (select avg(ss_ext_sales_price)
-                  from store_sales
-                  where ss_quantity between 81 and 100)
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 81 and 100) end bucket5
-from reason
-where r_reason_sk = 1
-;
+with ss as (
+ select
+          i_item_id,sum(ss_ext_sales_price) total_sales
+ from
+ 	store_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_item_id in (select
+  i_item_id
+from
+ item
+where i_category in ('Music'))
+ and     ss_item_sk              = i_item_sk
+ and     ss_sold_date_sk         = d_date_sk
+ and     d_year                  = 2002
+ and     d_moy                   = 10
+ and     ss_addr_sk              = ca_address_sk
+ and     ca_gmt_offset           = -6 
+ group by i_item_id),
+ cs as (
+ select
+          i_item_id,sum(cs_ext_sales_price) total_sales
+ from
+ 	catalog_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_item_id               in (select
+  i_item_id
+from
+ item
+where i_category in ('Music'))
+ and     cs_item_sk              = i_item_sk
+ and     cs_sold_date_sk         = d_date_sk
+ and     d_year                  = 2002
+ and     d_moy                   = 10
+ and     cs_bill_addr_sk         = ca_address_sk
+ and     ca_gmt_offset           = -6 
+ group by i_item_id),
+ ws as (
+ select
+          i_item_id,sum(ws_ext_sales_price) total_sales
+ from
+ 	web_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_item_id               in (select
+  i_item_id
+from
+ item
+where i_category in ('Music'))
+ and     ws_item_sk              = i_item_sk
+ and     ws_sold_date_sk         = d_date_sk
+ and     d_year                  = 2002
+ and     d_moy                   = 10
+ and     ws_bill_addr_sk         = ca_address_sk
+ and     ca_gmt_offset           = -6
+ group by i_item_id)
+  select   
+  i_item_id
+,sum(total_sales) total_sales
+ from  (select * from ss 
+        union all
+        select * from cs 
+        union all
+        select * from ws) tmp1
+ group by i_item_id
+ order by i_item_id
+      ,total_sales
+ limit 100

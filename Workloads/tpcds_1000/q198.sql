@@ -1,58 +1,28 @@
-with year_total as (
- select c_customer_id customer_id
-       ,c_first_name customer_first_name
-       ,c_last_name customer_last_name
-       ,d_year as year
-       ,sum(ss_net_paid) year_total
-       ,'s' sale_type
- from customer
-     ,store_sales
-     ,date_dim
- where c_customer_sk = ss_customer_sk
-   and ss_sold_date_sk = d_date_sk
-   and d_year in (1998,1998+1)
- group by c_customer_id
-         ,c_first_name
-         ,c_last_name
-         ,d_year
- union all
- select c_customer_id customer_id
-       ,c_first_name customer_first_name
-       ,c_last_name customer_last_name
-       ,d_year as year
-       ,sum(ws_net_paid) year_total
-       ,'w' sale_type
- from customer
-     ,web_sales
-     ,date_dim
- where c_customer_sk = ws_bill_customer_sk
-   and ws_sold_date_sk = d_date_sk
-   and d_year in (1998,1998+1)
- group by c_customer_id
-         ,c_first_name
-         ,c_last_name
-         ,d_year
-         )
-  select 
-        t_s_secyear.customer_id, t_s_secyear.customer_first_name, t_s_secyear.customer_last_name
- from year_total t_s_firstyear
-     ,year_total t_s_secyear
-     ,year_total t_w_firstyear
-     ,year_total t_w_secyear
- where t_s_secyear.customer_id = t_s_firstyear.customer_id
-         and t_s_firstyear.customer_id = t_w_secyear.customer_id
-         and t_s_firstyear.customer_id = t_w_firstyear.customer_id
-         and t_s_firstyear.sale_type = 's'
-         and t_w_firstyear.sale_type = 'w'
-         and t_s_secyear.sale_type = 's'
-         and t_w_secyear.sale_type = 'w'
-         and t_s_firstyear.year = 1998
-         and t_s_secyear.year = 1998+1
-         and t_w_firstyear.year = 1998
-         and t_w_secyear.year = 1998+1
-         and t_s_firstyear.year_total > 0
-         and t_w_firstyear.year_total > 0
-         and case when t_w_firstyear.year_total > 0 then t_w_secyear.year_total / t_w_firstyear.year_total else null end
-           > case when t_s_firstyear.year_total > 0 then t_s_secyear.year_total / t_s_firstyear.year_total else null end
- order by 2,3,1
-limit 100;
+select  
+        cc_call_center_id Call_Center,
+        cc_name Call_Center_Name,
+        cc_manager Manager,
+        sum(cr_net_loss) Returns_Loss
+from
+        call_center,
+        catalog_returns,
+        date_dim,
+        customer,
+        customer_address,
+        customer_demographics,
+        household_demographics
+where
+        cr_call_center_sk       = cc_call_center_sk
+and     cr_returned_date_sk     = d_date_sk
+and     cr_returning_customer_sk= c_customer_sk
+and     cd_demo_sk              = c_current_cdemo_sk
+and     hd_demo_sk              = c_current_hdemo_sk
+and     ca_address_sk           = c_current_addr_sk
+and     d_year                  = 2001 
+and     d_moy                   = 11
+and     ( (cd_marital_status       = 'M' and cd_education_status     = 'Unknown')
+        or(cd_marital_status       = 'W' and cd_education_status     = 'Advanced Degree'))
+and     hd_buy_potential like '1001-5000%'
+and     ca_gmt_offset           = -6
+group by cc_call_center_id,cc_name,cc_manager,cd_marital_status,cd_education_status
+order by sum(cr_net_loss) desc

@@ -1,18 +1,15 @@
-select  i_item_id, 
-        avg(ss_quantity) agg1,
-        avg(ss_list_price) agg2,
-        avg(ss_coupon_amt) agg3,
-        avg(ss_sales_price) agg4 
- from store_sales, customer_demographics, date_dim, item, promotion
- where ss_sold_date_sk = d_date_sk and
-       ss_item_sk = i_item_sk and
-       ss_cdemo_sk = cd_demo_sk and
-       ss_promo_sk = p_promo_sk and
-       cd_gender = 'F' and 
-       cd_marital_status = 'M' and
-       cd_education_status = 'College' and
-       (p_channel_email = 'N' or p_channel_event = 'N') and
-       d_year = 2001 
- group by i_item_id
- order by i_item_id
- limit 100;
+select  ss_customer_sk
+            ,sum(act_sales) sumsales
+      from (select ss_item_sk
+                  ,ss_ticket_number
+                  ,ss_customer_sk
+                  ,case when sr_return_quantity is not null then (ss_quantity-sr_return_quantity)*ss_sales_price
+                                                            else (ss_quantity*ss_sales_price) end act_sales
+            from store_sales left outer join store_returns on (sr_item_sk = ss_item_sk
+                                                               and sr_ticket_number = ss_ticket_number)
+                ,reason
+            where sr_reason_sk = r_reason_sk
+              and r_reason_desc = 'reason 48') t
+      group by ss_customer_sk
+      order by sumsales, ss_customer_sk
+limit 100

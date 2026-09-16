@@ -1,57 +1,93 @@
-with wscs as
- (select sold_date_sk
-        ,sales_price
-  from (select ws_sold_date_sk sold_date_sk
-              ,ws_ext_sales_price sales_price
-        from web_sales) x
-        union all
-       (select cs_sold_date_sk sold_date_sk
-              ,cs_ext_sales_price sales_price
-        from catalog_sales)),
- wswscs as 
- (select d_week_seq,
-        sum(case when (d_day_name='Sunday') then sales_price else null end) sun_sales,
-        sum(case when (d_day_name='Monday') then sales_price else null end) mon_sales,
-        sum(case when (d_day_name='Tuesday') then sales_price else  null end) tue_sales,
-        sum(case when (d_day_name='Wednesday') then sales_price else null end) wed_sales,
-        sum(case when (d_day_name='Thursday') then sales_price else null end) thu_sales,
-        sum(case when (d_day_name='Friday') then sales_price else null end) fri_sales,
-        sum(case when (d_day_name='Saturday') then sales_price else null end) sat_sales
- from wscs
-     ,date_dim
- where d_date_sk = sold_date_sk
- group by d_week_seq)
- select d_week_seq1
-       ,round(sun_sales1/sun_sales2,2)
-       ,round(mon_sales1/mon_sales2,2)
-       ,round(tue_sales1/tue_sales2,2)
-       ,round(wed_sales1/wed_sales2,2)
-       ,round(thu_sales1/thu_sales2,2)
-       ,round(fri_sales1/fri_sales2,2)
-       ,round(sat_sales1/sat_sales2,2)
- from
- (select wswscs.d_week_seq d_week_seq1
-        ,sun_sales sun_sales1
-        ,mon_sales mon_sales1
-        ,tue_sales tue_sales1
-        ,wed_sales wed_sales1
-        ,thu_sales thu_sales1
-        ,fri_sales fri_sales1
-        ,sat_sales sat_sales1
-  from wswscs,date_dim 
-  where date_dim.d_week_seq = wswscs.d_week_seq and
-        d_year = 1999) y,
- (select wswscs.d_week_seq d_week_seq2
-        ,sun_sales sun_sales2
-        ,mon_sales mon_sales2
-        ,tue_sales tue_sales2
-        ,wed_sales wed_sales2
-        ,thu_sales thu_sales2
-        ,fri_sales fri_sales2
-        ,sat_sales sat_sales2
-  from wswscs
-      ,date_dim 
-  where date_dim.d_week_seq = wswscs.d_week_seq and
-        d_year = 1999+1) z
- where d_week_seq1=d_week_seq2-53
- order by d_week_seq1;
+with ssr as
+ (select  s_store_id as store_id,
+          sum(ss_ext_sales_price) as sales,
+          sum(coalesce(sr_return_amt, 0)) as returns,
+          sum(ss_net_profit - coalesce(sr_net_loss, 0)) as profit
+  from store_sales left outer join store_returns on
+         (ss_item_sk = sr_item_sk and ss_ticket_number = sr_ticket_number),
+     date_dim,
+     store,
+     item,
+     promotion
+ where ss_sold_date_sk = d_date_sk
+       and d_date between cast('2001-08-20' as date) 
+                  and (cast('2001-08-20' as date) + INTERVAL '30' DAY)
+       and ss_store_sk = s_store_sk
+       and ss_item_sk = i_item_sk
+       and i_current_price > 50
+       and ss_promo_sk = p_promo_sk
+       and p_channel_tv = 'N'
+ group by s_store_id)
+ ,
+ csr as
+ (select  cp_catalog_page_id as catalog_page_id,
+          sum(cs_ext_sales_price) as sales,
+          sum(coalesce(cr_return_amount, 0)) as returns,
+          sum(cs_net_profit - coalesce(cr_net_loss, 0)) as profit
+  from catalog_sales left outer join catalog_returns on
+         (cs_item_sk = cr_item_sk and cs_order_number = cr_order_number),
+     date_dim,
+     catalog_page,
+     item,
+     promotion
+ where cs_sold_date_sk = d_date_sk
+       and d_date between cast('2001-08-20' as date)
+                  and (cast('2001-08-20' as date) + INTERVAL '30' DAY)
+        and cs_catalog_page_sk = cp_catalog_page_sk
+       and cs_item_sk = i_item_sk
+       and i_current_price > 50
+       and cs_promo_sk = p_promo_sk
+       and p_channel_tv = 'N'
+group by cp_catalog_page_id)
+ ,
+ wsr as
+ (select  web_site_id,
+          sum(ws_ext_sales_price) as sales,
+          sum(coalesce(wr_return_amt, 0)) as returns,
+          sum(ws_net_profit - coalesce(wr_net_loss, 0)) as profit
+  from web_sales left outer join web_returns on
+         (ws_item_sk = wr_item_sk and ws_order_number = wr_order_number),
+     date_dim,
+     web_site,
+     item,
+     promotion
+ where ws_sold_date_sk = d_date_sk
+       and d_date between cast('2001-08-20' as date)
+                  and (cast('2001-08-20' as date) + INTERVAL '30' DAY)
+        and ws_web_site_sk = web_site_sk
+       and ws_item_sk = i_item_sk
+       and i_current_price > 50
+       and ws_promo_sk = p_promo_sk
+       and p_channel_tv = 'N'
+group by web_site_id)
+  select  channel
+        , id
+        , sum(sales) as sales
+        , sum(returns) as returns
+        , sum(profit) as profit
+ from 
+ (select 'store channel' as channel
+        , 'store' || store_id as id
+        , sales
+        , returns
+        , profit
+ from   ssr
+ union all
+ select 'catalog channel' as channel
+        , 'catalog_page' || catalog_page_id as id
+        , sales
+        , returns
+        , profit
+ from  csr
+ union all
+ select 'web channel' as channel
+        , 'web_site' || web_site_id as id
+        , sales
+        , returns
+        , profit
+ from   wsr
+ ) x
+ group by rollup (channel, id)
+ order by channel
+         ,id
+ limit 100

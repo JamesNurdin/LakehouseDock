@@ -1,42 +1,64 @@
-select  i_item_id
-       ,i_item_desc
-       ,s_state
-       ,count(ss_quantity) as store_sales_quantitycount
-       ,avg(ss_quantity) as store_sales_quantityave
-       ,stddev_samp(ss_quantity) as store_sales_quantitystdev
-       ,stddev_samp(ss_quantity)/avg(ss_quantity) as store_sales_quantitycov
-       ,count(sr_return_quantity) as_store_returns_quantitycount
-       ,avg(sr_return_quantity) as_store_returns_quantityave
-       ,stddev_samp(sr_return_quantity) as_store_returns_quantitystdev
-       ,stddev_samp(sr_return_quantity)/avg(sr_return_quantity) as store_returns_quantitycov
-       ,count(cs_quantity) as catalog_sales_quantitycount ,avg(cs_quantity) as catalog_sales_quantityave
-       ,stddev_samp(cs_quantity)/avg(cs_quantity) as catalog_sales_quantitystdev
-       ,stddev_samp(cs_quantity)/avg(cs_quantity) as catalog_sales_quantitycov
- from store_sales
-     ,store_returns
-     ,catalog_sales
-     ,date_dim d1
-     ,date_dim d2
-     ,date_dim d3
-     ,store
-     ,item
- where d1.d_quarter_name = '1998Q1'
-   and d1.d_date_sk = ss_sold_date_sk
-   and i_item_sk = ss_item_sk
-   and s_store_sk = ss_store_sk
-   and ss_customer_sk = sr_customer_sk
-   and ss_item_sk = sr_item_sk
-   and ss_ticket_number = sr_ticket_number
-   and sr_returned_date_sk = d2.d_date_sk
-   and d2.d_quarter_name in ('1998Q1','1998Q2','1998Q3')
-   and sr_customer_sk = cs_bill_customer_sk
-   and sr_item_sk = cs_item_sk
-   and cs_sold_date_sk = d3.d_date_sk
-   and d3.d_quarter_name in ('1998Q1','1998Q2','1998Q3')
- group by i_item_id
-         ,i_item_desc
-         ,s_state
- order by i_item_id
-         ,i_item_desc
-         ,s_state
-limit 100;
+with sr_items as
+ (select i_item_id item_id,
+        sum(sr_return_quantity) sr_item_qty
+ from store_returns,
+      item,
+      date_dim
+ where sr_item_sk = i_item_sk
+ and   d_date    in 
+	(select d_date
+	from date_dim
+	where d_week_seq in 
+		(select d_week_seq
+		from date_dim
+	  where d_date in (DATE '2000-07-14',DATE '2000-08-23',DATE '2000-11-14')))
+ and   sr_returned_date_sk   = d_date_sk
+ group by i_item_id),
+ cr_items as
+ (select i_item_id item_id,
+        sum(cr_return_quantity) cr_item_qty
+ from catalog_returns,
+      item,
+      date_dim
+ where cr_item_sk = i_item_sk
+ and   d_date    in 
+	(select d_date
+	from date_dim
+	where d_week_seq in 
+		(select d_week_seq
+		from date_dim
+	  where d_date in (DATE '2000-07-14',DATE '2000-08-23',DATE '2000-11-14')))
+ and   cr_returned_date_sk   = d_date_sk
+ group by i_item_id),
+ wr_items as
+ (select i_item_id item_id,
+        sum(wr_return_quantity) wr_item_qty
+ from web_returns,
+      item,
+      date_dim
+ where wr_item_sk = i_item_sk
+ and   d_date    in 
+	(select d_date
+	from date_dim
+	where d_week_seq in 
+		(select d_week_seq
+		from date_dim
+		where d_date in (DATE '2000-07-14',DATE '2000-08-23',DATE '2000-11-14')))
+ and   wr_returned_date_sk   = d_date_sk
+ group by i_item_id)
+  select  sr_items.item_id
+       ,sr_item_qty
+       ,sr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 sr_dev
+       ,cr_item_qty
+       ,cr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 cr_dev
+       ,wr_item_qty
+       ,wr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 wr_dev
+       ,(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 average
+ from sr_items
+     ,cr_items
+     ,wr_items
+ where sr_items.item_id=cr_items.item_id
+   and sr_items.item_id=wr_items.item_id 
+ order by sr_items.item_id
+         ,sr_item_qty
+ limit 100

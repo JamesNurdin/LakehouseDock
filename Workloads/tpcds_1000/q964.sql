@@ -1,42 +1,28 @@
-WITH web_v1 as (
-select
-  ws_item_sk item_sk, d_date,
-  sum(sum(ws_sales_price))
-      over (partition by ws_item_sk order by d_date rows between unbounded preceding and current row) cume_sales
-from web_sales
-    ,date_dim
-where ws_sold_date_sk=d_date_sk
-  and d_month_seq between 1191 and 1191+11
-  and ws_item_sk is not NULL
-group by ws_item_sk, d_date),
-store_v1 as (
-select
-  ss_item_sk item_sk, d_date,
-  sum(sum(ss_sales_price))
-      over (partition by ss_item_sk order by d_date rows between unbounded preceding and current row) cume_sales
-from store_sales
-    ,date_dim
-where ss_sold_date_sk=d_date_sk
-  and d_month_seq between 1191 and 1191+11
-  and ss_item_sk is not NULL
-group by ss_item_sk, d_date)
- select  *
-from (select item_sk
-     ,d_date
-     ,web_sales
-     ,store_sales
-     ,max(web_sales)
-         over (partition by item_sk order by d_date rows between unbounded preceding and current row) web_cumulative
-     ,max(store_sales)
-         over (partition by item_sk order by d_date rows between unbounded preceding and current row) store_cumulative
-     from (select case when web.item_sk is not null then web.item_sk else store.item_sk end item_sk
-                 ,case when web.d_date is not null then web.d_date else store.d_date end d_date
-                 ,web.cume_sales web_sales
-                 ,store.cume_sales store_sales
-           from web_v1 web full outer join store_v1 store on (web.item_sk = store.item_sk
-                                                          and web.d_date = store.d_date)
-          )x )y
-where web_cumulative > store_cumulative
-order by item_sk
-        ,d_date
-limit 100;
+select c_last_name
+       ,c_first_name
+       ,c_salutation
+       ,c_preferred_cust_flag
+       ,ss_ticket_number
+       ,cnt from
+   (select ss_ticket_number
+          ,ss_customer_sk
+          ,count(*) cnt
+    from store_sales,date_dim,store,household_demographics
+    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
+    and store_sales.ss_store_sk = store.s_store_sk  
+    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
+    and (date_dim.d_dom between 1 and 3 or date_dim.d_dom between 25 and 28)
+    and (household_demographics.hd_buy_potential = '1001-5000' or
+         household_demographics.hd_buy_potential = '5001-10000')
+    and household_demographics.hd_vehicle_count > 0
+    and (case when household_demographics.hd_vehicle_count > 0 
+	then household_demographics.hd_dep_count/ household_demographics.hd_vehicle_count 
+	else null 
+	end)  > 1.2
+    and date_dim.d_year in (1998,1998+1,1998+2)
+    and store.s_county in ('Williamson County','Williamson County','Williamson County','Williamson County',
+                           'Williamson County','Williamson County','Williamson County','Williamson County')
+    group by ss_ticket_number,ss_customer_sk) dn,customer
+    where ss_customer_sk = c_customer_sk
+      and cnt between 15 and 20
+    order by c_last_name,c_first_name,c_salutation,c_preferred_cust_flag desc

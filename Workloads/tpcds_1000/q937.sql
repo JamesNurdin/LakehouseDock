@@ -1,28 +1,56 @@
-with customer_total_return as
- (select wr_returning_customer_sk as ctr_customer_sk
-        ,ca_state as ctr_state, 
- 	sum(wr_return_amt) as ctr_total_return
- from web_returns
-     ,date_dim
-     ,customer_address
- where wr_returned_date_sk = d_date_sk 
-   and d_year =2000
-   and wr_returning_addr_sk = ca_address_sk 
- group by wr_returning_customer_sk
-         ,ca_state)
-  select  c_customer_id,c_salutation,c_first_name,c_last_name,c_preferred_cust_flag
-       ,c_birth_day,c_birth_month,c_birth_year,c_birth_country,c_login,c_email_address
-       ,c_last_review_date,ctr_total_return
- from customer_total_return ctr1
-     ,customer_address
-     ,customer
- where ctr1.ctr_total_return > (select avg(ctr_total_return)*1.2
- 			  from customer_total_return ctr2 
-                  	  where ctr1.ctr_state = ctr2.ctr_state)
-       and ca_address_sk = c_current_addr_sk
-       and ca_state = 'GA'
-       and ctr1.ctr_customer_sk = c_customer_sk
- order by c_customer_id,c_salutation,c_first_name,c_last_name,c_preferred_cust_flag
-                  ,c_birth_day,c_birth_month,c_birth_year,c_birth_country,c_login,c_email_address
-                  ,c_last_review_date,ctr_total_return
-limit 100;
+select  
+  cd_gender,
+  cd_marital_status,
+  cd_education_status,
+  count(*) cnt1,
+  cd_purchase_estimate,
+  count(*) cnt2,
+  cd_credit_rating,
+  count(*) cnt3,
+  cd_dep_count,
+  count(*) cnt4,
+  cd_dep_employed_count,
+  count(*) cnt5,
+  cd_dep_college_count,
+  count(*) cnt6
+ from
+  customer c,customer_address ca,customer_demographics
+ where
+  c.c_current_addr_sk = ca.ca_address_sk and
+  ca_county in ('Monterey County','Miami County','Graham County','Newberry County','Klamath County') and
+  cd_demo_sk = c.c_current_cdemo_sk and 
+  exists (select *
+          from store_sales,date_dim
+          where c.c_customer_sk = ss_customer_sk and
+                ss_sold_date_sk = d_date_sk and
+                d_year = 1999 and
+                d_moy between 2 and 2+3) and
+   (exists (select *
+            from web_sales,date_dim
+            where c.c_customer_sk = ws_bill_customer_sk and
+                  ws_sold_date_sk = d_date_sk and
+                  d_year = 1999 and
+                  d_moy between 2 ANd 2+3) or 
+    exists (select * 
+            from catalog_sales,date_dim
+            where c.c_customer_sk = cs_ship_customer_sk and
+                  cs_sold_date_sk = d_date_sk and
+                  d_year = 1999 and
+                  d_moy between 2 and 2+3))
+ group by cd_gender,
+          cd_marital_status,
+          cd_education_status,
+          cd_purchase_estimate,
+          cd_credit_rating,
+          cd_dep_count,
+          cd_dep_employed_count,
+          cd_dep_college_count
+ order by cd_gender,
+          cd_marital_status,
+          cd_education_status,
+          cd_purchase_estimate,
+          cd_credit_rating,
+          cd_dep_count,
+          cd_dep_employed_count,
+          cd_dep_college_count
+limit 100

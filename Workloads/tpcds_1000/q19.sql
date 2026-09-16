@@ -1,62 +1,31 @@
-with ss_items as
- (select i_item_id item_id
-        ,sum(ss_ext_sales_price) ss_item_rev 
- from store_sales
-     ,item
-     ,date_dim
- where ss_item_sk = i_item_sk
-   and d_date in (select d_date
-                  from date_dim
-                  where d_week_seq = (select d_week_seq 
-                                      from date_dim
-                                      where d_date = '1999-04-12'))
-   and ss_sold_date_sk   = d_date_sk
- group by i_item_id),
- cs_items as
- (select i_item_id item_id
-        ,sum(cs_ext_sales_price) cs_item_rev
-  from catalog_sales
-      ,item
-      ,date_dim
- where cs_item_sk = i_item_sk
-  and  d_date in (select d_date
-                  from date_dim
-                  where d_week_seq = (select d_week_seq 
-                                      from date_dim
-                                      where d_date = '1999-04-12'))
-  and  cs_sold_date_sk = d_date_sk
- group by i_item_id),
- ws_items as
- (select i_item_id item_id
-        ,sum(ws_ext_sales_price) ws_item_rev
-  from web_sales
-      ,item
-      ,date_dim
- where ws_item_sk = i_item_sk
-  and  d_date in (select d_date
-                  from date_dim
-                  where d_week_seq =(select d_week_seq 
-                                     from date_dim
-                                     where d_date = '1999-04-12'))
-  and ws_sold_date_sk   = d_date_sk
- group by i_item_id)
-  select  ss_items.item_id
-       ,ss_item_rev
-       ,ss_item_rev/(ss_item_rev+cs_item_rev+ws_item_rev)/3 * 100 ss_dev
-       ,cs_item_rev
-       ,cs_item_rev/(ss_item_rev+cs_item_rev+ws_item_rev)/3 * 100 cs_dev
-       ,ws_item_rev
-       ,ws_item_rev/(ss_item_rev+cs_item_rev+ws_item_rev)/3 * 100 ws_dev
-       ,(ss_item_rev+cs_item_rev+ws_item_rev)/3 average
- from ss_items,cs_items,ws_items
- where ss_items.item_id=cs_items.item_id
-   and ss_items.item_id=ws_items.item_id 
-   and ss_item_rev between 0.9 * cs_item_rev and 1.1 * cs_item_rev
-   and ss_item_rev between 0.9 * ws_item_rev and 1.1 * ws_item_rev
-   and cs_item_rev between 0.9 * ss_item_rev and 1.1 * ss_item_rev
-   and cs_item_rev between 0.9 * ws_item_rev and 1.1 * ws_item_rev
-   and ws_item_rev between 0.9 * ss_item_rev and 1.1 * ss_item_rev
-   and ws_item_rev between 0.9 * cs_item_rev and 1.1 * cs_item_rev
- order by item_id
-         ,ss_item_rev
- limit 100;
+select  i_item_id,
+        ca_country,
+        ca_state, 
+        ca_county,
+        avg( cast(cs_quantity as decimal(12,2))) agg1,
+        avg( cast(cs_list_price as decimal(12,2))) agg2,
+        avg( cast(cs_coupon_amt as decimal(12,2))) agg3,
+        avg( cast(cs_sales_price as decimal(12,2))) agg4,
+        avg( cast(cs_net_profit as decimal(12,2))) agg5,
+        avg( cast(c_birth_year as decimal(12,2))) agg6,
+        avg( cast(cd1.cd_dep_count as decimal(12,2))) agg7
+ from catalog_sales, customer_demographics cd1, 
+      customer_demographics cd2, customer, customer_address, date_dim, item
+ where cs_sold_date_sk = d_date_sk and
+       cs_item_sk = i_item_sk and
+       cs_bill_cdemo_sk = cd1.cd_demo_sk and
+       cs_bill_customer_sk = c_customer_sk and
+       cd1.cd_gender = 'M' and 
+       cd1.cd_education_status = 'Advanced Degree' and
+       c_current_cdemo_sk = cd2.cd_demo_sk and
+       c_current_addr_sk = ca_address_sk and
+       c_birth_month in (8,4,7,10,5,1) and
+       d_year = 2000 and
+       ca_state in ('WI','NC','OK'
+                   ,'MI','PA','VA','SC')
+ group by rollup (i_item_id, ca_country, ca_state, ca_county)
+ order by ca_country,
+        ca_state, 
+        ca_county,
+	i_item_id
+ limit 100

@@ -1,72 +1,24 @@
-with year_total as (
- select c_customer_id customer_id
-       ,c_first_name customer_first_name
-       ,c_last_name customer_last_name
-       ,c_preferred_cust_flag customer_preferred_cust_flag
-       ,c_birth_country customer_birth_country
-       ,c_login customer_login
-       ,c_email_address customer_email_address
-       ,d_year dyear
-       ,sum(ss_ext_list_price-ss_ext_discount_amt) year_total
-       ,'s' sale_type
- from customer
-     ,store_sales
-     ,date_dim
- where c_customer_sk = ss_customer_sk
-   and ss_sold_date_sk = d_date_sk
- group by c_customer_id
-         ,c_first_name
-         ,c_last_name
-         ,d_year
-         ,c_preferred_cust_flag
-         ,c_birth_country
-         ,c_login
-         ,c_email_address
-         ,d_year 
- union all
- select c_customer_id customer_id
-       ,c_first_name customer_first_name
-       ,c_last_name customer_last_name
-       ,c_preferred_cust_flag customer_preferred_cust_flag
-       ,c_birth_country customer_birth_country
-       ,c_login customer_login
-       ,c_email_address customer_email_address
-       ,d_year dyear
-       ,sum(ws_ext_list_price-ws_ext_discount_amt) year_total
-       ,'w' sale_type
- from customer
-     ,web_sales
-     ,date_dim
- where c_customer_sk = ws_bill_customer_sk
-   and ws_sold_date_sk = d_date_sk
- group by c_customer_id
-         ,c_first_name
-         ,c_last_name
-         ,c_preferred_cust_flag
-         ,c_birth_country
-         ,c_login
-         ,c_email_address
-         ,d_year
-         )
-  select  t_s_secyear.customer_email_address
- from year_total t_s_firstyear
-     ,year_total t_s_secyear
-     ,year_total t_w_firstyear
-     ,year_total t_w_secyear
- where t_s_secyear.customer_id = t_s_firstyear.customer_id
-         and t_s_firstyear.customer_id = t_w_secyear.customer_id
-         and t_s_firstyear.customer_id = t_w_firstyear.customer_id
-         and t_s_firstyear.sale_type = 's'
-         and t_w_firstyear.sale_type = 'w'
-         and t_s_secyear.sale_type = 's'
-         and t_w_secyear.sale_type = 'w'
-         and t_s_firstyear.dyear = 1999
-         and t_s_secyear.dyear = 1999+1
-         and t_w_firstyear.dyear = 1999
-         and t_w_secyear.dyear = 1999+1
-         and t_s_firstyear.year_total > 0
-         and t_w_firstyear.year_total > 0
-         and case when t_w_firstyear.year_total > 0 then t_w_secyear.year_total / t_w_firstyear.year_total else null end
-             > case when t_s_firstyear.year_total > 0 then t_s_secyear.year_total / t_s_firstyear.year_total else null end
- order by t_s_secyear.customer_email_address
-limit 100;
+with inv as
+(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
+       ,stdev,mean, case mean when 0 then null else stdev/mean end cov
+ from(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
+            ,stddev_samp(inv_quantity_on_hand) stdev,avg(inv_quantity_on_hand) mean
+      from inventory
+          ,item
+          ,warehouse
+          ,date_dim
+      where inv_item_sk = i_item_sk
+        and inv_warehouse_sk = w_warehouse_sk
+        and inv_date_sk = d_date_sk
+        and d_year =1999
+      group by w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy) foo
+ where case mean when 0 then 0 else stdev/mean end > 1)
+select inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean, inv1.cov
+        ,inv2.w_warehouse_sk,inv2.i_item_sk,inv2.d_moy,inv2.mean, inv2.cov
+from inv inv1,inv inv2
+where inv1.i_item_sk = inv2.i_item_sk
+  and inv1.w_warehouse_sk =  inv2.w_warehouse_sk
+  and inv1.d_moy=4
+  and inv2.d_moy=4+1
+order by inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean,inv1.cov
+        ,inv2.d_moy,inv2.mean, inv2.cov

@@ -1,75 +1,58 @@
-with ss as (
- select
-          i_item_id,sum(ss_ext_sales_price) total_sales
- from
- 	store_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_item_id in (select
-  i_item_id
-from
- item
-where i_category in ('Shoes'))
- and     ss_item_sk              = i_item_sk
- and     ss_sold_date_sk         = d_date_sk
- and     d_year                  = 2002
- and     d_moy                   = 10
- and     ss_addr_sk              = ca_address_sk
- and     ca_gmt_offset           = -6 
- group by i_item_id),
- cs as (
- select
-          i_item_id,sum(cs_ext_sales_price) total_sales
- from
- 	catalog_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_item_id               in (select
-  i_item_id
-from
- item
-where i_category in ('Shoes'))
- and     cs_item_sk              = i_item_sk
- and     cs_sold_date_sk         = d_date_sk
- and     d_year                  = 2002
- and     d_moy                   = 10
- and     cs_bill_addr_sk         = ca_address_sk
- and     ca_gmt_offset           = -6 
- group by i_item_id),
- ws as (
- select
-          i_item_id,sum(ws_ext_sales_price) total_sales
- from
- 	web_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_item_id               in (select
-  i_item_id
-from
- item
-where i_category in ('Shoes'))
- and     ws_item_sk              = i_item_sk
- and     ws_sold_date_sk         = d_date_sk
- and     d_year                  = 2002
- and     d_moy                   = 10
- and     ws_bill_addr_sk         = ca_address_sk
- and     ca_gmt_offset           = -6
- group by i_item_id)
-  select   
-  i_item_id
-,sum(total_sales) total_sales
- from  (select * from ss 
-        union all
-        select * from cs 
-        union all
-        select * from ws) tmp1
- group by i_item_id
- order by i_item_id
-      ,total_sales
- limit 100;
+with year_total as (
+ select c_customer_id customer_id
+       ,c_first_name customer_first_name
+       ,c_last_name customer_last_name
+       ,d_year as year
+       ,min(ss_net_paid) year_total
+       ,'s' sale_type
+ from customer
+     ,store_sales
+     ,date_dim
+ where c_customer_sk = ss_customer_sk
+   and ss_sold_date_sk = d_date_sk
+   and d_year in (1999,1999+1)
+ group by c_customer_id
+         ,c_first_name
+         ,c_last_name
+         ,d_year
+ union all
+ select c_customer_id customer_id
+       ,c_first_name customer_first_name
+       ,c_last_name customer_last_name
+       ,d_year as year
+       ,min(ws_net_paid) year_total
+       ,'w' sale_type
+ from customer
+     ,web_sales
+     ,date_dim
+ where c_customer_sk = ws_bill_customer_sk
+   and ws_sold_date_sk = d_date_sk
+   and d_year in (1999,1999+1)
+ group by c_customer_id
+         ,c_first_name
+         ,c_last_name
+         ,d_year
+         )
+  select 
+        t_s_secyear.customer_id, t_s_secyear.customer_first_name, t_s_secyear.customer_last_name
+ from year_total t_s_firstyear
+     ,year_total t_s_secyear
+     ,year_total t_w_firstyear
+     ,year_total t_w_secyear
+ where t_s_secyear.customer_id = t_s_firstyear.customer_id
+         and t_s_firstyear.customer_id = t_w_secyear.customer_id
+         and t_s_firstyear.customer_id = t_w_firstyear.customer_id
+         and t_s_firstyear.sale_type = 's'
+         and t_w_firstyear.sale_type = 'w'
+         and t_s_secyear.sale_type = 's'
+         and t_w_secyear.sale_type = 'w'
+         and t_s_firstyear.year = 1999
+         and t_s_secyear.year = 1999+1
+         and t_w_firstyear.year = 1999
+         and t_w_secyear.year = 1999+1
+         and t_s_firstyear.year_total > 0
+         and t_w_firstyear.year_total > 0
+         and case when t_w_firstyear.year_total > 0 then t_w_secyear.year_total / t_w_firstyear.year_total else null end
+           > case when t_s_firstyear.year_total > 0 then t_s_secyear.year_total / t_s_firstyear.year_total else null end
+ order by 2,1,3
+limit 100

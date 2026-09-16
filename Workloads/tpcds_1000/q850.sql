@@ -1,51 +1,47 @@
-with inv as
-(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
-       ,stdev,mean, case mean when 0 then null else stdev/mean end cov
- from(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
-            ,stddev_samp(inv_quantity_on_hand) stdev,avg(inv_quantity_on_hand) mean
-      from inventory
-          ,item
-          ,warehouse
-          ,date_dim
-      where inv_item_sk = i_item_sk
-        and inv_warehouse_sk = w_warehouse_sk
-        and inv_date_sk = d_date_sk
-        and d_year =2000
-      group by w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy) foo
- where case mean when 0 then 0 else stdev/mean end > 1)
-select inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean, inv1.cov
-        ,inv2.w_warehouse_sk,inv2.i_item_sk,inv2.d_moy,inv2.mean, inv2.cov
-from inv inv1,inv inv2
-where inv1.i_item_sk = inv2.i_item_sk
-  and inv1.w_warehouse_sk =  inv2.w_warehouse_sk
-  and inv1.d_moy=4
-  and inv2.d_moy=4+1
-order by inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean,inv1.cov
-        ,inv2.d_moy,inv2.mean, inv2.cov
-;
-with inv as
-(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
-       ,stdev,mean, case mean when 0 then null else stdev/mean end cov
- from(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
-            ,stddev_samp(inv_quantity_on_hand) stdev,avg(inv_quantity_on_hand) mean
-      from inventory
-          ,item
-          ,warehouse
-          ,date_dim
-      where inv_item_sk = i_item_sk
-        and inv_warehouse_sk = w_warehouse_sk
-        and inv_date_sk = d_date_sk
-        and d_year =2000
-      group by w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy) foo
- where case mean when 0 then 0 else stdev/mean end > 1)
-select inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean, inv1.cov
-        ,inv2.w_warehouse_sk,inv2.i_item_sk,inv2.d_moy,inv2.mean, inv2.cov
-from inv inv1,inv inv2
-where inv1.i_item_sk = inv2.i_item_sk
-  and inv1.w_warehouse_sk =  inv2.w_warehouse_sk
-  and inv1.d_moy=4
-  and inv2.d_moy=4+1
-  and inv1.cov > 1.5
-order by inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean,inv1.cov
-        ,inv2.d_moy,inv2.mean, inv2.cov
-;
+with ssales as
+(select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,ca_state
+      ,s_state
+      ,i_color
+      ,i_current_price
+      ,i_manager_id
+      ,i_units
+      ,i_size
+      ,sum(ss_net_paid_inc_tax) netpaid
+from store_sales
+    ,store_returns
+    ,store
+    ,item
+    ,customer
+    ,customer_address
+where ss_ticket_number = sr_ticket_number
+  and ss_item_sk = sr_item_sk
+  and ss_customer_sk = c_customer_sk
+  and ss_item_sk = i_item_sk
+  and ss_store_sk = s_store_sk
+  and c_birth_country = upper(ca_country)
+  and s_zip = ca_zip
+and s_market_id=6
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+        ,ca_state
+        ,s_state
+        ,i_color
+        ,i_current_price
+        ,i_manager_id
+        ,i_units
+        ,i_size)
+select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,sum(netpaid) paid
+from ssales
+where i_color = 'lawn'
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+having sum(netpaid) > (select 0.05*avg(netpaid)
+                                 from ssales)

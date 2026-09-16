@@ -1,20 +1,28 @@
-select  i_item_id,
-        s_state, grouping(s_state) g_state,
-        avg(ss_quantity) agg1,
-        avg(ss_list_price) agg2,
-        avg(ss_coupon_amt) agg3,
-        avg(ss_sales_price) agg4
- from store_sales, customer_demographics, date_dim, store, item
- where ss_sold_date_sk = d_date_sk and
-       ss_item_sk = i_item_sk and
-       ss_store_sk = s_store_sk and
-       ss_cdemo_sk = cd_demo_sk and
-       cd_gender = 'M' and
-       cd_marital_status = 'S' and
-       cd_education_status = 'Secondary' and
-       d_year = 1998 and
-       s_state in ('TN','TN', 'TN', 'TN', 'TN', 'TN')
- group by rollup (i_item_id, s_state)
- order by i_item_id
-         ,s_state
- limit 100;
+select c_last_name
+       ,c_first_name
+       ,c_salutation
+       ,c_preferred_cust_flag
+       ,ss_ticket_number
+       ,cnt from
+   (select ss_ticket_number
+          ,ss_customer_sk
+          ,count(*) cnt
+    from store_sales,date_dim,store,household_demographics
+    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
+    and store_sales.ss_store_sk = store.s_store_sk  
+    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
+    and (date_dim.d_dom between 1 and 3 or date_dim.d_dom between 25 and 28)
+    and (household_demographics.hd_buy_potential = '1001-5000' or
+         household_demographics.hd_buy_potential = 'unknown')
+    and household_demographics.hd_vehicle_count > 0
+    and (case when household_demographics.hd_vehicle_count > 0 
+	then household_demographics.hd_dep_count/ household_demographics.hd_vehicle_count 
+	else null 
+	end)  > 1.2
+    and date_dim.d_year in (1998,1998+1,1998+2)
+    and store.s_county in ('Williamson County','Williamson County','Williamson County','Williamson County',
+                           'Williamson County','Williamson County','Williamson County','Williamson County')
+    group by ss_ticket_number,ss_customer_sk) dn,customer
+    where ss_customer_sk = c_customer_sk
+      and cnt between 15 and 20
+    order by c_last_name,c_first_name,c_salutation,c_preferred_cust_flag desc

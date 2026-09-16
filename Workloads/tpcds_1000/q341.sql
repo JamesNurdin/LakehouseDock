@@ -1,49 +1,44 @@
-select  distinct(i_product_name)
- from item i1
- where i_manufact_id between 893 and 893+40 
-   and (select count(*) as item_cnt
-        from item
-        where (i_manufact = i1.i_manufact and
-        ((i_category = 'Women' and 
-        (i_color = 'wheat' or i_color = 'sky') and 
-        (i_units = 'Gross' or i_units = 'Ounce') and
-        (i_size = 'small' or i_size = 'economy')
-        ) or
-        (i_category = 'Women' and
-        (i_color = 'burlywood' or i_color = 'forest') and
-        (i_units = 'Dozen' or i_units = 'Box') and
-        (i_size = 'extra large' or i_size = 'medium')
-        ) or
-        (i_category = 'Men' and
-        (i_color = 'spring' or i_color = 'slate') and
-        (i_units = 'Ton' or i_units = 'Gram') and
-        (i_size = 'N/A' or i_size = 'large')
-        ) or
-        (i_category = 'Men' and
-        (i_color = 'deep' or i_color = 'sienna') and
-        (i_units = 'Each' or i_units = 'Tbl') and
-        (i_size = 'small' or i_size = 'economy')
-        ))) or
-       (i_manufact = i1.i_manufact and
-        ((i_category = 'Women' and 
-        (i_color = 'pale' or i_color = 'peach') and 
-        (i_units = 'Cup' or i_units = 'Case') and
-        (i_size = 'small' or i_size = 'economy')
-        ) or
-        (i_category = 'Women' and
-        (i_color = 'tomato' or i_color = 'beige') and
-        (i_units = 'Carton' or i_units = 'Tsp') and
-        (i_size = 'extra large' or i_size = 'medium')
-        ) or
-        (i_category = 'Men' and
-        (i_color = 'turquoise' or i_color = 'purple') and
-        (i_units = 'Pound' or i_units = 'Lb') and
-        (i_size = 'N/A' or i_size = 'large')
-        ) or
-        (i_category = 'Men' and
-        (i_color = 'firebrick' or i_color = 'rose') and
-        (i_units = 'Dram' or i_units = 'Bunch') and
-        (i_size = 'small' or i_size = 'economy')
-        )))) > 0
- order by i_product_name
- limit 100;
+select   
+     i_item_id
+    ,i_item_desc
+    ,s_store_id
+    ,s_store_name
+    ,avg(ss_quantity)        as store_sales_quantity
+    ,avg(sr_return_quantity) as store_returns_quantity
+    ,avg(cs_quantity)        as catalog_sales_quantity
+ from
+    store_sales
+   ,store_returns
+   ,catalog_sales
+   ,date_dim             d1
+   ,date_dim             d2
+   ,date_dim             d3
+   ,store
+   ,item
+ where
+     d1.d_moy               = 4 
+ and d1.d_year              = 1999
+ and d1.d_date_sk           = ss_sold_date_sk
+ and i_item_sk              = ss_item_sk
+ and s_store_sk             = ss_store_sk
+ and ss_customer_sk         = sr_customer_sk
+ and ss_item_sk             = sr_item_sk
+ and ss_ticket_number       = sr_ticket_number
+ and sr_returned_date_sk    = d2.d_date_sk
+ and d2.d_moy               between 4 and  4 + 3 
+ and d2.d_year              = 1999
+ and sr_customer_sk         = cs_bill_customer_sk
+ and sr_item_sk             = cs_item_sk
+ and cs_sold_date_sk        = d3.d_date_sk     
+ and d3.d_year              in (1999,1999+1,1999+2)
+ group by
+    i_item_id
+   ,i_item_desc
+   ,s_store_id
+   ,s_store_name
+ order by
+    i_item_id 
+   ,i_item_desc
+   ,s_store_id
+   ,s_store_name
+ limit 100

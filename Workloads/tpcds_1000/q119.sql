@@ -1,30 +1,17 @@
-select  i_item_desc 
-      ,i_category 
-      ,i_class 
-      ,i_current_price
-      ,sum(ws_ext_sales_price) as itemrevenue 
-      ,sum(ws_ext_sales_price)*100/sum(sum(ws_ext_sales_price)) over
-          (partition by i_class) as revenueratio
-from	
-	web_sales
-    	,item 
-    	,date_dim
-where 
-	ws_item_sk = i_item_sk 
-  	and i_category in ('Music', 'Sports', 'Jewelry')
-  	and ws_sold_date_sk = d_date_sk
-	and d_date between cast('1999-03-13' as date) 
-				and (cast('1999-03-13' as date) + 30 days)
-group by 
-	i_item_id
-        ,i_item_desc 
-        ,i_category
-        ,i_class
-        ,i_current_price
-order by 
-	i_category
-        ,i_class
-        ,i_item_id
-        ,i_item_desc
-        ,revenueratio
-limit 100;
+select  ca_zip
+       ,sum(cs_sales_price)
+ from catalog_sales
+     ,customer
+     ,customer_address
+     ,date_dim
+ where cs_bill_customer_sk = c_customer_sk
+ 	and c_current_addr_sk = ca_address_sk 
+ 	and ( substr(ca_zip,1,5) in ('85669', '86197','88274','83405','86475',
+                                   '85392', '85460', '80348', '81792')
+ 	      or ca_state in ('CA','WA','GA')
+ 	      or cs_sales_price > 500)
+ 	and cs_sold_date_sk = d_date_sk
+ 	and d_qoy = 2 and d_year = 1998
+ group by ca_zip
+ order by ca_zip
+ limit 100

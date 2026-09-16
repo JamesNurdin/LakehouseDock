@@ -1,56 +1,47 @@
-select  
-  cd_gender,
-  cd_marital_status,
-  cd_education_status,
-  count(*) cnt1,
-  cd_purchase_estimate,
-  count(*) cnt2,
-  cd_credit_rating,
-  count(*) cnt3,
-  cd_dep_count,
-  count(*) cnt4,
-  cd_dep_employed_count,
-  count(*) cnt5,
-  cd_dep_college_count,
-  count(*) cnt6
- from
-  customer c,customer_address ca,customer_demographics
- where
-  c.c_current_addr_sk = ca.ca_address_sk and
-  ca_county in ('Cherry County','Parker County','Hancock County','Hale County','Meriwether County') and
-  cd_demo_sk = c.c_current_cdemo_sk and 
-  exists (select *
-          from store_sales,date_dim
-          where c.c_customer_sk = ss_customer_sk and
-                ss_sold_date_sk = d_date_sk and
-                d_year = 1999 and
-                d_moy between 4 and 4+3) and
-   (exists (select *
-            from web_sales,date_dim
-            where c.c_customer_sk = ws_bill_customer_sk and
-                  ws_sold_date_sk = d_date_sk and
-                  d_year = 1999 and
-                  d_moy between 4 ANd 4+3) or 
-    exists (select * 
-            from catalog_sales,date_dim
-            where c.c_customer_sk = cs_ship_customer_sk and
-                  cs_sold_date_sk = d_date_sk and
-                  d_year = 1999 and
-                  d_moy between 4 and 4+3))
- group by cd_gender,
-          cd_marital_status,
-          cd_education_status,
-          cd_purchase_estimate,
-          cd_credit_rating,
-          cd_dep_count,
-          cd_dep_employed_count,
-          cd_dep_college_count
- order by cd_gender,
-          cd_marital_status,
-          cd_education_status,
-          cd_purchase_estimate,
-          cd_credit_rating,
-          cd_dep_count,
-          cd_dep_employed_count,
-          cd_dep_college_count
-limit 100;
+with ssales as
+(select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,ca_state
+      ,s_state
+      ,i_color
+      ,i_current_price
+      ,i_manager_id
+      ,i_units
+      ,i_size
+      ,sum(ss_net_paid_inc_tax) netpaid
+from store_sales
+    ,store_returns
+    ,store
+    ,item
+    ,customer
+    ,customer_address
+where ss_ticket_number = sr_ticket_number
+  and ss_item_sk = sr_item_sk
+  and ss_customer_sk = c_customer_sk
+  and ss_item_sk = i_item_sk
+  and ss_store_sk = s_store_sk
+  and c_birth_country = upper(ca_country)
+  and s_zip = ca_zip
+and s_market_id=7
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+        ,ca_state
+        ,s_state
+        ,i_color
+        ,i_current_price
+        ,i_manager_id
+        ,i_units
+        ,i_size)
+select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,sum(netpaid) paid
+from ssales
+where i_color = 'peach'
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+having sum(netpaid) > (select 0.05*avg(netpaid)
+                                 from ssales)

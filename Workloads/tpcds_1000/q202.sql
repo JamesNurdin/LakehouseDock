@@ -1,96 +1,29 @@
-with ssales as
-(select c_last_name
-      ,c_first_name
-      ,s_store_name
-      ,ca_state
-      ,s_state
-      ,i_color
-      ,i_current_price
-      ,i_manager_id
-      ,i_units
-      ,i_size
-      ,sum(ss_ext_sales_price) netpaid
-from store_sales
-    ,store_returns
-    ,store
-    ,item
-    ,customer
-    ,customer_address
-where ss_ticket_number = sr_ticket_number
-  and ss_item_sk = sr_item_sk
-  and ss_customer_sk = c_customer_sk
-  and ss_item_sk = i_item_sk
-  and ss_store_sk = s_store_sk
-  and c_birth_country = upper(ca_country)
-  and s_zip = ca_zip
-and s_market_id=9
-group by c_last_name
-        ,c_first_name
-        ,s_store_name
-        ,ca_state
-        ,s_state
-        ,i_color
-        ,i_current_price
-        ,i_manager_id
-        ,i_units
-        ,i_size)
-select c_last_name
-      ,c_first_name
-      ,s_store_name
-      ,sum(netpaid) paid
-from ssales
-where i_color = 'thistle'
-group by c_last_name
-        ,c_first_name
-        ,s_store_name
-having sum(netpaid) > (select 0.05*avg(netpaid)
-                                 from ssales)
-;
-with ssales as
-(select c_last_name
-      ,c_first_name
-      ,s_store_name
-      ,ca_state
-      ,s_state
-      ,i_color
-      ,i_current_price
-      ,i_manager_id
-      ,i_units
-      ,i_size
-      ,sum(ss_ext_sales_price) netpaid
-from store_sales
-    ,store_returns
-    ,store
-    ,item
-    ,customer
-    ,customer_address
-where ss_ticket_number = sr_ticket_number
-  and ss_item_sk = sr_item_sk
-  and ss_customer_sk = c_customer_sk
-  and ss_item_sk = i_item_sk
-  and ss_store_sk = s_store_sk
-  and c_birth_country = upper(ca_country)
-  and s_zip = ca_zip
-  and s_market_id = 9
-group by c_last_name
-        ,c_first_name
-        ,s_store_name
-        ,ca_state
-        ,s_state
-        ,i_color
-        ,i_current_price
-        ,i_manager_id
-        ,i_units
-        ,i_size)
-select c_last_name
-      ,c_first_name
-      ,s_store_name
-      ,sum(netpaid) paid
-from ssales
-where i_color = 'tan'
-group by c_last_name
-        ,c_first_name
-        ,s_store_name
-having sum(netpaid) > (select 0.05*avg(netpaid)
-                           from ssales)
-;
+with ws_wh as
+(select ws1.ws_order_number,ws1.ws_warehouse_sk wh1,ws2.ws_warehouse_sk wh2
+ from web_sales ws1,web_sales ws2
+ where ws1.ws_order_number = ws2.ws_order_number
+   and ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk)
+ select  
+   count(distinct ws_order_number) as "order count"
+  ,sum(ws_ext_ship_cost) as "total shipping cost"
+  ,sum(ws_net_profit) as "total net profit"
+from
+   web_sales ws1
+  ,date_dim
+  ,customer_address
+  ,web_site
+where
+    d_date between DATE '2001-02-01' and 
+           (cast('2001-02-01' as date) + INTERVAL '60' DAY)
+and ws1.ws_ship_date_sk = d_date_sk
+and ws1.ws_ship_addr_sk = ca_address_sk
+and ca_state = 'AL'
+and ws1.ws_web_site_sk = web_site_sk
+and web_company_name = 'pri'
+and ws1.ws_order_number in (select ws_order_number
+                            from ws_wh)
+and ws1.ws_order_number in (select wr_order_number
+                            from web_returns,ws_wh
+                            where wr_order_number = ws_wh.ws_order_number)
+order by count(distinct ws_order_number)
+limit 100

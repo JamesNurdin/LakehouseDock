@@ -1,25 +1,29 @@
-select  *
-from(
-select i_category, i_class, i_brand,
-       s_store_name, s_company_name,
-       d_moy,
-       sum(ss_sales_price) sum_sales,
-       avg(sum(ss_sales_price)) over
-         (partition by i_category, i_brand, s_store_name, s_company_name)
-         avg_monthly_sales
-from item, store_sales, date_dim, store
-where ss_item_sk = i_item_sk and
-      ss_sold_date_sk = d_date_sk and
-      ss_store_sk = s_store_sk and
-      d_year in (1998) and
-        ((i_category in ('Jewelry','Electronics','Shoes') and
-          i_class in ('rings','dvd/vcr players','mens')
-         )
-      or (i_category in ('Sports','Music','Children') and
-          i_class in ('basketball','country','school-uniforms') 
-        ))
-group by i_category, i_class, i_brand,
-         s_store_name, s_company_name, d_moy) tmp1
-where case when (avg_monthly_sales <> 0) then (abs(sum_sales - avg_monthly_sales) / avg_monthly_sales) else null end > 0.1
-order by sum_sales - avg_monthly_sales, s_store_name
-limit 100;
+with ws_wh as
+(select ws1.ws_order_number,ws1.ws_warehouse_sk wh1,ws2.ws_warehouse_sk wh2
+ from web_sales ws1,web_sales ws2
+ where ws1.ws_order_number = ws2.ws_order_number
+   and ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk)
+ select  
+   count(distinct ws_order_number) as "order count"
+  ,sum(ws_ext_ship_cost) as "total shipping cost"
+  ,sum(ws_net_profit) as "total net profit"
+from
+   web_sales ws1
+  ,date_dim
+  ,customer_address
+  ,web_site
+where
+    d_date between DATE '2001-05-01' and 
+           (cast('2001-05-01' as date) + INTERVAL '60' DAY)
+and ws1.ws_ship_date_sk = d_date_sk
+and ws1.ws_ship_addr_sk = ca_address_sk
+and ca_state = 'OK'
+and ws1.ws_web_site_sk = web_site_sk
+and web_company_name = 'pri'
+and ws1.ws_order_number in (select ws_order_number
+                            from ws_wh)
+and ws1.ws_order_number in (select wr_order_number
+                            from web_returns,ws_wh
+                            where wr_order_number = ws_wh.ws_order_number)
+order by count(distinct ws_order_number)
+limit 100

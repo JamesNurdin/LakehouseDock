@@ -1,53 +1,47 @@
-with my_customers as (
- select distinct c_customer_sk
-        , c_current_addr_sk
- from   
-        ( select cs_sold_date_sk sold_date_sk,
-                 cs_bill_customer_sk customer_sk,
-                 cs_item_sk item_sk
-          from   catalog_sales
-          union all
-          select ws_sold_date_sk sold_date_sk,
-                 ws_bill_customer_sk customer_sk,
-                 ws_item_sk item_sk
-          from   web_sales
-         ) cs_or_ws_sales,
-         item,
-         date_dim,
-         customer
- where   sold_date_sk = d_date_sk
-         and item_sk = i_item_sk
-         and i_category = 'Children'
-         and i_class = 'infants'
-         and c_customer_sk = cs_or_ws_sales.customer_sk
-         and d_moy = 1
-         and d_year = 2001
- )
- , my_revenue as (
- select c_customer_sk,
-        sum(ss_ext_sales_price) as revenue
- from   my_customers,
-        store_sales,
-        customer_address,
-        store,
-        date_dim
- where  c_current_addr_sk = ca_address_sk
-        and ca_county = s_county
-        and ca_state = s_state
-        and ss_sold_date_sk = d_date_sk
-        and c_customer_sk = ss_customer_sk
-        and d_month_seq between (select distinct d_month_seq+1
-                                 from   date_dim where d_year = 2001 and d_moy = 1)
-                           and  (select distinct d_month_seq+3
-                                 from   date_dim where d_year = 2001 and d_moy = 1)
- group by c_customer_sk
- )
- , segments as
- (select cast((revenue/50) as int) as segment
-  from   my_revenue
- )
-  select  segment, count(*) as num_customers, segment*50 as segment_base
- from segments
- group by segment
- order by segment, num_customers
- limit 100;
+select case when (select count(*) 
+                  from store_sales 
+                  where ss_quantity between 1 and 20) > 31954
+            then (select avg(ss_ext_sales_price) 
+                  from store_sales 
+                  where ss_quantity between 1 and 20) 
+            else (select avg(ss_net_profit)
+                  from store_sales
+                  where ss_quantity between 1 and 20) end bucket1 ,
+       case when (select count(*)
+                  from store_sales
+                  where ss_quantity between 21 and 40) > 884
+            then (select avg(ss_ext_sales_price)
+                  from store_sales
+                  where ss_quantity between 21 and 40) 
+            else (select avg(ss_net_profit)
+                  from store_sales
+                  where ss_quantity between 21 and 40) end bucket2,
+       case when (select count(*)
+                  from store_sales
+                  where ss_quantity between 41 and 60) > 16483
+            then (select avg(ss_ext_sales_price)
+                  from store_sales
+                  where ss_quantity between 41 and 60)
+            else (select avg(ss_net_profit)
+                  from store_sales
+                  where ss_quantity between 41 and 60) end bucket3,
+       case when (select count(*)
+                  from store_sales
+                  where ss_quantity between 61 and 80) > 17047
+            then (select avg(ss_ext_sales_price)
+                  from store_sales
+                  where ss_quantity between 61 and 80)
+            else (select avg(ss_net_profit)
+                  from store_sales
+                  where ss_quantity between 61 and 80) end bucket4,
+       case when (select count(*)
+                  from store_sales
+                  where ss_quantity between 81 and 100) > 39186
+            then (select avg(ss_ext_sales_price)
+                  from store_sales
+                  where ss_quantity between 81 and 100)
+            else (select avg(ss_net_profit)
+                  from store_sales
+                  where ss_quantity between 81 and 100) end bucket5
+from reason
+where r_reason_sk = 1

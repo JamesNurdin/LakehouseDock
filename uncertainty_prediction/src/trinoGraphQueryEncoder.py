@@ -165,8 +165,8 @@ def _wl_relabel(
 # -----------------------
 
 @dataclass
-class WLHashEncoder
-
+class WLHashEncoder:
+    """
     Produces a fixed-size vector for ANY plan graph (unseen ops are fine).
     """
     dim: int = 256

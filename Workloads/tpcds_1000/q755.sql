@@ -1,124 +1,49 @@
-select  
- 'web' as channel
- ,web.item
- ,web.return_ratio
- ,web.return_rank
- ,web.currency_rank
- from (
- 	select 
- 	 item
- 	,return_ratio
- 	,currency_ratio
- 	,rank() over (order by return_ratio) as return_rank
- 	,rank() over (order by currency_ratio) as currency_rank
- 	from
- 	(	select ws.ws_item_sk as item
- 		,(cast(sum(coalesce(wr.wr_return_quantity,0)) as dec(15,4))/
- 		cast(sum(coalesce(ws.ws_quantity,0)) as dec(15,4) )) as return_ratio
- 		,(cast(sum(coalesce(wr.wr_return_amt,0)) as dec(15,4))/
- 		cast(sum(coalesce(ws.ws_net_paid,0)) as dec(15,4) )) as currency_ratio
- 		from 
- 		 web_sales ws left outer join web_returns wr 
- 			on (ws.ws_order_number = wr.wr_order_number and 
- 			ws.ws_item_sk = wr.wr_item_sk)
-                 ,date_dim
- 		where 
- 			wr.wr_return_amt > 10000 
- 			and ws.ws_net_profit > 1
-                         and ws.ws_net_paid > 0
-                         and ws.ws_quantity > 0
-                         and ws_sold_date_sk = d_date_sk
-                         and d_year = 1998
-                         and d_moy = 11
- 		group by ws.ws_item_sk
- 	) in_web
- ) web
- where 
- (
- web.return_rank <= 10
- or
- web.currency_rank <= 10
- )
- union
- select 
- 'catalog' as channel
- ,catalog.item
- ,catalog.return_ratio
- ,catalog.return_rank
- ,catalog.currency_rank
- from (
- 	select 
- 	 item
- 	,return_ratio
- 	,currency_ratio
- 	,rank() over (order by return_ratio) as return_rank
- 	,rank() over (order by currency_ratio) as currency_rank
- 	from
- 	(	select 
- 		cs.cs_item_sk as item
- 		,(cast(sum(coalesce(cr.cr_return_quantity,0)) as dec(15,4))/
- 		cast(sum(coalesce(cs.cs_quantity,0)) as dec(15,4) )) as return_ratio
- 		,(cast(sum(coalesce(cr.cr_return_amount,0)) as dec(15,4))/
- 		cast(sum(coalesce(cs.cs_net_paid,0)) as dec(15,4) )) as currency_ratio
- 		from 
- 		catalog_sales cs left outer join catalog_returns cr
- 			on (cs.cs_order_number = cr.cr_order_number and 
- 			cs.cs_item_sk = cr.cr_item_sk)
-                ,date_dim
- 		where 
- 			cr.cr_return_amount > 10000 
- 			and cs.cs_net_profit > 1
-                         and cs.cs_net_paid > 0
-                         and cs.cs_quantity > 0
-                         and cs_sold_date_sk = d_date_sk
-                         and d_year = 1998
-                         and d_moy = 11
-                 group by cs.cs_item_sk
- 	) in_cat
- ) catalog
- where 
- (
- catalog.return_rank <= 10
- or
- catalog.currency_rank <=10
- )
- union
- select 
- 'store' as channel
- ,store.item
- ,store.return_ratio
- ,store.return_rank
- ,store.currency_rank
- from (
- 	select 
- 	 item
- 	,return_ratio
- 	,currency_ratio
- 	,rank() over (order by return_ratio) as return_rank
- 	,rank() over (order by currency_ratio) as currency_rank
- 	from
- 	(	select sts.ss_item_sk as item
- 		,(cast(sum(coalesce(sr.sr_return_quantity,0)) as dec(15,4))/cast(sum(coalesce(sts.ss_quantity,0)) as dec(15,4) )) as return_ratio
- 		,(cast(sum(coalesce(sr.sr_return_amt,0)) as dec(15,4))/cast(sum(coalesce(sts.ss_net_paid,0)) as dec(15,4) )) as currency_ratio
- 		from 
- 		store_sales sts left outer join store_returns sr
- 			on (sts.ss_ticket_number = sr.sr_ticket_number and sts.ss_item_sk = sr.sr_item_sk)
-                ,date_dim
- 		where 
- 			sr.sr_return_amt > 10000 
- 			and sts.ss_net_profit > 1
-                         and sts.ss_net_paid > 0 
-                         and sts.ss_quantity > 0
-                         and ss_sold_date_sk = d_date_sk
-                         and d_year = 1998
-                         and d_moy = 11
- 		group by sts.ss_item_sk
- 	) in_store
- ) store
- where  (
- store.return_rank <= 10
- or 
- store.currency_rank <= 10
- )
- order by 1,4,5
- limit 100;
+with ss as
+ (select ca_county,d_qoy, d_year,sum(ss_ext_sales_price) as store_sales
+ from store_sales,date_dim,customer_address
+ where ss_sold_date_sk = d_date_sk
+  and ss_addr_sk=ca_address_sk
+ group by ca_county,d_qoy, d_year),
+ ws as
+ (select ca_county,d_qoy, d_year,sum(ws_ext_sales_price) as web_sales
+ from web_sales,date_dim,customer_address
+ where ws_sold_date_sk = d_date_sk
+  and ws_bill_addr_sk=ca_address_sk
+ group by ca_county,d_qoy, d_year)
+ select /* tt */
+        ss1.ca_county
+       ,ss1.d_year
+       ,ws2.web_sales/ws1.web_sales web_q1_q2_increase
+       ,ss2.store_sales/ss1.store_sales store_q1_q2_increase
+       ,ws3.web_sales/ws2.web_sales web_q2_q3_increase
+       ,ss3.store_sales/ss2.store_sales store_q2_q3_increase
+ from
+        ss ss1
+       ,ss ss2
+       ,ss ss3
+       ,ws ws1
+       ,ws ws2
+       ,ws ws3
+ where
+    ss1.d_qoy = 1
+    and ss1.d_year = 1998
+    and ss1.ca_county = ss2.ca_county
+    and ss2.d_qoy = 2
+    and ss2.d_year = 1998
+ and ss2.ca_county = ss3.ca_county
+    and ss3.d_qoy = 3
+    and ss3.d_year = 1998
+    and ss1.ca_county = ws1.ca_county
+    and ws1.d_qoy = 1
+    and ws1.d_year = 1998
+    and ws1.ca_county = ws2.ca_county
+    and ws2.d_qoy = 2
+    and ws2.d_year = 1998
+    and ws1.ca_county = ws3.ca_county
+    and ws3.d_qoy = 3
+    and ws3.d_year =1998
+    and case when ws1.web_sales > 0 then ws2.web_sales/ws1.web_sales else null end 
+       > case when ss1.store_sales > 0 then ss2.store_sales/ss1.store_sales else null end
+    and case when ws2.web_sales > 0 then ws3.web_sales/ws2.web_sales else null end
+       > case when ss2.store_sales > 0 then ss3.store_sales/ss2.store_sales else null end
+ order by web_q2_q3_increase

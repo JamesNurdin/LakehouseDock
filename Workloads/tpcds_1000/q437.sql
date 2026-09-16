@@ -1,58 +1,55 @@
-with year_total as (
- select c_customer_id customer_id
-       ,c_first_name customer_first_name
-       ,c_last_name customer_last_name
-       ,d_year as year
-       ,stddev_samp(ss_net_paid) year_total
-       ,'s' sale_type
- from customer
-     ,store_sales
-     ,date_dim
- where c_customer_sk = ss_customer_sk
-   and ss_sold_date_sk = d_date_sk
-   and d_year in (1999,1999+1)
- group by c_customer_id
-         ,c_first_name
-         ,c_last_name
-         ,d_year
- union all
- select c_customer_id customer_id
-       ,c_first_name customer_first_name
-       ,c_last_name customer_last_name
-       ,d_year as year
-       ,stddev_samp(ws_net_paid) year_total
-       ,'w' sale_type
- from customer
-     ,web_sales
-     ,date_dim
- where c_customer_sk = ws_bill_customer_sk
-   and ws_sold_date_sk = d_date_sk
-   and d_year in (1999,1999+1)
- group by c_customer_id
-         ,c_first_name
-         ,c_last_name
-         ,d_year
-         )
-  select 
-        t_s_secyear.customer_id, t_s_secyear.customer_first_name, t_s_secyear.customer_last_name
- from year_total t_s_firstyear
-     ,year_total t_s_secyear
-     ,year_total t_w_firstyear
-     ,year_total t_w_secyear
- where t_s_secyear.customer_id = t_s_firstyear.customer_id
-         and t_s_firstyear.customer_id = t_w_secyear.customer_id
-         and t_s_firstyear.customer_id = t_w_firstyear.customer_id
-         and t_s_firstyear.sale_type = 's'
-         and t_w_firstyear.sale_type = 'w'
-         and t_s_secyear.sale_type = 's'
-         and t_w_secyear.sale_type = 'w'
-         and t_s_firstyear.year = 1999
-         and t_s_secyear.year = 1999+1
-         and t_w_firstyear.year = 1999
-         and t_w_secyear.year = 1999+1
-         and t_s_firstyear.year_total > 0
-         and t_w_firstyear.year_total > 0
-         and case when t_w_firstyear.year_total > 0 then t_w_secyear.year_total / t_w_firstyear.year_total else null end
-           > case when t_s_firstyear.year_total > 0 then t_s_secyear.year_total / t_s_firstyear.year_total else null end
- order by 2,3,1
-limit 100;
+with frequent_ss_items as
+ (select substr(i_item_desc,1,30) itemdesc,i_item_sk item_sk,d_date solddate,count(*) cnt
+  from store_sales
+      ,date_dim
+      ,item
+  where ss_sold_date_sk = d_date_sk
+    and ss_item_sk = i_item_sk
+    and d_year in (1999,1999 + 1,1999 + 2,1999 + 3)
+  group by substr(i_item_desc,1,30),i_item_sk,d_date
+  having count(*) >4),
+ max_store_sales as
+ (select max(csales) tpcds_cmax
+  from (select c_customer_sk,sum(ss_quantity*ss_sales_price) csales
+        from store_sales
+            ,customer
+            ,date_dim 
+        where ss_customer_sk = c_customer_sk
+         and ss_sold_date_sk = d_date_sk
+         and d_year in (1999,1999+1,1999+2,1999+3)
+        group by c_customer_sk) x),
+ best_ss_customer as
+ (select c_customer_sk,sum(ss_quantity*ss_sales_price) ssales
+  from store_sales
+      ,customer
+  where ss_customer_sk = c_customer_sk
+  group by c_customer_sk
+  having sum(ss_quantity*ss_sales_price) > (95/100.0) * (select
+  *
+ from max_store_sales))
+  select  c_last_name,c_first_name,sales
+ from ((select c_last_name,c_first_name,sum(cs_quantity*cs_list_price) sales
+        from catalog_sales
+            ,customer
+            ,date_dim 
+        where d_year = 1999 
+         and d_moy = 6 
+         and cs_sold_date_sk = d_date_sk 
+         and cs_item_sk in (select item_sk from frequent_ss_items)
+         and cs_bill_customer_sk in (select c_customer_sk from best_ss_customer)
+         and cs_bill_customer_sk = c_customer_sk 
+       group by c_last_name,c_first_name)
+      union all
+      (select c_last_name,c_first_name,sum(ws_quantity*ws_list_price) sales
+       from web_sales
+           ,customer
+           ,date_dim 
+       where d_year = 1999 
+         and d_moy = 6 
+         and ws_sold_date_sk = d_date_sk 
+         and ws_item_sk in (select item_sk from frequent_ss_items)
+         and ws_bill_customer_sk in (select c_customer_sk from best_ss_customer)
+         and ws_bill_customer_sk = c_customer_sk
+       group by c_last_name,c_first_name)) y
+     order by c_last_name,c_first_name,sales
+  limit 100

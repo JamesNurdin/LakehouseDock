@@ -1,72 +1,47 @@
-with ss as (
- select
-          i_manufact_id,sum(ss_ext_sales_price) total_sales
- from
- 	store_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_manufact_id in (select
-  i_manufact_id
-from
- item
-where i_category in ('Sports'))
- and     ss_item_sk              = i_item_sk
- and     ss_sold_date_sk         = d_date_sk
- and     d_year                  = 1999
- and     d_moy                   = 7
- and     ss_addr_sk              = ca_address_sk
- and     ca_gmt_offset           = -5 
- group by i_manufact_id),
- cs as (
- select
-          i_manufact_id,sum(cs_ext_sales_price) total_sales
- from
- 	catalog_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_manufact_id               in (select
-  i_manufact_id
-from
- item
-where i_category in ('Sports'))
- and     cs_item_sk              = i_item_sk
- and     cs_sold_date_sk         = d_date_sk
- and     d_year                  = 1999
- and     d_moy                   = 7
- and     cs_bill_addr_sk         = ca_address_sk
- and     ca_gmt_offset           = -5 
- group by i_manufact_id),
- ws as (
- select
-          i_manufact_id,sum(ws_ext_sales_price) total_sales
- from
- 	web_sales,
- 	date_dim,
-         customer_address,
-         item
- where
-         i_manufact_id               in (select
-  i_manufact_id
-from
- item
-where i_category in ('Sports'))
- and     ws_item_sk              = i_item_sk
- and     ws_sold_date_sk         = d_date_sk
- and     d_year                  = 1999
- and     d_moy                   = 7
- and     ws_bill_addr_sk         = ca_address_sk
- and     ca_gmt_offset           = -5
- group by i_manufact_id)
-  select  i_manufact_id ,sum(total_sales) total_sales
- from  (select * from ss 
-        union all
-        select * from cs 
-        union all
-        select * from ws) tmp1
- group by i_manufact_id
- order by total_sales
-limit 100;
+with ssales as
+(select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,ca_state
+      ,s_state
+      ,i_color
+      ,i_current_price
+      ,i_manager_id
+      ,i_units
+      ,i_size
+      ,sum(ss_net_paid) netpaid
+from store_sales
+    ,store_returns
+    ,store
+    ,item
+    ,customer
+    ,customer_address
+where ss_ticket_number = sr_ticket_number
+  and ss_item_sk = sr_item_sk
+  and ss_customer_sk = c_customer_sk
+  and ss_item_sk = i_item_sk
+  and ss_store_sk = s_store_sk
+  and c_birth_country = upper(ca_country)
+  and s_zip = ca_zip
+  and s_market_id = 6
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+        ,ca_state
+        ,s_state
+        ,i_color
+        ,i_current_price
+        ,i_manager_id
+        ,i_units
+        ,i_size)
+select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,sum(netpaid) paid
+from ssales
+where i_color = 'plum'
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+having sum(netpaid) > (select 0.05*avg(netpaid)
+                           from ssales)

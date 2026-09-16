@@ -1,48 +1,32 @@
-select case when (select count(*) 
-                  from store_sales 
-                  where ss_quantity between 1 and 20) > 22812
-            then (select avg(ss_ext_discount_amt) 
-                  from store_sales 
-                  where ss_quantity between 1 and 20) 
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 1 and 20) end bucket1 ,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 21 and 40) > 25562
-            then (select avg(ss_ext_discount_amt)
-                  from store_sales
-                  where ss_quantity between 21 and 40) 
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 21 and 40) end bucket2,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 41 and 60) > 14097
-            then (select avg(ss_ext_discount_amt)
-                  from store_sales
-                  where ss_quantity between 41 and 60)
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 41 and 60) end bucket3,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 61 and 80) > 45030
-            then (select avg(ss_ext_discount_amt)
-                  from store_sales
-                  where ss_quantity between 61 and 80)
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 61 and 80) end bucket4,
-       case when (select count(*)
-                  from store_sales
-                  where ss_quantity between 81 and 100) > 42142
-            then (select avg(ss_ext_discount_amt)
-                  from store_sales
-                  where ss_quantity between 81 and 100)
-            else (select avg(ss_net_paid)
-                  from store_sales
-                  where ss_quantity between 81 and 100) end bucket5
-from reason
-where r_reason_sk = 1
-;
+select  
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,web_name
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk <= 30 ) then 1 else 0 end)  as "30 days" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 30) and 
+                 (ws_ship_date_sk - ws_sold_date_sk <= 60) then 1 else 0 end )  as "31- INTERVAL '60' DAY" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 60) and 
+                 (ws_ship_date_sk - ws_sold_date_sk <= 90) then 1 else 0 end)  as "61- INTERVAL '90' DAY" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 90) and
+                 (ws_ship_date_sk - ws_sold_date_sk <= 120) then 1 else 0 end)  as "91- INTERVAL '120' DAY" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk  > 120) then 1 else 0 end)  as ">120 days" 
+from
+   web_sales
+  ,warehouse
+  ,ship_mode
+  ,web_site
+  ,date_dim
+where
+    d_month_seq between 1196 and 1196 + 11
+and ws_ship_date_sk   = d_date_sk
+and ws_warehouse_sk   = w_warehouse_sk
+and ws_ship_mode_sk   = sm_ship_mode_sk
+and ws_web_site_sk    = web_site_sk
+group by
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,web_name
+order by substr(w_warehouse_name,1,20)
+        ,sm_type
+       ,web_name
+limit 100

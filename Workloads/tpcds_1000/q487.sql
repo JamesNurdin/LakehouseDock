@@ -1,49 +1,36 @@
-select avg(ss_quantity)
-       ,avg(ss_ext_sales_price)
-       ,avg(ss_ext_wholesale_cost)
-       ,sum(ss_ext_wholesale_cost)
- from store_sales
-     ,store
-     ,customer_demographics
-     ,household_demographics
-     ,customer_address
-     ,date_dim
- where s_store_sk = ss_store_sk
- and  ss_sold_date_sk = d_date_sk and d_year = 2001
- and((ss_hdemo_sk=hd_demo_sk
-  and cd_demo_sk = ss_cdemo_sk
-  and cd_marital_status = 'U'
-  and cd_education_status = 'Advanced Degree'
-  and ss_sales_price between 100.00 and 150.00
-  and hd_dep_count = 3   
-     )or
-     (ss_hdemo_sk=hd_demo_sk
-  and cd_demo_sk = ss_cdemo_sk
-  and cd_marital_status = 'S'
-  and cd_education_status = '2 yr Degree'
-  and ss_sales_price between 50.00 and 100.00   
-  and hd_dep_count = 1
-     ) or 
-     (ss_hdemo_sk=hd_demo_sk
-  and cd_demo_sk = ss_cdemo_sk
-  and cd_marital_status = 'M'
-  and cd_education_status = 'College'
-  and ss_sales_price between 150.00 and 200.00 
-  and hd_dep_count = 1  
-     ))
- and((ss_addr_sk = ca_address_sk
-  and ca_country = 'United States'
-  and ca_state in ('MS', 'TX', 'LA')
-  and ss_net_profit between 100 and 200  
-     ) or
-     (ss_addr_sk = ca_address_sk
-  and ca_country = 'United States'
-  and ca_state in ('WY', 'NV', 'MI')
-  and ss_net_profit between 150 and 300  
-     ) or
-     (ss_addr_sk = ca_address_sk
-  and ca_country = 'United States'
-  and ca_state in ('OK', 'PA', 'IA')
-  and ss_net_profit between 50 and 250  
-     ))
-;
+select i_brand_id brand_id, i_brand brand,t_hour,t_minute,
+ 	sum(ext_price) ext_price
+ from item, (select ws_ext_sales_price as ext_price, 
+                        ws_sold_date_sk as sold_date_sk,
+                        ws_item_sk as sold_item_sk,
+                        ws_sold_time_sk as time_sk  
+                 from web_sales,date_dim
+                 where d_date_sk = ws_sold_date_sk
+                   and d_moy=11
+                   and d_year=2000
+                 union all
+                 select cs_ext_sales_price as ext_price,
+                        cs_sold_date_sk as sold_date_sk,
+                        cs_item_sk as sold_item_sk,
+                        cs_sold_time_sk as time_sk
+                 from catalog_sales,date_dim
+                 where d_date_sk = cs_sold_date_sk
+                   and d_moy=11
+                   and d_year=2000
+                 union all
+                 select ss_ext_sales_price as ext_price,
+                        ss_sold_date_sk as sold_date_sk,
+                        ss_item_sk as sold_item_sk,
+                        ss_sold_time_sk as time_sk
+                 from store_sales,date_dim
+                 where d_date_sk = ss_sold_date_sk
+                   and d_moy=11
+                   and d_year=2000
+                 ) as tmp,time_dim
+ where
+   sold_item_sk = i_item_sk
+   and i_manager_id=1
+   and time_sk = t_time_sk
+   and (t_meal_time = 'breakfast' or t_meal_time = 'dinner')
+ group by i_brand, i_brand_id,t_hour,t_minute
+ order by ext_price desc, i_brand_id

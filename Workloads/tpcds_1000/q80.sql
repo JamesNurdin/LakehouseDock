@@ -1,18 +1,21 @@
-select  c_customer_id as customer_id
-       ,c_last_name || ', ' || c_first_name as customername
- from customer
-     ,customer_address
-     ,customer_demographics
-     ,household_demographics
-     ,income_band
-     ,store_returns
- where ca_city	        =  'Edgewood'
-   and c_current_addr_sk = ca_address_sk
-   and ib_lower_bound   >=  62933
-   and ib_upper_bound   <=  62933 + 50000
-   and ib_income_band_sk = hd_income_band_sk
-   and cd_demo_sk = c_current_cdemo_sk
-   and hd_demo_sk = c_current_hdemo_sk
-   and sr_cdemo_sk = cd_demo_sk
- order by c_customer_id
- limit 100;
+select  channel, col_name, d_year, d_qoy, i_category, COUNT(*) sales_cnt, SUM(ext_sales_price) sales_amt FROM (
+        SELECT 'store' as channel, 'ss_cdemo_sk' col_name, d_year, d_qoy, i_category, ss_ext_sales_price ext_sales_price
+         FROM store_sales, item, date_dim
+         WHERE ss_cdemo_sk IS NULL
+           AND ss_sold_date_sk=d_date_sk
+           AND ss_item_sk=i_item_sk
+        UNION ALL
+        SELECT 'web' as channel, 'ws_ship_customer_sk' col_name, d_year, d_qoy, i_category, ws_ext_sales_price ext_sales_price
+         FROM web_sales, item, date_dim
+         WHERE ws_ship_customer_sk IS NULL
+           AND ws_sold_date_sk=d_date_sk
+           AND ws_item_sk=i_item_sk
+        UNION ALL
+        SELECT 'catalog' as channel, 'cs_bill_hdemo_sk' col_name, d_year, d_qoy, i_category, cs_ext_sales_price ext_sales_price
+         FROM catalog_sales, item, date_dim
+         WHERE cs_bill_hdemo_sk IS NULL
+           AND cs_sold_date_sk=d_date_sk
+           AND cs_item_sk=i_item_sk) foo
+GROUP BY channel, col_name, d_year, d_qoy, i_category
+ORDER BY channel, col_name, d_year, d_qoy, i_category
+limit 100

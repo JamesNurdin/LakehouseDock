@@ -1,22 +1,22 @@
-with ssci as (
-select ss_customer_sk customer_sk
-      ,ss_item_sk item_sk
-from store_sales,date_dim
-where ss_sold_date_sk = d_date_sk
-  and d_month_seq between 1194 and 1194 + 11
-group by ss_customer_sk
-        ,ss_item_sk),
-csci as(
- select cs_bill_customer_sk customer_sk
-      ,cs_item_sk item_sk
-from catalog_sales,date_dim
-where cs_sold_date_sk = d_date_sk
-  and d_month_seq between 1194 and 1194 + 11
-group by cs_bill_customer_sk
-        ,cs_item_sk)
- select  sum(case when ssci.customer_sk is not null and csci.customer_sk is null then 1 else 0 end) store_only
-      ,sum(case when ssci.customer_sk is null and csci.customer_sk is not null then 1 else 0 end) catalog_only
-      ,sum(case when ssci.customer_sk is not null and csci.customer_sk is not null then 1 else 0 end) store_and_catalog
-from ssci full outer join csci on (ssci.customer_sk=csci.customer_sk
-                               and ssci.item_sk = csci.item_sk)
-limit 100;
+with customer_total_return as
+(select sr_customer_sk as ctr_customer_sk
+,sr_store_sk as ctr_store_sk
+,sum(SR_FEE) as ctr_total_return
+from store_returns
+,date_dim
+where sr_returned_date_sk = d_date_sk
+and d_year =1998
+group by sr_customer_sk
+,sr_store_sk)
+ select  c_customer_id
+from customer_total_return ctr1
+,store
+,customer
+where ctr1.ctr_total_return > (select avg(ctr_total_return)*1.2
+from customer_total_return ctr2
+where ctr1.ctr_store_sk = ctr2.ctr_store_sk)
+and s_store_sk = ctr1.ctr_store_sk
+and s_state = 'TN'
+and ctr1.ctr_customer_sk = c_customer_sk
+order by c_customer_id
+limit 100

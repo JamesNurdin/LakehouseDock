@@ -1,28 +1,26 @@
-select c_last_name
-       ,c_first_name
-       ,c_salutation
-       ,c_preferred_cust_flag
-       ,ss_ticket_number
-       ,cnt from
-   (select ss_ticket_number
-          ,ss_customer_sk
-          ,count(*) cnt
-    from store_sales,date_dim,store,household_demographics
-    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
-    and store_sales.ss_store_sk = store.s_store_sk  
-    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
-    and (date_dim.d_dom between 1 and 3 or date_dim.d_dom between 25 and 28)
-    and (household_demographics.hd_buy_potential = '1001-5000' or
-         household_demographics.hd_buy_potential = '0-500')
-    and household_demographics.hd_vehicle_count > 0
-    and (case when household_demographics.hd_vehicle_count > 0 
-	then household_demographics.hd_dep_count/ household_demographics.hd_vehicle_count 
-	else null 
-	end)  > 1.2
-    and date_dim.d_year in (1999,1999+1,1999+2)
-    and store.s_county in ('Williamson County','Williamson County','Williamson County','Williamson County',
-                           'Williamson County','Williamson County','Williamson County','Williamson County')
-    group by ss_ticket_number,ss_customer_sk) dn,customer
-    where ss_customer_sk = c_customer_sk
-      and cnt between 15 and 20
-    order by c_last_name,c_first_name,c_salutation,c_preferred_cust_flag desc;
+select  * 
+from (select i_manager_id
+             ,sum(ss_sales_price) sum_sales
+             ,avg(sum(ss_sales_price)) over (partition by i_manager_id) avg_monthly_sales
+      from item
+          ,store_sales
+          ,date_dim
+          ,store
+      where ss_item_sk = i_item_sk
+        and ss_sold_date_sk = d_date_sk
+        and ss_store_sk = s_store_sk
+        and d_month_seq in (1177,1177+1,1177+2,1177+3,1177+4,1177+5,1177+6,1177+7,1177+8,1177+9,1177+10,1177+11)
+        and ((    i_category in ('Books','Children','Electronics')
+              and i_class in ('personal','portable','refernece','self-help')
+              and i_brand in ('scholaramalgamalg #14','scholaramalgamalg #7',
+		                  'exportiunivamalg #9','scholaramalgamalg #9'))
+           or(    i_category in ('Women','Music','Men')
+              and i_class in ('accessories','classical','fragrances','pants')
+              and i_brand in ('amalgimporto #1','edu packscholar #1','exportiimporto #1',
+		                 'importoamalg #1')))
+group by i_manager_id, d_moy) tmp1
+where case when avg_monthly_sales > 0 then abs (sum_sales - avg_monthly_sales) / avg_monthly_sales else null end > 0.1
+order by i_manager_id
+        ,avg_monthly_sales
+        ,sum_sales
+limit 100

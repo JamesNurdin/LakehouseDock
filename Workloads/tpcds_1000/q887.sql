@@ -1,31 +1,41 @@
-select  i_item_id,
-        ca_country,
-        ca_state, 
-        ca_county,
-        avg( cast(cs_quantity as numeric(12,2))) agg1,
-        avg( cast(cs_list_price as numeric(12,2))) agg2,
-        avg( cast(cs_coupon_amt as numeric(12,2))) agg3,
-        avg( cast(cs_sales_price as numeric(12,2))) agg4,
-        avg( cast(cs_net_profit as numeric(12,2))) agg5,
-        avg( cast(c_birth_year as numeric(12,2))) agg6,
-        avg( cast(cd1.cd_dep_count as numeric(12,2))) agg7
- from catalog_sales, customer_demographics cd1, 
-      customer_demographics cd2, customer, customer_address, date_dim, item
- where cs_sold_date_sk = d_date_sk and
-       cs_item_sk = i_item_sk and
-       cs_bill_cdemo_sk = cd1.cd_demo_sk and
-       cs_bill_customer_sk = c_customer_sk and
-       cd1.cd_gender = 'F' and 
-       cd1.cd_education_status = 'Secondary' and
-       c_current_cdemo_sk = cd2.cd_demo_sk and
-       c_current_addr_sk = ca_address_sk and
-       c_birth_month in (10,1,4,11,3,12) and
-       d_year = 1998 and
-       ca_state in ('TX','MO','NE'
-                   ,'KY','MS','CO','IL')
- group by rollup (i_item_id, ca_country, ca_state, ca_county)
- order by ca_country,
-        ca_state, 
-        ca_county,
-	i_item_id
- limit 100;
+with wss as 
+ (select d_week_seq,
+        ss_store_sk,
+        sum(case when (d_day_name='Sunday') then ss_sales_price else null end) sun_sales,
+        sum(case when (d_day_name='Monday') then ss_sales_price else null end) mon_sales,
+        sum(case when (d_day_name='Tuesday') then ss_sales_price else  null end) tue_sales,
+        sum(case when (d_day_name='Wednesday') then ss_sales_price else null end) wed_sales,
+        sum(case when (d_day_name='Thursday') then ss_sales_price else null end) thu_sales,
+        sum(case when (d_day_name='Friday') then ss_sales_price else null end) fri_sales,
+        sum(case when (d_day_name='Saturday') then ss_sales_price else null end) sat_sales
+ from store_sales,date_dim
+ where d_date_sk = ss_sold_date_sk
+ group by d_week_seq,ss_store_sk
+ )
+  select  s_store_name1,s_store_id1,d_week_seq1
+       ,sun_sales1/sun_sales2,mon_sales1/mon_sales2
+       ,tue_sales1/tue_sales2,wed_sales1/wed_sales2,thu_sales1/thu_sales2
+       ,fri_sales1/fri_sales2,sat_sales1/sat_sales2
+ from
+ (select s_store_name s_store_name1,wss.d_week_seq d_week_seq1
+        ,s_store_id s_store_id1,sun_sales sun_sales1
+        ,mon_sales mon_sales1,tue_sales tue_sales1
+        ,wed_sales wed_sales1,thu_sales thu_sales1
+        ,fri_sales fri_sales1,sat_sales sat_sales1
+  from wss,store,date_dim d
+  where d.d_week_seq = wss.d_week_seq and
+        ss_store_sk = s_store_sk and 
+        d_month_seq between 1204 and 1204 + 11) y,
+ (select s_store_name s_store_name2,wss.d_week_seq d_week_seq2
+        ,s_store_id s_store_id2,sun_sales sun_sales2
+        ,mon_sales mon_sales2,tue_sales tue_sales2
+        ,wed_sales wed_sales2,thu_sales thu_sales2
+        ,fri_sales fri_sales2,sat_sales sat_sales2
+  from wss,store,date_dim d
+  where d.d_week_seq = wss.d_week_seq and
+        ss_store_sk = s_store_sk and 
+        d_month_seq between 1204+ 12 and 1204 + 23) x
+ where s_store_id1=s_store_id2
+   and d_week_seq1=d_week_seq2-52
+ order by s_store_name1,s_store_id1,d_week_seq1
+limit 100

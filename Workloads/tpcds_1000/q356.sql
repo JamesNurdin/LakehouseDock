@@ -1,32 +1,16 @@
-select  asceding.rnk, i1.i_product_name best_performing, i2.i_product_name worst_performing
-from(select *
-     from (select item_sk,rank() over (order by rank_col asc) rnk
-           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col 
-                 from store_sales ss1
-                 where ss_store_sk = 6
-                 group by ss_item_sk
-                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
-                                                  from store_sales
-                                                  where ss_store_sk = 6
-                                                    and ss_addr_sk is null
-                                                  group by ss_store_sk))V1)V11
-     where rnk  < 11) asceding,
-    (select *
-     from (select item_sk,rank() over (order by rank_col desc) rnk
-           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col
-                 from store_sales ss1
-                 where ss_store_sk = 6
-                 group by ss_item_sk
-                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
-                                                  from store_sales
-                                                  where ss_store_sk = 6
-                                                    and ss_addr_sk is null
-                                                  group by ss_store_sk))V2)V21
-     where rnk  < 11) descending,
-item i1,
-item i2
-where asceding.rnk = descending.rnk 
-  and i1.i_item_sk=asceding.item_sk
-  and i2.i_item_sk=descending.item_sk
-order by asceding.rnk
-limit 100;
+select  s_store_name, s_store_id,
+        sum(case when (d_day_name='Sunday') then ss_sales_price else null end) sun_sales,
+        sum(case when (d_day_name='Monday') then ss_sales_price else null end) mon_sales,
+        sum(case when (d_day_name='Tuesday') then ss_sales_price else  null end) tue_sales,
+        sum(case when (d_day_name='Wednesday') then ss_sales_price else null end) wed_sales,
+        sum(case when (d_day_name='Thursday') then ss_sales_price else null end) thu_sales,
+        sum(case when (d_day_name='Friday') then ss_sales_price else null end) fri_sales,
+        sum(case when (d_day_name='Saturday') then ss_sales_price else null end) sat_sales
+ from date_dim, store_sales, store
+ where d_date_sk = ss_sold_date_sk and
+       s_store_sk = ss_store_sk and
+       s_gmt_offset = -5 and
+       d_year = 1998 
+ group by s_store_name, s_store_id
+ order by s_store_name, s_store_id,sun_sales,mon_sales,tue_sales,wed_sales,thu_sales,fri_sales,sat_sales
+ limit 100

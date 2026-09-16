@@ -1,30 +1,32 @@
-select  i_item_desc 
-      ,i_category 
-      ,i_class 
-      ,i_current_price
-      ,sum(ws_ext_sales_price) as itemrevenue 
-      ,sum(ws_ext_sales_price)*100/sum(sum(ws_ext_sales_price)) over
-          (partition by i_class) as revenueratio
-from	
-	web_sales
-    	,item 
-    	,date_dim
-where 
-	ws_item_sk = i_item_sk 
-  	and i_category in ('Books', 'Electronics', 'Shoes')
-  	and ws_sold_date_sk = d_date_sk
-	and d_date between cast('2002-06-18' as date) 
-				and (cast('2002-06-18' as date) + 30 days)
-group by 
-	i_item_id
-        ,i_item_desc 
-        ,i_category
-        ,i_class
-        ,i_current_price
-order by 
-	i_category
-        ,i_class
-        ,i_item_id
-        ,i_item_desc
-        ,revenueratio
-limit 100;
+select  c_last_name
+       ,c_first_name
+       ,ca_city
+       ,bought_city
+       ,ss_ticket_number
+       ,amt,profit 
+ from
+   (select ss_ticket_number
+          ,ss_customer_sk
+          ,ca_city bought_city
+          ,sum(ss_coupon_amt) amt
+          ,sum(ss_net_profit) profit
+    from store_sales,date_dim,store,household_demographics,customer_address 
+    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
+    and store_sales.ss_store_sk = store.s_store_sk  
+    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
+    and store_sales.ss_addr_sk = customer_address.ca_address_sk
+    and (household_demographics.hd_dep_count = 7 or
+         household_demographics.hd_vehicle_count= -1)
+    and date_dim.d_dow in (6,0)
+    and date_dim.d_year in (1999,1999+1,1999+2) 
+    and store.s_city in ('Midway','Fairview','Fairview','Fairview','Fairview') 
+    group by ss_ticket_number,ss_customer_sk,ss_addr_sk,ca_city) dn,customer,customer_address current_addr
+    where ss_customer_sk = c_customer_sk
+      and customer.c_current_addr_sk = current_addr.ca_address_sk
+      and current_addr.ca_city <> bought_city
+  order by c_last_name
+          ,c_first_name
+          ,ca_city
+          ,bought_city
+          ,ss_ticket_number
+  limit 100

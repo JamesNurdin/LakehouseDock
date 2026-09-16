@@ -1,96 +1,27 @@
-with ssales as
-(select c_last_name
-      ,c_first_name
-      ,s_store_name
-      ,ca_state
-      ,s_state
-      ,i_color
-      ,i_current_price
-      ,i_manager_id
-      ,i_units
-      ,i_size
-      ,sum(ss_ext_sales_price) netpaid
-from store_sales
-    ,store_returns
-    ,store
-    ,item
-    ,customer
-    ,customer_address
-where ss_ticket_number = sr_ticket_number
-  and ss_item_sk = sr_item_sk
-  and ss_customer_sk = c_customer_sk
-  and ss_item_sk = i_item_sk
-  and ss_store_sk = s_store_sk
-  and c_birth_country = upper(ca_country)
-  and s_zip = ca_zip
-and s_market_id=6
-group by c_last_name
-        ,c_first_name
-        ,s_store_name
-        ,ca_state
-        ,s_state
-        ,i_color
-        ,i_current_price
-        ,i_manager_id
-        ,i_units
-        ,i_size)
-select c_last_name
-      ,c_first_name
-      ,s_store_name
-      ,sum(netpaid) paid
-from ssales
-where i_color = 'midnight'
-group by c_last_name
-        ,c_first_name
-        ,s_store_name
-having sum(netpaid) > (select 0.05*avg(netpaid)
-                                 from ssales)
-;
-with ssales as
-(select c_last_name
-      ,c_first_name
-      ,s_store_name
-      ,ca_state
-      ,s_state
-      ,i_color
-      ,i_current_price
-      ,i_manager_id
-      ,i_units
-      ,i_size
-      ,sum(ss_ext_sales_price) netpaid
-from store_sales
-    ,store_returns
-    ,store
-    ,item
-    ,customer
-    ,customer_address
-where ss_ticket_number = sr_ticket_number
-  and ss_item_sk = sr_item_sk
-  and ss_customer_sk = c_customer_sk
-  and ss_item_sk = i_item_sk
-  and ss_store_sk = s_store_sk
-  and c_birth_country = upper(ca_country)
-  and s_zip = ca_zip
-  and s_market_id = 6
-group by c_last_name
-        ,c_first_name
-        ,s_store_name
-        ,ca_state
-        ,s_state
-        ,i_color
-        ,i_current_price
-        ,i_manager_id
-        ,i_units
-        ,i_size)
-select c_last_name
-      ,c_first_name
-      ,s_store_name
-      ,sum(netpaid) paid
-from ssales
-where i_color = 'dark'
-group by c_last_name
-        ,c_first_name
-        ,s_store_name
-having sum(netpaid) > (select 0.05*avg(netpaid)
-                           from ssales)
-;
+select  
+    sum(ss_net_profit)/sum(ss_ext_sales_price) as gross_margin
+   ,i_category
+   ,i_class
+   ,grouping(i_category)+grouping(i_class) as lochierarchy
+   ,rank() over (
+ 	partition by grouping(i_category)+grouping(i_class),
+ 	case when grouping(i_class) = 0 then i_category end 
+ 	order by sum(ss_net_profit)/sum(ss_ext_sales_price) asc) as rank_within_parent
+ from
+    store_sales
+   ,date_dim       d1
+   ,item
+   ,store
+ where
+    d1.d_year = 2000 
+ and d1.d_date_sk = ss_sold_date_sk
+ and i_item_sk  = ss_item_sk 
+ and s_store_sk  = ss_store_sk
+ and s_state in ('TN','TN','TN','TN',
+                 'TN','TN','TN','TN')
+ group by rollup(i_category,i_class)
+ order by
+   lochierarchy desc
+  ,case when lochierarchy = 0 then i_category end
+  ,rank_within_parent
+  limit 100

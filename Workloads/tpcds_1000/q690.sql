@@ -1,35 +1,39 @@
-select  
-    sum(ss_net_profit) as total_sum
-   ,s_state
-   ,s_county
-   ,grouping(s_state)+grouping(s_county) as lochierarchy
-   ,rank() over (
- 	partition by grouping(s_state)+grouping(s_county),
- 	case when grouping(s_county) = 0 then s_state end 
- 	order by sum(ss_net_profit) desc) as rank_within_parent
- from
-    store_sales
-   ,date_dim       d1
-   ,store
- where
-    d1.d_month_seq between 1202 and 1202+11
- and d1.d_date_sk = ss_sold_date_sk
- and s_store_sk  = ss_store_sk
- and s_state in
-             ( select s_state
-               from  (select s_state as s_state,
- 			    rank() over ( partition by s_state order by sum(ss_net_profit) desc) as ranking
-                      from   store_sales, store, date_dim
-                      where  d_month_seq between 1202 and 1202+11
- 			    and d_date_sk = ss_sold_date_sk
- 			    and s_store_sk  = ss_store_sk
-                      group by s_state
-                     ) tmp1 
-               where ranking <= 5
-             )
- group by rollup(s_state,s_county)
- order by
-   lochierarchy desc
-  ,case when lochierarchy = 0 then s_state end
-  ,rank_within_parent
- limit 100;
+select  c_last_name
+       ,c_first_name
+       ,ca_city
+       ,bought_city
+       ,ss_ticket_number
+       ,extended_price
+       ,extended_tax
+       ,list_price
+ from (select ss_ticket_number
+             ,ss_customer_sk
+             ,ca_city bought_city
+             ,sum(ss_ext_sales_price) extended_price 
+             ,sum(ss_ext_list_price) list_price
+             ,sum(ss_ext_tax) extended_tax 
+       from store_sales
+           ,date_dim
+           ,store
+           ,household_demographics
+           ,customer_address 
+       where store_sales.ss_sold_date_sk = date_dim.d_date_sk
+         and store_sales.ss_store_sk = store.s_store_sk  
+        and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
+        and store_sales.ss_addr_sk = customer_address.ca_address_sk
+        and date_dim.d_dom between 1 and 2 
+        and (household_demographics.hd_dep_count = 3 or
+             household_demographics.hd_vehicle_count= -1)
+        and date_dim.d_year in (1999,1999+1,1999+2)
+        and store.s_city in ('Fairview','Midway')
+       group by ss_ticket_number
+               ,ss_customer_sk
+               ,ss_addr_sk,ca_city) dn
+      ,customer
+      ,customer_address current_addr
+ where ss_customer_sk = c_customer_sk
+   and customer.c_current_addr_sk = current_addr.ca_address_sk
+   and current_addr.ca_city <> bought_city
+ order by c_last_name
+         ,ss_ticket_number
+ limit 100

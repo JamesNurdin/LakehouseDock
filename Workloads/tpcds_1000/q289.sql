@@ -1,49 +1,20 @@
-select avg(ss_quantity)
-       ,avg(ss_ext_sales_price)
-       ,avg(ss_ext_wholesale_cost)
-       ,sum(ss_ext_wholesale_cost)
- from store_sales
-     ,store
-     ,customer_demographics
-     ,household_demographics
-     ,customer_address
-     ,date_dim
- where s_store_sk = ss_store_sk
- and  ss_sold_date_sk = d_date_sk and d_year = 2001
- and((ss_hdemo_sk=hd_demo_sk
-  and cd_demo_sk = ss_cdemo_sk
-  and cd_marital_status = 'W'
-  and cd_education_status = 'Advanced Degree'
-  and ss_sales_price between 100.00 and 150.00
-  and hd_dep_count = 3   
-     )or
-     (ss_hdemo_sk=hd_demo_sk
-  and cd_demo_sk = ss_cdemo_sk
-  and cd_marital_status = 'S'
-  and cd_education_status = '2 yr Degree'
-  and ss_sales_price between 50.00 and 100.00   
-  and hd_dep_count = 1
-     ) or 
-     (ss_hdemo_sk=hd_demo_sk
-  and cd_demo_sk = ss_cdemo_sk
-  and cd_marital_status = 'M'
-  and cd_education_status = 'Primary'
-  and ss_sales_price between 150.00 and 200.00 
-  and hd_dep_count = 1  
-     ))
- and((ss_addr_sk = ca_address_sk
-  and ca_country = 'United States'
-  and ca_state in ('WI', 'KY', 'OR')
-  and ss_net_profit between 100 and 200  
-     ) or
-     (ss_addr_sk = ca_address_sk
-  and ca_country = 'United States'
-  and ca_state in ('TX', 'WA', 'AK')
-  and ss_net_profit between 150 and 300  
-     ) or
-     (ss_addr_sk = ca_address_sk
-  and ca_country = 'United States'
-  and ca_state in ('GA', 'ND', 'NV')
-  and ss_net_profit between 50 and 250  
-     ))
-;
+select 
+  c_last_name,c_first_name,substr(s_city,1,30),ss_ticket_number,amt,profit
+  from
+   (select ss_ticket_number
+          ,ss_customer_sk
+          ,store.s_city
+          ,sum(ss_coupon_amt) amt
+          ,sum(ss_net_profit) profit
+    from store_sales,date_dim,store,household_demographics
+    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
+    and store_sales.ss_store_sk = store.s_store_sk  
+    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
+    and (household_demographics.hd_dep_count = 3 or household_demographics.hd_vehicle_count > 1)
+    and date_dim.d_dow = 1
+    and date_dim.d_year in (1998,1998+1,1998+2) 
+    and store.s_number_employees between 200 and 295
+    group by ss_ticket_number,ss_customer_sk,ss_addr_sk,store.s_city) ms,customer
+    where ss_customer_sk = c_customer_sk
+ order by c_last_name,c_first_name,substr(s_city,1,30), profit
+limit 100

@@ -1,124 +1,219 @@
-select  
- 'web' as channel
- ,web.item
- ,web.return_ratio
- ,web.return_rank
- ,web.currency_rank
+select   
+         w_warehouse_name
+ 	,w_warehouse_sq_ft
+ 	,w_city
+ 	,w_county
+ 	,w_state
+ 	,w_country
+        ,ship_carriers
+        ,year
+ 	,sum(jan_sales) as jan_sales
+ 	,sum(feb_sales) as feb_sales
+ 	,sum(mar_sales) as mar_sales
+ 	,sum(apr_sales) as apr_sales
+ 	,sum(may_sales) as may_sales
+ 	,sum(jun_sales) as jun_sales
+ 	,sum(jul_sales) as jul_sales
+ 	,sum(aug_sales) as aug_sales
+ 	,sum(sep_sales) as sep_sales
+ 	,sum(oct_sales) as oct_sales
+ 	,sum(nov_sales) as nov_sales
+ 	,sum(dec_sales) as dec_sales
+ 	,sum(jan_sales/w_warehouse_sq_ft) as jan_sales_per_sq_foot
+ 	,sum(feb_sales/w_warehouse_sq_ft) as feb_sales_per_sq_foot
+ 	,sum(mar_sales/w_warehouse_sq_ft) as mar_sales_per_sq_foot
+ 	,sum(apr_sales/w_warehouse_sq_ft) as apr_sales_per_sq_foot
+ 	,sum(may_sales/w_warehouse_sq_ft) as may_sales_per_sq_foot
+ 	,sum(jun_sales/w_warehouse_sq_ft) as jun_sales_per_sq_foot
+ 	,sum(jul_sales/w_warehouse_sq_ft) as jul_sales_per_sq_foot
+ 	,sum(aug_sales/w_warehouse_sq_ft) as aug_sales_per_sq_foot
+ 	,sum(sep_sales/w_warehouse_sq_ft) as sep_sales_per_sq_foot
+ 	,sum(oct_sales/w_warehouse_sq_ft) as oct_sales_per_sq_foot
+ 	,sum(nov_sales/w_warehouse_sq_ft) as nov_sales_per_sq_foot
+ 	,sum(dec_sales/w_warehouse_sq_ft) as dec_sales_per_sq_foot
+ 	,sum(jan_net) as jan_net
+ 	,sum(feb_net) as feb_net
+ 	,sum(mar_net) as mar_net
+ 	,sum(apr_net) as apr_net
+ 	,sum(may_net) as may_net
+ 	,sum(jun_net) as jun_net
+ 	,sum(jul_net) as jul_net
+ 	,sum(aug_net) as aug_net
+ 	,sum(sep_net) as sep_net
+ 	,sum(oct_net) as oct_net
+ 	,sum(nov_net) as nov_net
+ 	,sum(dec_net) as dec_net
  from (
- 	select 
- 	 item
- 	,return_ratio
- 	,currency_ratio
- 	,rank() over (order by return_ratio) as return_rank
- 	,rank() over (order by currency_ratio) as currency_rank
- 	from
- 	(	select ws.ws_item_sk as item
- 		,(cast(sum(coalesce(wr.wr_return_quantity,0)) as dec(15,4))/
- 		cast(sum(coalesce(ws.ws_quantity,0)) as dec(15,4) )) as return_ratio
- 		,(cast(sum(coalesce(wr.wr_return_amt,0)) as dec(15,4))/
- 		cast(sum(coalesce(ws.ws_net_paid,0)) as dec(15,4) )) as currency_ratio
- 		from 
- 		 web_sales ws left outer join web_returns wr 
- 			on (ws.ws_order_number = wr.wr_order_number and 
- 			ws.ws_item_sk = wr.wr_item_sk)
-                 ,date_dim
- 		where 
- 			wr.wr_return_amt > 10000 
- 			and ws.ws_net_profit > 1
-                         and ws.ws_net_paid > 0
-                         and ws.ws_quantity > 0
-                         and ws_sold_date_sk = d_date_sk
-                         and d_year = 1999
-                         and d_moy = 12
- 		group by ws.ws_item_sk
- 	) in_web
- ) web
- where 
- (
- web.return_rank <= 10
- or
- web.currency_rank <= 10
- )
- union
- select 
- 'catalog' as channel
- ,catalog.item
- ,catalog.return_ratio
- ,catalog.return_rank
- ,catalog.currency_rank
- from (
- 	select 
- 	 item
- 	,return_ratio
- 	,currency_ratio
- 	,rank() over (order by return_ratio) as return_rank
- 	,rank() over (order by currency_ratio) as currency_rank
- 	from
- 	(	select 
- 		cs.cs_item_sk as item
- 		,(cast(sum(coalesce(cr.cr_return_quantity,0)) as dec(15,4))/
- 		cast(sum(coalesce(cs.cs_quantity,0)) as dec(15,4) )) as return_ratio
- 		,(cast(sum(coalesce(cr.cr_return_amount,0)) as dec(15,4))/
- 		cast(sum(coalesce(cs.cs_net_paid,0)) as dec(15,4) )) as currency_ratio
- 		from 
- 		catalog_sales cs left outer join catalog_returns cr
- 			on (cs.cs_order_number = cr.cr_order_number and 
- 			cs.cs_item_sk = cr.cr_item_sk)
-                ,date_dim
- 		where 
- 			cr.cr_return_amount > 10000 
- 			and cs.cs_net_profit > 1
-                         and cs.cs_net_paid > 0
-                         and cs.cs_quantity > 0
-                         and cs_sold_date_sk = d_date_sk
-                         and d_year = 1999
-                         and d_moy = 12
-                 group by cs.cs_item_sk
- 	) in_cat
- ) catalog
- where 
- (
- catalog.return_rank <= 10
- or
- catalog.currency_rank <=10
- )
- union
- select 
- 'store' as channel
- ,store.item
- ,store.return_ratio
- ,store.return_rank
- ,store.currency_rank
- from (
- 	select 
- 	 item
- 	,return_ratio
- 	,currency_ratio
- 	,rank() over (order by return_ratio) as return_rank
- 	,rank() over (order by currency_ratio) as currency_rank
- 	from
- 	(	select sts.ss_item_sk as item
- 		,(cast(sum(coalesce(sr.sr_return_quantity,0)) as dec(15,4))/cast(sum(coalesce(sts.ss_quantity,0)) as dec(15,4) )) as return_ratio
- 		,(cast(sum(coalesce(sr.sr_return_amt,0)) as dec(15,4))/cast(sum(coalesce(sts.ss_net_paid,0)) as dec(15,4) )) as currency_ratio
- 		from 
- 		store_sales sts left outer join store_returns sr
- 			on (sts.ss_ticket_number = sr.sr_ticket_number and sts.ss_item_sk = sr.sr_item_sk)
-                ,date_dim
- 		where 
- 			sr.sr_return_amt > 10000 
- 			and sts.ss_net_profit > 1
-                         and sts.ss_net_paid > 0 
-                         and sts.ss_quantity > 0
-                         and ss_sold_date_sk = d_date_sk
-                         and d_year = 1999
-                         and d_moy = 12
- 		group by sts.ss_item_sk
- 	) in_store
- ) store
- where  (
- store.return_rank <= 10
- or 
- store.currency_rank <= 10
- )
- order by 1,4,5
- limit 100;
+    (select 
+ 	w_warehouse_name
+ 	,w_warehouse_sq_ft
+ 	,w_city
+ 	,w_county
+ 	,w_state
+ 	,w_country
+ 	,'DHL' || ',' || 'HARMSTORF' as ship_carriers
+       ,d_year as year
+ 	,sum(case when d_moy = 1 
+ 		then ws_ext_sales_price* ws_quantity else 0 end) as jan_sales
+ 	,sum(case when d_moy = 2 
+ 		then ws_ext_sales_price* ws_quantity else 0 end) as feb_sales
+ 	,sum(case when d_moy = 3 
+ 		then ws_ext_sales_price* ws_quantity else 0 end) as mar_sales
+ 	,sum(case when d_moy = 4 
+ 		then ws_ext_sales_price* ws_quantity else 0 end) as apr_sales
+ 	,sum(case when d_moy = 5 
+ 		then ws_ext_sales_price* ws_quantity else 0 end) as may_sales
+ 	,sum(case when d_moy = 6 
+ 		then ws_ext_sales_price* ws_quantity else 0 end) as jun_sales
+ 	,sum(case when d_moy = 7 
+ 		then ws_ext_sales_price* ws_quantity else 0 end) as jul_sales
+ 	,sum(case when d_moy = 8 
+ 		then ws_ext_sales_price* ws_quantity else 0 end) as aug_sales
+ 	,sum(case when d_moy = 9 
+ 		then ws_ext_sales_price* ws_quantity else 0 end) as sep_sales
+ 	,sum(case when d_moy = 10 
+ 		then ws_ext_sales_price* ws_quantity else 0 end) as oct_sales
+ 	,sum(case when d_moy = 11
+ 		then ws_ext_sales_price* ws_quantity else 0 end) as nov_sales
+ 	,sum(case when d_moy = 12
+ 		then ws_ext_sales_price* ws_quantity else 0 end) as dec_sales
+ 	,sum(case when d_moy = 1 
+ 		then ws_net_paid_inc_tax * ws_quantity else 0 end) as jan_net
+ 	,sum(case when d_moy = 2
+ 		then ws_net_paid_inc_tax * ws_quantity else 0 end) as feb_net
+ 	,sum(case when d_moy = 3 
+ 		then ws_net_paid_inc_tax * ws_quantity else 0 end) as mar_net
+ 	,sum(case when d_moy = 4 
+ 		then ws_net_paid_inc_tax * ws_quantity else 0 end) as apr_net
+ 	,sum(case when d_moy = 5 
+ 		then ws_net_paid_inc_tax * ws_quantity else 0 end) as may_net
+ 	,sum(case when d_moy = 6 
+ 		then ws_net_paid_inc_tax * ws_quantity else 0 end) as jun_net
+ 	,sum(case when d_moy = 7 
+ 		then ws_net_paid_inc_tax * ws_quantity else 0 end) as jul_net
+ 	,sum(case when d_moy = 8 
+ 		then ws_net_paid_inc_tax * ws_quantity else 0 end) as aug_net
+ 	,sum(case when d_moy = 9 
+ 		then ws_net_paid_inc_tax * ws_quantity else 0 end) as sep_net
+ 	,sum(case when d_moy = 10 
+ 		then ws_net_paid_inc_tax * ws_quantity else 0 end) as oct_net
+ 	,sum(case when d_moy = 11
+ 		then ws_net_paid_inc_tax * ws_quantity else 0 end) as nov_net
+ 	,sum(case when d_moy = 12
+ 		then ws_net_paid_inc_tax * ws_quantity else 0 end) as dec_net
+     from
+          web_sales
+         ,warehouse
+         ,date_dim
+         ,time_dim
+ 	  ,ship_mode
+     where
+            ws_warehouse_sk =  w_warehouse_sk
+        and ws_sold_date_sk = d_date_sk
+        and ws_sold_time_sk = t_time_sk
+ 	and ws_ship_mode_sk = sm_ship_mode_sk
+        and d_year = 1999
+ 	and t_time between 16930 and 16930+28800 
+ 	and sm_carrier in ('DHL','HARMSTORF')
+     group by 
+        w_warehouse_name
+ 	,w_warehouse_sq_ft
+ 	,w_city
+ 	,w_county
+ 	,w_state
+ 	,w_country
+       ,d_year
+ 	)
+ union all
+    (select 
+ 	w_warehouse_name
+ 	,w_warehouse_sq_ft
+ 	,w_city
+ 	,w_county
+ 	,w_state
+ 	,w_country
+ 	,'DHL' || ',' || 'HARMSTORF' as ship_carriers
+       ,d_year as year
+ 	,sum(case when d_moy = 1 
+ 		then cs_sales_price* cs_quantity else 0 end) as jan_sales
+ 	,sum(case when d_moy = 2 
+ 		then cs_sales_price* cs_quantity else 0 end) as feb_sales
+ 	,sum(case when d_moy = 3 
+ 		then cs_sales_price* cs_quantity else 0 end) as mar_sales
+ 	,sum(case when d_moy = 4 
+ 		then cs_sales_price* cs_quantity else 0 end) as apr_sales
+ 	,sum(case when d_moy = 5 
+ 		then cs_sales_price* cs_quantity else 0 end) as may_sales
+ 	,sum(case when d_moy = 6 
+ 		then cs_sales_price* cs_quantity else 0 end) as jun_sales
+ 	,sum(case when d_moy = 7 
+ 		then cs_sales_price* cs_quantity else 0 end) as jul_sales
+ 	,sum(case when d_moy = 8 
+ 		then cs_sales_price* cs_quantity else 0 end) as aug_sales
+ 	,sum(case when d_moy = 9 
+ 		then cs_sales_price* cs_quantity else 0 end) as sep_sales
+ 	,sum(case when d_moy = 10 
+ 		then cs_sales_price* cs_quantity else 0 end) as oct_sales
+ 	,sum(case when d_moy = 11
+ 		then cs_sales_price* cs_quantity else 0 end) as nov_sales
+ 	,sum(case when d_moy = 12
+ 		then cs_sales_price* cs_quantity else 0 end) as dec_sales
+ 	,sum(case when d_moy = 1 
+ 		then cs_net_profit * cs_quantity else 0 end) as jan_net
+ 	,sum(case when d_moy = 2 
+ 		then cs_net_profit * cs_quantity else 0 end) as feb_net
+ 	,sum(case when d_moy = 3 
+ 		then cs_net_profit * cs_quantity else 0 end) as mar_net
+ 	,sum(case when d_moy = 4 
+ 		then cs_net_profit * cs_quantity else 0 end) as apr_net
+ 	,sum(case when d_moy = 5 
+ 		then cs_net_profit * cs_quantity else 0 end) as may_net
+ 	,sum(case when d_moy = 6 
+ 		then cs_net_profit * cs_quantity else 0 end) as jun_net
+ 	,sum(case when d_moy = 7 
+ 		then cs_net_profit * cs_quantity else 0 end) as jul_net
+ 	,sum(case when d_moy = 8 
+ 		then cs_net_profit * cs_quantity else 0 end) as aug_net
+ 	,sum(case when d_moy = 9 
+ 		then cs_net_profit * cs_quantity else 0 end) as sep_net
+ 	,sum(case when d_moy = 10 
+ 		then cs_net_profit * cs_quantity else 0 end) as oct_net
+ 	,sum(case when d_moy = 11
+ 		then cs_net_profit * cs_quantity else 0 end) as nov_net
+ 	,sum(case when d_moy = 12
+ 		then cs_net_profit * cs_quantity else 0 end) as dec_net
+     from
+          catalog_sales
+         ,warehouse
+         ,date_dim
+         ,time_dim
+ 	 ,ship_mode
+     where
+            cs_warehouse_sk =  w_warehouse_sk
+        and cs_sold_date_sk = d_date_sk
+        and cs_sold_time_sk = t_time_sk
+ 	and cs_ship_mode_sk = sm_ship_mode_sk
+        and d_year = 1999
+ 	and t_time between 16930 AND 16930+28800 
+ 	and sm_carrier in ('DHL','HARMSTORF')
+     group by 
+        w_warehouse_name
+ 	,w_warehouse_sq_ft
+ 	,w_city
+ 	,w_county
+ 	,w_state
+ 	,w_country
+       ,d_year
+     ) 
+ ) x
+ group by 
+        w_warehouse_name
+ 	,w_warehouse_sq_ft
+ 	,w_city
+ 	,w_county
+ 	,w_state
+ 	,w_country
+ 	,ship_carriers
+       ,year
+ order by w_warehouse_name
+ limit 100

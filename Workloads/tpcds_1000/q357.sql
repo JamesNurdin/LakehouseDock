@@ -1,28 +1,32 @@
-with customer_total_return as
- (select cr_returning_customer_sk as ctr_customer_sk
-        ,ca_state as ctr_state, 
- 	sum(cr_return_amt_inc_tax) as ctr_total_return
- from catalog_returns
-     ,date_dim
-     ,customer_address
- where cr_returned_date_sk = d_date_sk 
-   and d_year =2000
-   and cr_returning_addr_sk = ca_address_sk 
- group by cr_returning_customer_sk
-         ,ca_state )
-  select  c_customer_id,c_salutation,c_first_name,c_last_name,ca_street_number,ca_street_name
-                   ,ca_street_type,ca_suite_number,ca_city,ca_county,ca_state,ca_zip,ca_country,ca_gmt_offset
-                  ,ca_location_type,ctr_total_return
- from customer_total_return ctr1
-     ,customer_address
-     ,customer
- where ctr1.ctr_total_return > (select avg(ctr_total_return)*1.2
- 			  from customer_total_return ctr2 
-                  	  where ctr1.ctr_state = ctr2.ctr_state)
-       and ca_address_sk = c_current_addr_sk
-       and ca_state = 'TX'
-       and ctr1.ctr_customer_sk = c_customer_sk
- order by c_customer_id,c_salutation,c_first_name,c_last_name,ca_street_number,ca_street_name
-                   ,ca_street_type,ca_suite_number,ca_city,ca_county,ca_state,ca_zip,ca_country,ca_gmt_offset
-                  ,ca_location_type,ctr_total_return
- limit 100;
+select  asceding.rnk, i1.i_product_name best_performing, i2.i_product_name worst_performing
+from(select *
+     from (select item_sk,rank() over (order by rank_col asc) rnk
+           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col 
+                 from store_sales ss1
+                 where ss_store_sk = 4
+                 group by ss_item_sk
+                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
+                                                  from store_sales
+                                                  where ss_store_sk = 4
+                                                    and ss_cdemo_sk is null
+                                                  group by ss_store_sk))V1)V11
+     where rnk  < 11) asceding,
+    (select *
+     from (select item_sk,rank() over (order by rank_col desc) rnk
+           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col
+                 from store_sales ss1
+                 where ss_store_sk = 4
+                 group by ss_item_sk
+                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
+                                                  from store_sales
+                                                  where ss_store_sk = 4
+                                                    and ss_cdemo_sk is null
+                                                  group by ss_store_sk))V2)V21
+     where rnk  < 11) descending,
+item i1,
+item i2
+where asceding.rnk = descending.rnk 
+  and i1.i_item_sk=asceding.item_sk
+  and i2.i_item_sk=descending.item_sk
+order by asceding.rnk
+limit 100

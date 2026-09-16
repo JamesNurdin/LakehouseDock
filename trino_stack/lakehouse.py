@@ -133,6 +133,20 @@ class Lakehouse:
         # You can customize this naming logic if needed
         return f"trino-service-{self.instance_name}.{self.namespace}.svc.cluster.local"
 
+    @property
+    def raw_results_root(self) -> Path:
+        """
+        Host-side directory backing this instance's raw-results PVC
+        (results.raw.name in its lakehouse YAML). PVCs are mounted directly
+        on this host at /mnt/<pvc-name>, independent of the in-pod mount
+        path (results.raw.path), which stays "/mnt/lakehouse-raw-results"
+        across every instance -- only the PVC name changes between them.
+        Falls back to config.RESULTS_ROOT if the values don't set a name.
+        """
+        raw = self.render_result.values.get("results", {}).get("raw", {}) or {}
+        name = raw.get("name")
+        return Path("/mnt") / name if name else Path(RESULTS_ROOT)
+
     @classmethod
     def from_release(
         cls,
@@ -403,10 +417,8 @@ class Lakehouse:
         workload_dir = Path(WORKLOAD_ROOT) / workload_name
         start_time = utc_now_stamp()
     
-        if results_path is None:
-            results_dir = Path(RESULTS_ROOT) / schema / self.instance_name / start_time
-        else:
-            results_dir = Path(results_path) / schema / self.instance_name / start_time
+        results_root = self.raw_results_root if results_path is None else Path(results_path)
+        results_dir = results_root / schema / self.instance_name / start_time
     
         ensure_dir(workload_dir)
         ensure_dir(results_dir)
@@ -476,7 +488,7 @@ class Lakehouse:
                 )
     
         self.workload_runs.append(record)
-        write_to_index(record)
+        write_to_index(record, results_root=results_root)
     
         return summary
 
@@ -522,7 +534,7 @@ class Lakehouse:
         qname = utc_now_stamp()
     
         if ad_hoc_dir is None:
-            base_dir = Path(RESULTS_ROOT) / schema / self.instance_name / "ad-hoc"
+            base_dir = self.raw_results_root / schema / self.instance_name / "ad-hoc"
         else:
             base_dir = Path(ad_hoc_dir)
     
@@ -977,10 +989,17 @@ class Lakehouse:
         ready_timeout_s: int = 120,
         ready_poll_s: float = 2.0,
         raise_on_error: bool = False,
+        plan_workers: int = 1,
     ) -> Dict[str, Any]:
-        
+
         """
         Load a pre-execution SQL workload and obtain Trino query plans in memory.
+
+        With plan_workers=1 (default) queries are EXPLAINed sequentially on a
+        single connection, as before. Pass plan_workers > 1 to fetch plans
+        concurrently -- each worker thread opens its own Trino connection
+        (same pattern as validate_candidates_parallel), keyed back into
+        `plans` in original query order so plans.json stays deterministic.
         """
         workload_path = Path(workload_path)
 
@@ -1014,76 +1033,91 @@ class Lakehouse:
                 verbose=self.verbose,
             )
 
-        conn = hive_mod.connect_trino(self.trino_host, schema)
-        cur = conn.cursor()
+        def fetch_plan(qname: str, record: Dict[str, Any]) -> Dict[str, Any]:
+            sql = record["sql"].strip().rstrip(";")
+
+            if self.verbose:
+                print(f"Loading query plan for {qname}")
+
+            plan_record: Dict[str, Any] = {
+                "query_name": qname,
+                "sql": sql,
+                "sql_path": record.get("path"),
+                "status": "unknown",
+                "plan_json": None,
+                "dag": None,
+                "node_count": None,
+                "edge_count": None,
+                "error": None,
+            }
+
+            conn = hive_mod.connect_trino(self.trino_host, schema)
+            cur = conn.cursor()
+
+            try:
+                cur.execute(f"EXPLAIN (FORMAT JSON) {sql}")
+                rows = cur.fetchall()
+
+                if not rows or not rows[0]:
+                    raise RuntimeError(f"No EXPLAIN output returned for {qname}")
+
+                raw_plan = rows[0][0]
+
+                if isinstance(raw_plan, str):
+                    plan_json = json.loads(raw_plan)
+                else:
+                    plan_json = raw_plan
+
+                plan_record["plan_json"] = plan_json
+
+                if parse_dag:
+                    dag = build_trino_dag(plan_json)
+                    plan_record["dag"] = dag
+                    plan_record["node_count"] = len(dag.get("nodes", {}))
+                    plan_record["edge_count"] = len(dag.get("edges", []))
+
+                plan_record["status"] = "ok"
+
+            except Exception as e:
+                plan_record["status"] = "failed"
+                plan_record["error"] = {
+                    "type": type(e).__name__,
+                    "message": str(e),
+                }
+
+                if raise_on_error:
+                    raise
+
+            finally:
+                try:
+                    cur.close()
+                finally:
+                    conn.close()
+
+            return plan_record
 
         plans: Dict[str, Any] = {}
         ok = 0
         failed = 0
 
-        try:
+        if plan_workers <= 1:
             for qname, record in query_items:
-                sql = record["sql"].strip().rstrip(";")
-
-                if self.verbose:
-                    print(f"Loading query plan for {qname}")
-
-                plan_record: Dict[str, Any] = {
-                    "query_name": qname,
-                    "sql": sql,
-                    "sql_path": record.get("path"),
-                    "status": "unknown",
-                    "plan_json": None,
-                    "dag": None,
-                    "node_count": None,
-                    "edge_count": None,
-                    "error": None,
-                }
-
-                try:
-                    cur.execute(f"EXPLAIN (FORMAT JSON) {sql}")
-                    rows = cur.fetchall()
-
-                    if not rows or not rows[0]:
-                        raise RuntimeError(f"No EXPLAIN output returned for {qname}")
-
-                    raw_plan = rows[0][0]
-
-                    if isinstance(raw_plan, str):
-                        plan_json = json.loads(raw_plan)
-                    else:
-                        plan_json = raw_plan
-
-                    plan_record["plan_json"] = plan_json
-
-                    if parse_dag:
-                        dag = build_trino_dag(plan_json)
-                        plan_record["dag"] = dag
-                        plan_record["node_count"] = len(dag.get("nodes", {}))
-                        plan_record["edge_count"] = len(dag.get("edges", []))
-
-                    plan_record["status"] = "ok"
-                    ok += 1
-
-                except Exception as e:
-                    failed += 1
-
-                    plan_record["status"] = "failed"
-                    plan_record["error"] = {
-                        "type": type(e).__name__,
-                        "message": str(e),
-                    }
-
-                    if raise_on_error:
-                        raise
-
+                plan_record = fetch_plan(qname, record)
                 plans[qname] = plan_record
+                ok += plan_record["status"] == "ok"
+                failed += plan_record["status"] != "ok"
+        else:
+            with ThreadPoolExecutor(max_workers=plan_workers) as executor:
+                pending = [
+                    (qname, executor.submit(fetch_plan, qname, record))
+                    for qname, record in query_items
+                ]
 
-        finally:
-            try:
-                cur.close()
-            finally:
-                conn.close()
+                for qname, future in pending:
+                    plan_record = future.result()
+                    plans[qname] = plan_record
+                    ok += plan_record["status"] == "ok"
+                    failed += plan_record["status"] != "ok"
 
         return _json_safe(
             {

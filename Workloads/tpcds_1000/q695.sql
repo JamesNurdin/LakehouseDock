@@ -1,25 +1,25 @@
-select  * from 
-(select i_manufact_id,
-sum(ss_sales_price) sum_sales,
-avg(sum(ss_sales_price)) over (partition by i_manufact_id) avg_quarterly_sales
-from item, store_sales, date_dim, store
-where ss_item_sk = i_item_sk and
-ss_sold_date_sk = d_date_sk and
-ss_store_sk = s_store_sk and
-d_month_seq in (1186,1186+1,1186+2,1186+3,1186+4,1186+5,1186+6,1186+7,1186+8,1186+9,1186+10,1186+11) and
-((i_category in ('Books','Children','Electronics') and
-i_class in ('personal','portable','reference','self-help') and
-i_brand in ('scholaramalgamalg #14','scholaramalgamalg #7',
-		'exportiunivamalg #9','scholaramalgamalg #9'))
-or(i_category in ('Women','Music','Men') and
-i_class in ('accessories','classical','fragrances','pants') and
-i_brand in ('amalgimporto #1','edu packscholar #1','exportiimporto #1',
-		'importoamalg #1')))
-group by i_manufact_id, d_qoy ) tmp1
-where case when avg_quarterly_sales > 0 
-	then abs (sum_sales - avg_quarterly_sales)/ avg_quarterly_sales 
-	else null end > 0.1
-order by avg_quarterly_sales,
-	 sum_sales,
-	 i_manufact_id
-limit 100;
+select c_last_name
+       ,c_first_name
+       ,c_salutation
+       ,c_preferred_cust_flag 
+       ,ss_ticket_number
+       ,cnt from
+   (select ss_ticket_number
+          ,ss_customer_sk
+          ,count(*) cnt
+    from store_sales,date_dim,store,household_demographics
+    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
+    and store_sales.ss_store_sk = store.s_store_sk  
+    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
+    and date_dim.d_dom between 1 and 2 
+    and (household_demographics.hd_buy_potential = '>10000' or
+         household_demographics.hd_buy_potential = '5001-10000')
+    and household_demographics.hd_vehicle_count > 0
+    and case when household_demographics.hd_vehicle_count > 0 then 
+             household_demographics.hd_dep_count/ household_demographics.hd_vehicle_count else null end > 1
+    and date_dim.d_year in (1998,1998+1,1998+2)
+    and store.s_county in ('Williamson County','Williamson County','Williamson County','Williamson County')
+    group by ss_ticket_number,ss_customer_sk) dj,customer
+    where ss_customer_sk = c_customer_sk
+      and cnt between 1 and 5
+    order by cnt desc

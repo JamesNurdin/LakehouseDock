@@ -1,28 +1,44 @@
-select  i_item_desc
-      ,w_warehouse_name
-      ,d1.d_week_seq
-      ,count(case when p_promo_sk is null then 1 else 0 end) no_promo
-      ,count(case when p_promo_sk is not null then 1 else 0 end) promo
-      ,count(*) total_cnt
-from catalog_sales
-join inventory on (cs_item_sk = inv_item_sk)
-join warehouse on (w_warehouse_sk=inv_warehouse_sk)
-join item on (i_item_sk = cs_item_sk)
-join customer_demographics on (cs_bill_cdemo_sk = cd_demo_sk)
-join household_demographics on (cs_bill_hdemo_sk = hd_demo_sk)
-join date_dim d1 on (cs_sold_date_sk = d1.d_date_sk)
-join date_dim d2 on (inv_date_sk = d2.d_date_sk)
-join date_dim d3 on (cs_ship_date_sk = d3.d_date_sk)
-left outer join promotion on (cs_promo_sk=p_promo_sk)
-left outer join catalog_returns on (cr_item_sk = cs_item_sk and cr_order_number = cs_order_number)
-where d1.d_week_seq = d2.d_week_seq
-  and inv_quantity_on_hand < cs_quantity 
-  and d3.d_date > d1.d_date + 5
-  and hd_buy_potential = '1001-5000'
-  and d1.d_year = 1998
-  and hd_buy_potential = '1001-5000'
-  and cd_marital_status = 'S'
-  and d1.d_year = 1998
-group by i_item_desc,w_warehouse_name,d1.d_week_seq
-order by total_cnt desc, i_item_desc, w_warehouse_name, d_week_seq
-limit 100;
+select  
+  cd_gender,
+  cd_marital_status,
+  cd_education_status,
+  count(*) cnt1,
+  cd_purchase_estimate,
+  count(*) cnt2,
+  cd_credit_rating,
+  count(*) cnt3
+ from
+  customer c,customer_address ca,customer_demographics
+ where
+  c.c_current_addr_sk = ca.ca_address_sk and
+  ca_state in ('MN','TN','NE') and
+  cd_demo_sk = c.c_current_cdemo_sk and 
+  exists (select *
+          from store_sales,date_dim
+          where c.c_customer_sk = ss_customer_sk and
+                ss_sold_date_sk = d_date_sk and
+                d_year = 1999 and
+                d_moy between 1 and 1+2) and
+   (not exists (select *
+            from web_sales,date_dim
+            where c.c_customer_sk = ws_bill_customer_sk and
+                  ws_sold_date_sk = d_date_sk and
+                  d_year = 1999 and
+                  d_moy between 1 and 1+2) and
+    not exists (select * 
+            from catalog_sales,date_dim
+            where c.c_customer_sk = cs_ship_customer_sk and
+                  cs_sold_date_sk = d_date_sk and
+                  d_year = 1999 and
+                  d_moy between 1 and 1+2))
+ group by cd_gender,
+          cd_marital_status,
+          cd_education_status,
+          cd_purchase_estimate,
+          cd_credit_rating
+ order by cd_gender,
+          cd_marital_status,
+          cd_education_status,
+          cd_purchase_estimate,
+          cd_credit_rating
+ limit 100

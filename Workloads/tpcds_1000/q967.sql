@@ -1,22 +1,14 @@
-select  i_brand_id brand_id, i_brand brand, i_manufact_id, i_manufact,
- 	sum(ss_ext_sales_price) ext_price
- from date_dim, store_sales, item,customer,customer_address,store
- where d_date_sk = ss_sold_date_sk
-   and ss_item_sk = i_item_sk
-   and i_manager_id=1
-   and d_moy=12
-   and d_year=2001
-   and ss_customer_sk = c_customer_sk 
-   and c_current_addr_sk = ca_address_sk
-   and substr(ca_zip,1,5) <> substr(s_zip,1,5) 
-   and ss_store_sk = s_store_sk 
- group by i_brand
-      ,i_brand_id
-      ,i_manufact_id
-      ,i_manufact
- order by ext_price desc
-         ,i_brand
-         ,i_brand_id
-         ,i_manufact_id
-         ,i_manufact
-limit 100 ;
+select  i_item_id
+       ,i_item_desc
+       ,i_current_price
+ from item, inventory, date_dim, catalog_sales
+ where i_current_price between 61 and 61 + 30
+ and inv_item_sk = i_item_sk
+ and d_date_sk=inv_date_sk
+ and d_date between cast('2002-01-09' as date) and (cast('2002-01-09' as date) + INTERVAL '60' DAY)
+ and i_manufact_id in (776,717,768,890)
+ and inv_quantity_on_hand between 100 and 500
+ and cs_item_sk = i_item_sk
+ group by i_item_id,i_item_desc,i_current_price
+ order by i_item_id
+ limit 100

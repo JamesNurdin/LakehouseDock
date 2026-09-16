@@ -1,48 +1,49 @@
-with v1 as(
- select i_category, i_brand,
-        s_store_name, s_company_name,
-        d_year, d_moy,
-        sum(ss_sales_price) sum_sales,
-        avg(sum(ss_sales_price)) over
-          (partition by i_category, i_brand,
-                     s_store_name, s_company_name, d_year)
-          avg_monthly_sales,
-        rank() over
-          (partition by i_category, i_brand,
-                     s_store_name, s_company_name
-           order by d_year, d_moy) rn
- from item, store_sales, date_dim, store
- where ss_item_sk = i_item_sk and
-       ss_sold_date_sk = d_date_sk and
-       ss_store_sk = s_store_sk and
-       (
-         d_year = 2001 or
-         ( d_year = 2001-1 and d_moy =12) or
-         ( d_year = 2001+1 and d_moy =1)
-       )
- group by i_category, i_brand,
-          s_store_name, s_company_name,
-          d_year, d_moy),
- v2 as(
- select v1.s_store_name, v1.s_company_name
-        ,v1.d_year
-        ,v1.avg_monthly_sales
-        ,v1.sum_sales, v1_lag.sum_sales psum, v1_lead.sum_sales nsum
- from v1, v1 v1_lag, v1 v1_lead
- where v1.i_category = v1_lag.i_category and
-       v1.i_category = v1_lead.i_category and
-       v1.i_brand = v1_lag.i_brand and
-       v1.i_brand = v1_lead.i_brand and
-       v1.s_store_name = v1_lag.s_store_name and
-       v1.s_store_name = v1_lead.s_store_name and
-       v1.s_company_name = v1_lag.s_company_name and
-       v1.s_company_name = v1_lead.s_company_name and
-       v1.rn = v1_lag.rn + 1 and
-       v1.rn = v1_lead.rn - 1)
-  select  *
- from v2
- where  d_year = 2001 and    
-        avg_monthly_sales > 0 and
-        case when avg_monthly_sales > 0 then abs(sum_sales - avg_monthly_sales) / avg_monthly_sales else null end > 0.1
- order by sum_sales - avg_monthly_sales, 3
- limit 100;
+with frequent_ss_items as 
+ (select substr(i_item_desc,1,30) itemdesc,i_item_sk item_sk,d_date solddate,count(*) cnt
+  from store_sales
+      ,date_dim 
+      ,item
+  where ss_sold_date_sk = d_date_sk
+    and ss_item_sk = i_item_sk 
+    and d_year in (1998,1998+1,1998+2,1998+3)
+  group by substr(i_item_desc,1,30),i_item_sk,d_date
+  having count(*) >4),
+ max_store_sales as
+ (select max(csales) tpcds_cmax 
+  from (select c_customer_sk,sum(ss_quantity*ss_sales_price) csales
+        from store_sales
+            ,customer
+            ,date_dim 
+        where ss_customer_sk = c_customer_sk
+         and ss_sold_date_sk = d_date_sk
+         and d_year in (1998,1998+1,1998+2,1998+3) 
+        group by c_customer_sk) x),
+ best_ss_customer as
+ (select c_customer_sk,sum(ss_quantity*ss_sales_price) ssales
+  from store_sales
+      ,customer
+  where ss_customer_sk = c_customer_sk
+  group by c_customer_sk
+  having sum(ss_quantity*ss_sales_price) > (95/100.0) * (select
+  *
+from
+ max_store_sales))
+  select  sum(sales)
+ from ((select cs_quantity*cs_list_price sales
+       from catalog_sales
+           ,date_dim 
+       where d_year = 1998 
+         and d_moy = 7 
+         and cs_sold_date_sk = d_date_sk 
+         and cs_item_sk in (select item_sk from frequent_ss_items)
+         and cs_bill_customer_sk in (select c_customer_sk from best_ss_customer))
+      union all
+      (select ws_quantity*ws_list_price sales
+       from web_sales 
+           ,date_dim 
+       where d_year = 1998 
+         and d_moy = 7 
+         and ws_sold_date_sk = d_date_sk 
+         and ws_item_sk in (select item_sk from frequent_ss_items)
+         and ws_bill_customer_sk in (select c_customer_sk from best_ss_customer))) y
+ limit 100

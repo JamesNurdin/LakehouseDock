@@ -1,56 +1,27 @@
 select  
-  cd_gender,
-  cd_marital_status,
-  cd_education_status,
-  count(*) cnt1,
-  cd_purchase_estimate,
-  count(*) cnt2,
-  cd_credit_rating,
-  count(*) cnt3,
-  cd_dep_count,
-  count(*) cnt4,
-  cd_dep_employed_count,
-  count(*) cnt5,
-  cd_dep_college_count,
-  count(*) cnt6
+    sum(ss_net_profit)/sum(ss_ext_sales_price) as gross_margin
+   ,i_category
+   ,i_class
+   ,grouping(i_category)+grouping(i_class) as lochierarchy
+   ,rank() over (
+ 	partition by grouping(i_category)+grouping(i_class),
+ 	case when grouping(i_class) = 0 then i_category end 
+ 	order by sum(ss_net_profit)/sum(ss_ext_sales_price) asc) as rank_within_parent
  from
-  customer c,customer_address ca,customer_demographics
+    store_sales
+   ,date_dim       d1
+   ,item
+   ,store
  where
-  c.c_current_addr_sk = ca.ca_address_sk and
-  ca_county in ('Macoupin County','Roane County','Bennington County','Marshall County','Nemaha County') and
-  cd_demo_sk = c.c_current_cdemo_sk and 
-  exists (select *
-          from store_sales,date_dim
-          where c.c_customer_sk = ss_customer_sk and
-                ss_sold_date_sk = d_date_sk and
-                d_year = 2001 and
-                d_moy between 2 and 2+3) and
-   (exists (select *
-            from web_sales,date_dim
-            where c.c_customer_sk = ws_bill_customer_sk and
-                  ws_sold_date_sk = d_date_sk and
-                  d_year = 2001 and
-                  d_moy between 2 ANd 2+3) or 
-    exists (select * 
-            from catalog_sales,date_dim
-            where c.c_customer_sk = cs_ship_customer_sk and
-                  cs_sold_date_sk = d_date_sk and
-                  d_year = 2001 and
-                  d_moy between 2 and 2+3))
- group by cd_gender,
-          cd_marital_status,
-          cd_education_status,
-          cd_purchase_estimate,
-          cd_credit_rating,
-          cd_dep_count,
-          cd_dep_employed_count,
-          cd_dep_college_count
- order by cd_gender,
-          cd_marital_status,
-          cd_education_status,
-          cd_purchase_estimate,
-          cd_credit_rating,
-          cd_dep_count,
-          cd_dep_employed_count,
-          cd_dep_college_count
-limit 100;
+    d1.d_year = 2001 
+ and d1.d_date_sk = ss_sold_date_sk
+ and i_item_sk  = ss_item_sk 
+ and s_store_sk  = ss_store_sk
+ and s_state in ('TN','TN','TN','TN',
+                 'TN','TN','TN','TN')
+ group by rollup(i_category,i_class)
+ order by
+   lochierarchy desc
+  ,case when lochierarchy = 0 then i_category end
+  ,rank_within_parent
+  limit 100

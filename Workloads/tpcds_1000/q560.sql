@@ -1,64 +1,49 @@
-with sr_items as
- (select i_item_id item_id,
-        sum(sr_return_quantity) sr_item_qty
- from store_returns,
-      item,
-      date_dim
- where sr_item_sk = i_item_sk
- and   d_date    in 
-	(select d_date
-	from date_dim
-	where d_week_seq in 
-		(select d_week_seq
-		from date_dim
-	  where d_date in ('1998-04-21','1998-08-18','1998-11-11')))
- and   sr_returned_date_sk   = d_date_sk
- group by i_item_id),
- cr_items as
- (select i_item_id item_id,
-        sum(cr_return_quantity) cr_item_qty
- from catalog_returns,
-      item,
-      date_dim
- where cr_item_sk = i_item_sk
- and   d_date    in 
-	(select d_date
-	from date_dim
-	where d_week_seq in 
-		(select d_week_seq
-		from date_dim
-	  where d_date in ('1998-04-21','1998-08-18','1998-11-11')))
- and   cr_returned_date_sk   = d_date_sk
- group by i_item_id),
- wr_items as
- (select i_item_id item_id,
-        sum(wr_return_quantity) wr_item_qty
- from web_returns,
-      item,
-      date_dim
- where wr_item_sk = i_item_sk
- and   d_date    in 
-	(select d_date
-	from date_dim
-	where d_week_seq in 
-		(select d_week_seq
-		from date_dim
-		where d_date in ('1998-04-21','1998-08-18','1998-11-11')))
- and   wr_returned_date_sk   = d_date_sk
- group by i_item_id)
-  select  sr_items.item_id
-       ,sr_item_qty
-       ,sr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 sr_dev
-       ,cr_item_qty
-       ,cr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 cr_dev
-       ,wr_item_qty
-       ,wr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 wr_dev
-       ,(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 average
- from sr_items
-     ,cr_items
-     ,wr_items
- where sr_items.item_id=cr_items.item_id
-   and sr_items.item_id=wr_items.item_id 
- order by sr_items.item_id
-         ,sr_item_qty
- limit 100;
+select  distinct(i_product_name)
+ from item i1
+ where i_manufact_id between 975 and 975+40 
+   and (select count(*) as item_cnt
+        from item
+        where (i_manufact = i1.i_manufact and
+        ((i_category = 'Women' and 
+        (i_color = 'pale' or i_color = 'tomato') and 
+        (i_units = 'Oz' or i_units = 'Ton') and
+        (i_size = 'petite' or i_size = 'small')
+        ) or
+        (i_category = 'Women' and
+        (i_color = 'antique' or i_color = 'metallic') and
+        (i_units = 'Carton' or i_units = 'Each') and
+        (i_size = 'extra large' or i_size = 'medium')
+        ) or
+        (i_category = 'Men' and
+        (i_color = 'powder' or i_color = 'honeydew') and
+        (i_units = 'N/A' or i_units = 'Gram') and
+        (i_size = 'economy' or i_size = 'large')
+        ) or
+        (i_category = 'Men' and
+        (i_color = 'navajo' or i_color = 'beige') and
+        (i_units = 'Pound' or i_units = 'Unknown') and
+        (i_size = 'petite' or i_size = 'small')
+        ))) or
+       (i_manufact = i1.i_manufact and
+        ((i_category = 'Women' and 
+        (i_color = 'cornflower' or i_color = 'red') and 
+        (i_units = 'Box' or i_units = 'Bundle') and
+        (i_size = 'petite' or i_size = 'small')
+        ) or
+        (i_category = 'Women' and
+        (i_color = 'deep' or i_color = 'floral') and
+        (i_units = 'Dram' or i_units = 'Dozen') and
+        (i_size = 'extra large' or i_size = 'medium')
+        ) or
+        (i_category = 'Men' and
+        (i_color = 'midnight' or i_color = 'maroon') and
+        (i_units = 'Case' or i_units = 'Cup') and
+        (i_size = 'economy' or i_size = 'large')
+        ) or
+        (i_category = 'Men' and
+        (i_color = 'cornsilk' or i_color = 'papaya') and
+        (i_units = 'Bunch' or i_units = 'Tsp') and
+        (i_size = 'petite' or i_size = 'small')
+        )))) > 0
+ order by i_product_name
+ limit 100

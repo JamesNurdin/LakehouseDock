@@ -1,23 +1,54 @@
 select   
-    sum(ws_net_paid) as total_sum
-   ,i_category
-   ,i_class
-   ,grouping(i_category)+grouping(i_class) as lochierarchy
-   ,rank() over (
- 	partition by grouping(i_category)+grouping(i_class),
- 	case when grouping(i_class) = 0 then i_category end 
- 	order by sum(ws_net_paid) desc) as rank_within_parent
+  ca_state,
+  cd_gender,
+  cd_marital_status,
+  count(*) cnt1,
+  stddev_samp(cd_dep_count),
+  stddev_samp(cd_dep_count),
+  max(cd_dep_count),
+  cd_dep_employed_count,
+  count(*) cnt2,
+  stddev_samp(cd_dep_employed_count),
+  stddev_samp(cd_dep_employed_count),
+  max(cd_dep_employed_count),
+  cd_dep_college_count,
+  count(*) cnt3,
+  stddev_samp(cd_dep_college_count),
+  stddev_samp(cd_dep_college_count),
+  max(cd_dep_college_count)
  from
-    web_sales
-   ,date_dim       d1
-   ,item
+  customer c,customer_address ca,customer_demographics
  where
-    d1.d_month_seq between 1185 and 1185+11
- and d1.d_date_sk = ws_sold_date_sk
- and i_item_sk  = ws_item_sk
- group by rollup(i_category,i_class)
- order by
-   lochierarchy desc,
-   case when lochierarchy = 0 then i_category end,
-   rank_within_parent
- limit 100;
+  c.c_current_addr_sk = ca.ca_address_sk and
+  cd_demo_sk = c.c_current_cdemo_sk and 
+  exists (select *
+          from store_sales,date_dim
+          where c.c_customer_sk = ss_customer_sk and
+                ss_sold_date_sk = d_date_sk and
+                d_year = 2002 and
+                d_qoy < 4) and
+   (exists (select *
+            from web_sales,date_dim
+            where c.c_customer_sk = ws_bill_customer_sk and
+                  ws_sold_date_sk = d_date_sk and
+                  d_year = 2002 and
+                  d_qoy < 4) or 
+    exists (select * 
+            from catalog_sales,date_dim
+            where c.c_customer_sk = cs_ship_customer_sk and
+                  cs_sold_date_sk = d_date_sk and
+                  d_year = 2002 and
+                  d_qoy < 4))
+ group by ca_state,
+          cd_gender,
+          cd_marital_status,
+          cd_dep_count,
+          cd_dep_employed_count,
+          cd_dep_college_count
+ order by ca_state,
+          cd_gender,
+          cd_marital_status,
+          cd_dep_count,
+          cd_dep_employed_count,
+          cd_dep_college_count
+ limit 100

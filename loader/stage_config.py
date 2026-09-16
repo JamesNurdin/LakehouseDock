@@ -3,7 +3,15 @@ from pathlib import Path
 
 # Root
 PARSED_ROOT = Path("/mnt/primary/Main/Parsed_Results")
-RESULTS_ROOT = Path("/mnt/lakehouse-raw-results") # Dont use the symlink for this, the overview files point to the actual mounted path
+
+# Raw-results roots to search, in priority order. Dont use the symlinks for
+# these, the overview files point to the actual mounted paths. A run's data
+# lives entirely under one root -- roots are tried in order until a run/
+# instance dir is found, they are never merged within a single run.
+RESULTS_ROOTS = [
+    Path("/mnt/lakehouse-raw-results-2"),  # new PVC, active writes go here
+    Path("/mnt/lakehouse-raw-results"),    # old PVC, full, kept for history
+]
 
 # -----------------
 # Staging

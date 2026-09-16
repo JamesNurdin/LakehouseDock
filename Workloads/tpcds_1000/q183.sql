@@ -1,18 +1,21 @@
-select  i_item_id, 
-        avg(ss_quantity) agg1,
-        avg(ss_list_price) agg2,
-        avg(ss_coupon_amt) agg3,
-        avg(ss_sales_price) agg4 
- from store_sales, customer_demographics, date_dim, item, promotion
- where ss_sold_date_sk = d_date_sk and
-       ss_item_sk = i_item_sk and
-       ss_cdemo_sk = cd_demo_sk and
-       ss_promo_sk = p_promo_sk and
-       cd_gender = 'M' and 
-       cd_marital_status = 'U' and
-       cd_education_status = 'Unknown' and
-       (p_channel_email = 'N' or p_channel_event = 'N') and
-       d_year = 2000 
- group by i_item_id
- order by i_item_id
- limit 100;
+select  channel, col_name, d_year, d_qoy, i_category, COUNT(*) sales_cnt, SUM(ext_sales_price) sales_amt FROM (
+        SELECT 'store' as channel, 'ss_customer_sk' col_name, d_year, d_qoy, i_category, ss_ext_sales_price ext_sales_price
+         FROM store_sales, item, date_dim
+         WHERE ss_customer_sk IS NULL
+           AND ss_sold_date_sk=d_date_sk
+           AND ss_item_sk=i_item_sk
+        UNION ALL
+        SELECT 'web' as channel, 'ws_ship_cdemo_sk' col_name, d_year, d_qoy, i_category, ws_ext_sales_price ext_sales_price
+         FROM web_sales, item, date_dim
+         WHERE ws_ship_cdemo_sk IS NULL
+           AND ws_sold_date_sk=d_date_sk
+           AND ws_item_sk=i_item_sk
+        UNION ALL
+        SELECT 'catalog' as channel, 'cs_ship_cdemo_sk' col_name, d_year, d_qoy, i_category, cs_ext_sales_price ext_sales_price
+         FROM catalog_sales, item, date_dim
+         WHERE cs_ship_cdemo_sk IS NULL
+           AND cs_sold_date_sk=d_date_sk
+           AND cs_item_sk=i_item_sk) foo
+GROUP BY channel, col_name, d_year, d_qoy, i_category
+ORDER BY channel, col_name, d_year, d_qoy, i_category
+limit 100

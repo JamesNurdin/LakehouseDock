@@ -1,64 +1,42 @@
-with sr_items as
- (select i_item_id item_id,
-        sum(sr_return_quantity) sr_item_qty
- from store_returns,
-      item,
-      date_dim
- where sr_item_sk = i_item_sk
- and   d_date    in 
-	(select d_date
-	from date_dim
-	where d_week_seq in 
-		(select d_week_seq
-		from date_dim
-	  where d_date in ('1998-04-06','1998-08-21','1998-11-15')))
- and   sr_returned_date_sk   = d_date_sk
- group by i_item_id),
- cr_items as
- (select i_item_id item_id,
-        sum(cr_return_quantity) cr_item_qty
- from catalog_returns,
-      item,
-      date_dim
- where cr_item_sk = i_item_sk
- and   d_date    in 
-	(select d_date
-	from date_dim
-	where d_week_seq in 
-		(select d_week_seq
-		from date_dim
-	  where d_date in ('1998-04-06','1998-08-21','1998-11-15')))
- and   cr_returned_date_sk   = d_date_sk
- group by i_item_id),
- wr_items as
- (select i_item_id item_id,
-        sum(wr_return_quantity) wr_item_qty
- from web_returns,
-      item,
-      date_dim
- where wr_item_sk = i_item_sk
- and   d_date    in 
-	(select d_date
-	from date_dim
-	where d_week_seq in 
-		(select d_week_seq
-		from date_dim
-		where d_date in ('1998-04-06','1998-08-21','1998-11-15')))
- and   wr_returned_date_sk   = d_date_sk
- group by i_item_id)
-  select  sr_items.item_id
-       ,sr_item_qty
-       ,sr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 sr_dev
-       ,cr_item_qty
-       ,cr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 cr_dev
-       ,wr_item_qty
-       ,wr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 wr_dev
-       ,(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 average
- from sr_items
-     ,cr_items
-     ,wr_items
- where sr_items.item_id=cr_items.item_id
-   and sr_items.item_id=wr_items.item_id 
- order by sr_items.item_id
-         ,sr_item_qty
- limit 100;
+WITH web_v1 as (
+select
+  ws_item_sk item_sk, d_date,
+  sum(sum(ws_sales_price))
+      over (partition by ws_item_sk order by d_date rows between unbounded preceding and current row) cume_sales
+from web_sales
+    ,date_dim
+where ws_sold_date_sk=d_date_sk
+  and d_month_seq between 1198 and 1198+11
+  and ws_item_sk is not NULL
+group by ws_item_sk, d_date),
+store_v1 as (
+select
+  ss_item_sk item_sk, d_date,
+  sum(sum(ss_sales_price))
+      over (partition by ss_item_sk order by d_date rows between unbounded preceding and current row) cume_sales
+from store_sales
+    ,date_dim
+where ss_sold_date_sk=d_date_sk
+  and d_month_seq between 1198 and 1198+11
+  and ss_item_sk is not NULL
+group by ss_item_sk, d_date)
+ select  *
+from (select item_sk
+     ,d_date
+     ,web_sales
+     ,store_sales
+     ,max(web_sales)
+         over (partition by item_sk order by d_date rows between unbounded preceding and current row) web_cumulative
+     ,max(store_sales)
+         over (partition by item_sk order by d_date rows between unbounded preceding and current row) store_cumulative
+     from (select case when web.item_sk is not null then web.item_sk else store.item_sk end item_sk
+                 ,case when web.d_date is not null then web.d_date else store.d_date end d_date
+                 ,web.cume_sales web_sales
+                 ,store.cume_sales store_sales
+           from web_v1 web full outer join store_v1 store on (web.item_sk = store.item_sk
+                                                          and web.d_date = store.d_date)
+          )x )y
+where web_cumulative > store_cumulative
+order by item_sk
+        ,d_date
+limit 100

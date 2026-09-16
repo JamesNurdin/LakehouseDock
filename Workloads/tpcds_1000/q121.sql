@@ -1,81 +1,42 @@
-select  substr(r_reason_desc,1,20)
-       ,avg(ws_quantity)
-       ,avg(wr_refunded_cash)
-       ,avg(wr_fee)
- from web_sales, web_returns, web_page, customer_demographics cd1,
-      customer_demographics cd2, customer_address, date_dim, reason 
- where ws_web_page_sk = wp_web_page_sk
-   and ws_item_sk = wr_item_sk
-   and ws_order_number = wr_order_number
-   and ws_sold_date_sk = d_date_sk and d_year = 2001
-   and cd1.cd_demo_sk = wr_refunded_cdemo_sk 
-   and cd2.cd_demo_sk = wr_returning_cdemo_sk
-   and ca_address_sk = wr_refunded_addr_sk
-   and r_reason_sk = wr_reason_sk
-   and
-   (
-    (
-     cd1.cd_marital_status = 'S'
-     and
-     cd1.cd_marital_status = cd2.cd_marital_status
-     and
-     cd1.cd_education_status = '2 yr Degree'
-     and 
-     cd1.cd_education_status = cd2.cd_education_status
-     and
-     ws_sales_price between 100.00 and 150.00
-    )
-   or
-    (
-     cd1.cd_marital_status = 'M'
-     and
-     cd1.cd_marital_status = cd2.cd_marital_status
-     and
-     cd1.cd_education_status = 'Primary' 
-     and
-     cd1.cd_education_status = cd2.cd_education_status
-     and
-     ws_sales_price between 50.00 and 100.00
-    )
-   or
-    (
-     cd1.cd_marital_status = 'D'
-     and
-     cd1.cd_marital_status = cd2.cd_marital_status
-     and
-     cd1.cd_education_status = '4 yr Degree'
-     and
-     cd1.cd_education_status = cd2.cd_education_status
-     and
-     ws_sales_price between 150.00 and 200.00
-    )
-   )
-   and
-   (
-    (
-     ca_country = 'United States'
-     and
-     ca_state in ('ID', 'OK', 'GA')
-     and ws_net_profit between 100 and 200  
-    )
-    or
-    (
-     ca_country = 'United States'
-     and
-     ca_state in ('ND', 'LA', 'VA')
-     and ws_net_profit between 150 and 300  
-    )
-    or
-    (
-     ca_country = 'United States'
-     and
-     ca_state in ('MO', 'CO', 'TX')
-     and ws_net_profit between 50 and 250  
-    )
-   )
-group by r_reason_desc
-order by substr(r_reason_desc,1,20)
-        ,avg(ws_quantity)
-        ,avg(wr_refunded_cash)
-        ,avg(wr_fee)
-limit 100;
+select  i_item_id
+       ,i_item_desc
+       ,s_state
+       ,count(ss_quantity) as store_sales_quantitycount
+       ,avg(ss_quantity) as store_sales_quantityave
+       ,stddev_samp(ss_quantity) as store_sales_quantitystdev
+       ,stddev_samp(ss_quantity)/avg(ss_quantity) as store_sales_quantitycov
+       ,count(sr_return_quantity) as_store_returns_quantitycount
+       ,avg(sr_return_quantity) as_store_returns_quantityave
+       ,stddev_samp(sr_return_quantity) as_store_returns_quantitystdev
+       ,stddev_samp(sr_return_quantity)/avg(sr_return_quantity) as store_returns_quantitycov
+       ,count(cs_quantity) as catalog_sales_quantitycount ,avg(cs_quantity) as catalog_sales_quantityave
+       ,stddev_samp(cs_quantity)/avg(cs_quantity) as catalog_sales_quantitystdev
+       ,stddev_samp(cs_quantity)/avg(cs_quantity) as catalog_sales_quantitycov
+ from store_sales
+     ,store_returns
+     ,catalog_sales
+     ,date_dim d1
+     ,date_dim d2
+     ,date_dim d3
+     ,store
+     ,item
+ where d1.d_quarter_name = '2001Q1'
+   and d1.d_date_sk = ss_sold_date_sk
+   and i_item_sk = ss_item_sk
+   and s_store_sk = ss_store_sk
+   and ss_customer_sk = sr_customer_sk
+   and ss_item_sk = sr_item_sk
+   and ss_ticket_number = sr_ticket_number
+   and sr_returned_date_sk = d2.d_date_sk
+   and d2.d_quarter_name in ('2001Q1','2001Q2','2001Q3')
+   and sr_customer_sk = cs_bill_customer_sk
+   and sr_item_sk = cs_item_sk
+   and cs_sold_date_sk = d3.d_date_sk
+   and d3.d_quarter_name in ('2001Q1','2001Q2','2001Q3')
+ group by i_item_id
+         ,i_item_desc
+         ,s_state
+ order by i_item_id
+         ,i_item_desc
+         ,s_state
+limit 100

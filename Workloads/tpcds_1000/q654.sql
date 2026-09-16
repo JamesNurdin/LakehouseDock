@@ -1,22 +1,72 @@
-with ssci as (
-select ss_customer_sk customer_sk
-      ,ss_item_sk item_sk
-from store_sales,date_dim
-where ss_sold_date_sk = d_date_sk
-  and d_month_seq between 1216 and 1216 + 11
-group by ss_customer_sk
-        ,ss_item_sk),
-csci as(
- select cs_bill_customer_sk customer_sk
-      ,cs_item_sk item_sk
-from catalog_sales,date_dim
-where cs_sold_date_sk = d_date_sk
-  and d_month_seq between 1216 and 1216 + 11
-group by cs_bill_customer_sk
-        ,cs_item_sk)
- select  sum(case when ssci.customer_sk is not null and csci.customer_sk is null then 1 else 0 end) store_only
-      ,sum(case when ssci.customer_sk is null and csci.customer_sk is not null then 1 else 0 end) catalog_only
-      ,sum(case when ssci.customer_sk is not null and csci.customer_sk is not null then 1 else 0 end) store_and_catalog
-from ssci full outer join csci on (ssci.customer_sk=csci.customer_sk
-                               and ssci.item_sk = csci.item_sk)
-limit 100;
+with ss as (
+ select
+          i_manufact_id,sum(ss_ext_sales_price) total_sales
+ from
+ 	store_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_manufact_id in (select
+  i_manufact_id
+from
+ item
+where i_category in ('Electronics'))
+ and     ss_item_sk              = i_item_sk
+ and     ss_sold_date_sk         = d_date_sk
+ and     d_year                  = 2000
+ and     d_moy                   = 6
+ and     ss_addr_sk              = ca_address_sk
+ and     ca_gmt_offset           = -5 
+ group by i_manufact_id),
+ cs as (
+ select
+          i_manufact_id,sum(cs_ext_sales_price) total_sales
+ from
+ 	catalog_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_manufact_id               in (select
+  i_manufact_id
+from
+ item
+where i_category in ('Electronics'))
+ and     cs_item_sk              = i_item_sk
+ and     cs_sold_date_sk         = d_date_sk
+ and     d_year                  = 2000
+ and     d_moy                   = 6
+ and     cs_bill_addr_sk         = ca_address_sk
+ and     ca_gmt_offset           = -5 
+ group by i_manufact_id),
+ ws as (
+ select
+          i_manufact_id,sum(ws_ext_sales_price) total_sales
+ from
+ 	web_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_manufact_id               in (select
+  i_manufact_id
+from
+ item
+where i_category in ('Electronics'))
+ and     ws_item_sk              = i_item_sk
+ and     ws_sold_date_sk         = d_date_sk
+ and     d_year                  = 2000
+ and     d_moy                   = 6
+ and     ws_bill_addr_sk         = ca_address_sk
+ and     ca_gmt_offset           = -5
+ group by i_manufact_id)
+  select  i_manufact_id ,sum(total_sales) total_sales
+ from  (select * from ss 
+        union all
+        select * from cs 
+        union all
+        select * from ws) tmp1
+ group by i_manufact_id
+ order by total_sales
+limit 100

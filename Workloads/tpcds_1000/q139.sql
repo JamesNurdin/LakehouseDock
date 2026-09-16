@@ -1,31 +1,72 @@
-select  i_item_id,
-        ca_country,
-        ca_state, 
-        ca_county,
-        avg( cast(cs_quantity as numeric(12,2))) agg1,
-        avg( cast(cs_list_price as numeric(12,2))) agg2,
-        avg( cast(cs_coupon_amt as numeric(12,2))) agg3,
-        avg( cast(cs_sales_price as numeric(12,2))) agg4,
-        avg( cast(cs_net_profit as numeric(12,2))) agg5,
-        avg( cast(c_birth_year as numeric(12,2))) agg6,
-        avg( cast(cd1.cd_dep_count as numeric(12,2))) agg7
- from catalog_sales, customer_demographics cd1, 
-      customer_demographics cd2, customer, customer_address, date_dim, item
- where cs_sold_date_sk = d_date_sk and
-       cs_item_sk = i_item_sk and
-       cs_bill_cdemo_sk = cd1.cd_demo_sk and
-       cs_bill_customer_sk = c_customer_sk and
-       cd1.cd_gender = 'F' and 
-       cd1.cd_education_status = 'Primary' and
-       c_current_cdemo_sk = cd2.cd_demo_sk and
-       c_current_addr_sk = ca_address_sk and
-       c_birth_month in (7,11,3,4,5,2) and
-       d_year = 1998 and
-       ca_state in ('TN','GA','KY'
-                   ,'ID','MS','SC','NE')
- group by rollup (i_item_id, ca_country, ca_state, ca_county)
- order by ca_country,
-        ca_state, 
-        ca_county,
-	i_item_id
- limit 100;
+with ss as (
+ select
+          i_manufact_id,sum(ss_ext_sales_price) total_sales
+ from
+ 	store_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_manufact_id in (select
+  i_manufact_id
+from
+ item
+where i_category in ('Home'))
+ and     ss_item_sk              = i_item_sk
+ and     ss_sold_date_sk         = d_date_sk
+ and     d_year                  = 1998
+ and     d_moy                   = 7
+ and     ss_addr_sk              = ca_address_sk
+ and     ca_gmt_offset           = -5 
+ group by i_manufact_id),
+ cs as (
+ select
+          i_manufact_id,sum(cs_ext_sales_price) total_sales
+ from
+ 	catalog_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_manufact_id               in (select
+  i_manufact_id
+from
+ item
+where i_category in ('Home'))
+ and     cs_item_sk              = i_item_sk
+ and     cs_sold_date_sk         = d_date_sk
+ and     d_year                  = 1998
+ and     d_moy                   = 7
+ and     cs_bill_addr_sk         = ca_address_sk
+ and     ca_gmt_offset           = -5 
+ group by i_manufact_id),
+ ws as (
+ select
+          i_manufact_id,sum(ws_ext_sales_price) total_sales
+ from
+ 	web_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_manufact_id               in (select
+  i_manufact_id
+from
+ item
+where i_category in ('Home'))
+ and     ws_item_sk              = i_item_sk
+ and     ws_sold_date_sk         = d_date_sk
+ and     d_year                  = 1998
+ and     d_moy                   = 7
+ and     ws_bill_addr_sk         = ca_address_sk
+ and     ca_gmt_offset           = -5
+ group by i_manufact_id)
+  select  i_manufact_id ,sum(total_sales) total_sales
+ from  (select * from ss 
+        union all
+        select * from cs 
+        union all
+        select * from ws) tmp1
+ group by i_manufact_id
+ order by total_sales
+limit 100

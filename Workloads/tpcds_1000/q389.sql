@@ -1,42 +1,21 @@
-select  i_item_id
-       ,i_item_desc
-       ,s_state
-       ,count(ss_quantity) as store_sales_quantitycount
-       ,avg(ss_quantity) as store_sales_quantityave
-       ,stddev_samp(ss_quantity) as store_sales_quantitystdev
-       ,stddev_samp(ss_quantity)/avg(ss_quantity) as store_sales_quantitycov
-       ,count(sr_return_quantity) as_store_returns_quantitycount
-       ,avg(sr_return_quantity) as_store_returns_quantityave
-       ,stddev_samp(sr_return_quantity) as_store_returns_quantitystdev
-       ,stddev_samp(sr_return_quantity)/avg(sr_return_quantity) as store_returns_quantitycov
-       ,count(cs_quantity) as catalog_sales_quantitycount ,avg(cs_quantity) as catalog_sales_quantityave
-       ,stddev_samp(cs_quantity)/avg(cs_quantity) as catalog_sales_quantitystdev
-       ,stddev_samp(cs_quantity)/avg(cs_quantity) as catalog_sales_quantitycov
- from store_sales
-     ,store_returns
-     ,catalog_sales
-     ,date_dim d1
-     ,date_dim d2
-     ,date_dim d3
-     ,store
-     ,item
- where d1.d_quarter_name = '2001Q1'
-   and d1.d_date_sk = ss_sold_date_sk
-   and i_item_sk = ss_item_sk
-   and s_store_sk = ss_store_sk
-   and ss_customer_sk = sr_customer_sk
-   and ss_item_sk = sr_item_sk
-   and ss_ticket_number = sr_ticket_number
-   and sr_returned_date_sk = d2.d_date_sk
-   and d2.d_quarter_name in ('2001Q1','2001Q2','2001Q3')
-   and sr_customer_sk = cs_bill_customer_sk
-   and sr_item_sk = cs_item_sk
-   and cs_sold_date_sk = d3.d_date_sk
-   and d3.d_quarter_name in ('2001Q1','2001Q2','2001Q3')
- group by i_item_id
-         ,i_item_desc
-         ,s_state
- order by i_item_id
-         ,i_item_desc
-         ,s_state
-limit 100;
+select  channel, col_name, d_year, d_qoy, i_category, COUNT(*) sales_cnt, SUM(ext_sales_price) sales_amt FROM (
+        SELECT 'store' as channel, 'ss_store_sk' col_name, d_year, d_qoy, i_category, ss_ext_sales_price ext_sales_price
+         FROM store_sales, item, date_dim
+         WHERE ss_store_sk IS NULL
+           AND ss_sold_date_sk=d_date_sk
+           AND ss_item_sk=i_item_sk
+        UNION ALL
+        SELECT 'web' as channel, 'ws_promo_sk' col_name, d_year, d_qoy, i_category, ws_ext_sales_price ext_sales_price
+         FROM web_sales, item, date_dim
+         WHERE ws_promo_sk IS NULL
+           AND ws_sold_date_sk=d_date_sk
+           AND ws_item_sk=i_item_sk
+        UNION ALL
+        SELECT 'catalog' as channel, 'cs_bill_customer_sk' col_name, d_year, d_qoy, i_category, cs_ext_sales_price ext_sales_price
+         FROM catalog_sales, item, date_dim
+         WHERE cs_bill_customer_sk IS NULL
+           AND cs_sold_date_sk=d_date_sk
+           AND cs_item_sk=i_item_sk) foo
+GROUP BY channel, col_name, d_year, d_qoy, i_category
+ORDER BY channel, col_name, d_year, d_qoy, i_category
+limit 100

@@ -1,23 +1,29 @@
-select  a.ca_state state, count(*) cnt
- from customer_address a
-     ,customer c
-     ,store_sales s
-     ,date_dim d
-     ,item i
- where       a.ca_address_sk = c.c_current_addr_sk
- 	and c.c_customer_sk = s.ss_customer_sk
- 	and s.ss_sold_date_sk = d.d_date_sk
- 	and s.ss_item_sk = i.i_item_sk
- 	and d.d_month_seq = 
- 	     (select distinct (d_month_seq)
- 	      from date_dim
-               where d_year = 1999
- 	        and d_moy = 1 )
- 	and i.i_current_price > 1.2 * 
-             (select avg(j.i_current_price) 
- 	     from item j 
- 	     where j.i_category = i.i_category)
- group by a.ca_state
- having count(*) >= 10
- order by cnt 
- limit 100;
+with ws_wh as
+(select ws1.ws_order_number,ws1.ws_warehouse_sk wh1,ws2.ws_warehouse_sk wh2
+ from web_sales ws1,web_sales ws2
+ where ws1.ws_order_number = ws2.ws_order_number
+   and ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk)
+ select  
+   count(distinct ws_order_number) as "order count"
+  ,sum(ws_ext_ship_cost) as "total shipping cost"
+  ,sum(ws_net_profit) as "total net profit"
+from
+   web_sales ws1
+  ,date_dim
+  ,customer_address
+  ,web_site
+where
+    d_date between DATE '2000-03-01' and 
+           (cast('2000-03-01' as date) + INTERVAL '60' DAY)
+and ws1.ws_ship_date_sk = d_date_sk
+and ws1.ws_ship_addr_sk = ca_address_sk
+and ca_state = 'NM'
+and ws1.ws_web_site_sk = web_site_sk
+and web_company_name = 'pri'
+and ws1.ws_order_number in (select ws_order_number
+                            from ws_wh)
+and ws1.ws_order_number in (select wr_order_number
+                            from web_returns,ws_wh
+                            where wr_order_number = ws_wh.ws_order_number)
+order by count(distinct ws_order_number)
+limit 100

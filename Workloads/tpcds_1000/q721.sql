@@ -1,27 +1,32 @@
-select  *
- from(select w_warehouse_name
-            ,i_item_id
-            ,sum(case when (cast(d_date as date) < cast ('1998-06-26' as date))
-	                then inv_quantity_on_hand 
-                      else 0 end) as inv_before
-            ,sum(case when (cast(d_date as date) >= cast ('1998-06-26' as date))
-                      then inv_quantity_on_hand 
-                      else 0 end) as inv_after
-   from inventory
-       ,warehouse
-       ,item
-       ,date_dim
-   where i_current_price between 0.99 and 1.49
-     and i_item_sk          = inv_item_sk
-     and inv_warehouse_sk   = w_warehouse_sk
-     and inv_date_sk    = d_date_sk
-     and d_date between (cast ('1998-06-26' as date) - 30 days)
-                    and (cast ('1998-06-26' as date) + 30 days)
-   group by w_warehouse_name, i_item_id) x
- where (case when inv_before > 0 
-             then inv_after / inv_before 
-             else null
-             end) between 2.0/3.0 and 3.0/2.0
- order by w_warehouse_name
-         ,i_item_id
- limit 100;
+select  
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,cc_name
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk <= 30 ) then 1 else 0 end)  as "30 days" 
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk > 30) and 
+                 (cs_ship_date_sk - cs_sold_date_sk <= 60) then 1 else 0 end )  as "31- INTERVAL '60' DAY" 
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk > 60) and 
+                 (cs_ship_date_sk - cs_sold_date_sk <= 90) then 1 else 0 end)  as "61- INTERVAL '90' DAY" 
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk > 90) and
+                 (cs_ship_date_sk - cs_sold_date_sk <= 120) then 1 else 0 end)  as "91- INTERVAL '120' DAY" 
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk  > 120) then 1 else 0 end)  as ">120 days" 
+from
+   catalog_sales
+  ,warehouse
+  ,ship_mode
+  ,call_center
+  ,date_dim
+where
+    d_month_seq between 1191 and 1191 + 11
+and cs_ship_date_sk   = d_date_sk
+and cs_warehouse_sk   = w_warehouse_sk
+and cs_ship_mode_sk   = sm_ship_mode_sk
+and cs_call_center_sk = cc_call_center_sk
+group by
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,cc_name
+order by substr(w_warehouse_name,1,20)
+        ,sm_type
+        ,cc_name
+limit 100

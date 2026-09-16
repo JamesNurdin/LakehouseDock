@@ -1,32 +1,28 @@
-select  asceding.rnk, i1.i_product_name best_performing, i2.i_product_name worst_performing
-from(select *
-     from (select item_sk,rank() over (order by rank_col asc) rnk
-           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col 
-                 from store_sales ss1
-                 where ss_store_sk = 5
-                 group by ss_item_sk
-                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
-                                                  from store_sales
-                                                  where ss_store_sk = 5
-                                                    and ss_hdemo_sk is null
-                                                  group by ss_store_sk))V1)V11
-     where rnk  < 11) asceding,
-    (select *
-     from (select item_sk,rank() over (order by rank_col desc) rnk
-           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col
-                 from store_sales ss1
-                 where ss_store_sk = 5
-                 group by ss_item_sk
-                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
-                                                  from store_sales
-                                                  where ss_store_sk = 5
-                                                    and ss_hdemo_sk is null
-                                                  group by ss_store_sk))V2)V21
-     where rnk  < 11) descending,
-item i1,
-item i2
-where asceding.rnk = descending.rnk 
-  and i1.i_item_sk=asceding.item_sk
-  and i2.i_item_sk=descending.item_sk
-order by asceding.rnk
-limit 100;
+select  
+   count(distinct cs_order_number) as "order count"
+  ,sum(cs_ext_ship_cost) as "total shipping cost"
+  ,sum(cs_net_profit) as "total net profit"
+from
+   catalog_sales cs1
+  ,date_dim
+  ,customer_address
+  ,call_center
+where
+    d_date between DATE '2001-02-01' and 
+           (cast('2001-02-01' as date) + INTERVAL '60' DAY)
+and cs1.cs_ship_date_sk = d_date_sk
+and cs1.cs_ship_addr_sk = ca_address_sk
+and ca_state = 'NJ'
+and cs1.cs_call_center_sk = cc_call_center_sk
+and cc_county in ('Williamson County','Williamson County','Williamson County','Williamson County',
+                  'Williamson County'
+)
+and exists (select *
+            from catalog_sales cs2
+            where cs1.cs_order_number = cs2.cs_order_number
+              and cs1.cs_warehouse_sk <> cs2.cs_warehouse_sk)
+and not exists(select *
+               from catalog_returns cr1
+               where cs1.cs_order_number = cr1.cr_order_number)
+order by count(distinct cs_order_number)
+limit 100

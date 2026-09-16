@@ -1,20 +1,26 @@
-select count(*) 
-from ((select distinct c_last_name, c_first_name, d_date
-       from store_sales, date_dim, customer
-       where store_sales.ss_sold_date_sk = date_dim.d_date_sk
-         and store_sales.ss_customer_sk = customer.c_customer_sk
-         and d_month_seq between 1184 and 1184+11)
-       except
-      (select distinct c_last_name, c_first_name, d_date
-       from catalog_sales, date_dim, customer
-       where catalog_sales.cs_sold_date_sk = date_dim.d_date_sk
-         and catalog_sales.cs_bill_customer_sk = customer.c_customer_sk
-         and d_month_seq between 1184 and 1184+11)
-       except
-      (select distinct c_last_name, c_first_name, d_date
-       from web_sales, date_dim, customer
-       where web_sales.ws_sold_date_sk = date_dim.d_date_sk
-         and web_sales.ws_bill_customer_sk = customer.c_customer_sk
-         and d_month_seq between 1184 and 1184+11)
-) cool_cust
-;
+select 
+	s_store_name,
+	i_item_desc,
+	sc.revenue,
+	i_current_price,
+	i_wholesale_cost,
+	i_brand
+ from store, item,
+     (select ss_store_sk, avg(revenue) as ave
+ 	from
+ 	    (select  ss_store_sk, ss_item_sk, 
+ 		     sum(ss_sales_price) as revenue
+ 		from store_sales, date_dim
+ 		where ss_sold_date_sk = d_date_sk and d_month_seq between 1181 and 1181+11
+ 		group by ss_store_sk, ss_item_sk) sa
+ 	group by ss_store_sk) sb,
+     (select  ss_store_sk, ss_item_sk, sum(ss_sales_price) as revenue
+ 	from store_sales, date_dim
+ 	where ss_sold_date_sk = d_date_sk and d_month_seq between 1181 and 1181+11
+ 	group by ss_store_sk, ss_item_sk) sc
+ where sb.ss_store_sk = sc.ss_store_sk and 
+       sc.revenue <= 0.1 * sb.ave and
+       s_store_sk = sc.ss_store_sk and
+       i_item_sk = sc.ss_item_sk
+ order by s_store_name, i_item_desc
+limit 100

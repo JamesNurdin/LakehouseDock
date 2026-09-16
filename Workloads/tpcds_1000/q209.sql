@@ -1,19 +1,18 @@
-select  cast(amc as decimal(15,4))/cast(pmc as decimal(15,4)) am_pm_ratio
- from ( select count(*) amc
-       from web_sales, household_demographics , time_dim, web_page
-       where ws_sold_time_sk = time_dim.t_time_sk
-         and ws_ship_hdemo_sk = household_demographics.hd_demo_sk
-         and ws_web_page_sk = web_page.wp_web_page_sk
-         and time_dim.t_hour between 12 and 12+1
-         and household_demographics.hd_dep_count = 9
-         and web_page.wp_char_count between 5000 and 5200) at,
-      ( select count(*) pmc
-       from web_sales, household_demographics , time_dim, web_page
-       where ws_sold_time_sk = time_dim.t_time_sk
-         and ws_ship_hdemo_sk = household_demographics.hd_demo_sk
-         and ws_web_page_sk = web_page.wp_web_page_sk
-         and time_dim.t_hour between 13 and 13+1
-         and household_demographics.hd_dep_count = 9
-         and web_page.wp_char_count between 5000 and 5200) pt
- order by am_pm_ratio
- limit 100;
+select  dt.d_year 
+       ,item.i_brand_id brand_id 
+       ,item.i_brand brand
+       ,sum(ss_ext_discount_amt) sum_agg
+ from  date_dim dt 
+      ,store_sales
+      ,item
+ where dt.d_date_sk = store_sales.ss_sold_date_sk
+   and store_sales.ss_item_sk = item.i_item_sk
+   and item.i_manufact_id = 992
+   and dt.d_moy=11
+ group by dt.d_year
+      ,item.i_brand
+      ,item.i_brand_id
+ order by dt.d_year
+         ,sum_agg desc
+         ,brand_id
+ limit 100

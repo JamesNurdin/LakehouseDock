@@ -1,22 +1,54 @@
-with ssci as (
-select ss_customer_sk customer_sk
-      ,ss_item_sk item_sk
-from store_sales,date_dim
-where ss_sold_date_sk = d_date_sk
-  and d_month_seq between 1197 and 1197 + 11
-group by ss_customer_sk
-        ,ss_item_sk),
-csci as(
- select cs_bill_customer_sk customer_sk
-      ,cs_item_sk item_sk
-from catalog_sales,date_dim
-where cs_sold_date_sk = d_date_sk
-  and d_month_seq between 1197 and 1197 + 11
-group by cs_bill_customer_sk
-        ,cs_item_sk)
- select  sum(case when ssci.customer_sk is not null and csci.customer_sk is null then 1 else 0 end) store_only
-      ,sum(case when ssci.customer_sk is null and csci.customer_sk is not null then 1 else 0 end) catalog_only
-      ,sum(case when ssci.customer_sk is not null and csci.customer_sk is not null then 1 else 0 end) store_and_catalog
-from ssci full outer join csci on (ssci.customer_sk=csci.customer_sk
-                               and ssci.item_sk = csci.item_sk)
-limit 100;
+select   
+  ca_state,
+  cd_gender,
+  cd_marital_status,
+  count(*) cnt1,
+  max(cd_dep_count),
+  min(cd_dep_count),
+  max(cd_dep_count),
+  cd_dep_employed_count,
+  count(*) cnt2,
+  max(cd_dep_employed_count),
+  min(cd_dep_employed_count),
+  max(cd_dep_employed_count),
+  cd_dep_college_count,
+  count(*) cnt3,
+  max(cd_dep_college_count),
+  min(cd_dep_college_count),
+  max(cd_dep_college_count)
+ from
+  customer c,customer_address ca,customer_demographics
+ where
+  c.c_current_addr_sk = ca.ca_address_sk and
+  cd_demo_sk = c.c_current_cdemo_sk and 
+  exists (select *
+          from store_sales,date_dim
+          where c.c_customer_sk = ss_customer_sk and
+                ss_sold_date_sk = d_date_sk and
+                d_year = 2000 and
+                d_qoy < 4) and
+   (exists (select *
+            from web_sales,date_dim
+            where c.c_customer_sk = ws_bill_customer_sk and
+                  ws_sold_date_sk = d_date_sk and
+                  d_year = 2000 and
+                  d_qoy < 4) or 
+    exists (select * 
+            from catalog_sales,date_dim
+            where c.c_customer_sk = cs_ship_customer_sk and
+                  cs_sold_date_sk = d_date_sk and
+                  d_year = 2000 and
+                  d_qoy < 4))
+ group by ca_state,
+          cd_gender,
+          cd_marital_status,
+          cd_dep_count,
+          cd_dep_employed_count,
+          cd_dep_college_count
+ order by ca_state,
+          cd_gender,
+          cd_marital_status,
+          cd_dep_count,
+          cd_dep_employed_count,
+          cd_dep_college_count
+ limit 100

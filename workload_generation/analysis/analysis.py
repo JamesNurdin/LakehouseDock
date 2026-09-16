@@ -15,6 +15,12 @@ Two families of metrics feed into a single comparable row per workload:
     workloads such as ``tpcds``) we compute them directly from the .sql
     files, so every workload ends up scored on the same axes.
 
+``capture_query_plans`` / ``capture_query_plans_for_set`` persist the raw
+EXPLAIN plan bundle (JSON + DAGs) to ``<workload_dir>/plans.json`` next to
+``generation_report.json`` (which only gets a pointer + ok/failed summary,
+to keep it small). Re-running is incremental: a workload is skipped
+entirely if plans.json already matches the current q*.sql files.
+
 Usage from the notebook::
 
     from Workloads.analysis import analyse_workload_set
@@ -30,7 +36,9 @@ Usage from the notebook::
 
 from __future__ import annotations
 
+import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
 
@@ -74,6 +82,22 @@ def load_generation_report(workload_dir: str | Path) -> Optional[dict]:
         return None
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def template_lookup(
+    workload_name_or_path: str | Path,
+    *,
+    workload_root: str | Path = _DEFAULT_WORKLOAD_ROOT,
+) -> Dict[str, str]:
+    """
+    file->template map from generation_report.json's "queries" list, e.g.
+    {"q1": "query96", ...}. Returns {} for workloads with no such report
+    (e.g. hand-curated imports like ``tpcds``) or no per-query template field.
+    """
+    report = load_generation_report(resolve_workload_path(workload_name_or_path, workload_root))
+    if not report or "queries" not in report:
+        return {}
+    return {q["file"].replace(".sql", ""): q.get("template") for q in report["queries"]}
 
 
 def compute_metaheuristics(
@@ -255,6 +279,186 @@ def load_generation_overhead(
         row[f"{prefix}tokens_per_query"] = round(tpq, 2) if tpq is not None else None
 
     return row
+
+
+def update_generation_report(workload_dir: str | Path, updates: Dict[str, Any]) -> None:
+    """Merge top-level keys into a workload's generation_report.json (creating it if absent)."""
+    path = Path(workload_dir) / "generation_report.json"
+    report = load_generation_report(workload_dir) or {}
+    report.update(updates)
+    path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Query plan capture (EXPLAIN JSON + DAGs, persisted to plans.json)
+# ---------------------------------------------------------------------------
+#
+# lh.load_query_plans(...) already does the EXPLAIN + DAG-build work; this
+# layer just persists that bundle to <workload_dir>/plans.json (next to
+# generation_report.json, which gets a small pointer + summary) and makes
+# repeat notebook runs cheap by skipping Trino entirely when the cached
+# plans already cover the current q*.sql files with unchanged SQL text.
+
+def _sql_hash(sql: str) -> str:
+    return hashlib.sha256(sql.strip().rstrip(";").strip().encode("utf-8")).hexdigest()
+
+
+def load_plans_file(workload_dir: str | Path) -> Optional[dict]:
+    """Read plans.json from a workload dir, if it exists."""
+    path = Path(workload_dir) / "plans.json"
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _plans_up_to_date(cached: Optional[dict], query_items) -> bool:
+    """True if a cached plans.json already covers exactly this query set, unchanged."""
+    if not cached or not cached.get("plans"):
+        return False
+
+    cached_plans = cached["plans"]
+
+    if set(cached_plans.keys()) != {qname for qname, _ in query_items}:
+        return False
+
+    return all(
+        cached_plans[qname].get("sql_hash") == _sql_hash(record["sql"])
+        for qname, record in query_items
+    )
+
+
+def capture_query_plans(
+    workload_name_or_path: str | Path,
+    *,
+    workload_root: str | Path = _DEFAULT_WORKLOAD_ROOT,
+    lh,
+    catalog: str = "iceberg",
+    schema: str = "tpcds",
+    pattern: str = "q*.sql",
+    force_recompute: bool = False,
+    plan_workers: int = 1,
+) -> Dict[str, Any]:
+    """
+    Run Trino EXPLAIN plans for a workload's queries and persist the bundle to
+    ``<workload_dir>/plans.json``, updating ``generation_report.json`` with a
+    pointer + summary (not the full plan JSON, to keep the report small).
+
+    Skips Trino entirely if plans.json already covers exactly the current
+    q*.sql files with unchanged SQL text; pass force_recompute=True to always
+    re-run every query.
+
+    plan_workers > 1 fetches EXPLAIN plans concurrently (one Trino connection
+    per worker thread) -- see ``Lakehouse.load_query_plans``.
+    """
+    workload_path = resolve_workload_path(workload_name_or_path, workload_root)
+    plans_path = workload_path / "plans.json"
+
+    workload = load_sql_workload(workload_path, pattern=pattern)
+    query_items = list(workload["queries"].items())
+
+    cached = None if force_recompute else load_plans_file(workload_path)
+
+    if _plans_up_to_date(cached, query_items):
+        print(
+            f"{workload_path.name}: plans.json already up to date "
+            f"({cached['ok']}/{cached['query_count']} ok) -- skipping Trino."
+        )
+        return cached
+
+    print(f"{workload_path.name}: capturing plans for {len(query_items)} queries ...")
+
+    plan_bundle = lh.load_query_plans(
+        workload_path=str(workload_path),
+        schema=schema,
+        pattern=pattern,
+        plan_workers=plan_workers,
+    )
+
+    for qname, record in query_items:
+        plan_bundle["plans"][qname]["sql_hash"] = _sql_hash(record["sql"])
+
+    plan_bundle["catalog"] = catalog
+    plan_bundle["captured_at_utc"] = datetime.now(timezone.utc).isoformat()
+
+    plans_path.write_text(json.dumps(plan_bundle, indent=2, default=str), encoding="utf-8")
+
+    update_generation_report(workload_path, {
+        "query_plans": {
+            "path": plans_path.name,
+            "captured_at_utc": plan_bundle["captured_at_utc"],
+            "instance": plan_bundle.get("instance"),
+            "schema": schema,
+            "catalog": catalog,
+            "query_count": plan_bundle.get("query_count"),
+            "ok": plan_bundle.get("ok"),
+            "failed": plan_bundle.get("failed"),
+        }
+    })
+
+    print(
+        f"{workload_path.name}: wrote {plans_path} "
+        f"({plan_bundle.get('ok')}/{plan_bundle.get('query_count')} ok)"
+    )
+
+    return plan_bundle
+
+
+def capture_query_plans_for_set(
+    workload_names: Iterable[str | Path],
+    *,
+    workload_root: str | Path = _DEFAULT_WORKLOAD_ROOT,
+    lh,
+    catalog: str = "iceberg",
+    schema: str = "tpcds",
+    pattern: str = "q*.sql",
+    force_recompute: bool = False,
+    plan_workers: int = 1,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Capture (or reuse cached) query plans for multiple workloads, persisting
+    each to ``<workload_dir>/plans.json``. Returns (summary_df, failures_df).
+
+    plan_workers > 1 fetches each workload's EXPLAIN plans concurrently (one
+    Trino connection per worker thread) -- see ``Lakehouse.load_query_plans``.
+    Workloads themselves are still processed one at a time.
+    """
+    rows = []
+    failures = []
+
+    for workload_name in workload_names:
+        workload_path = resolve_workload_path(workload_name, workload_root)
+        print(f"\n=== Capturing plans: {workload_path.name} ===")
+
+        try:
+            bundle = capture_query_plans(
+                workload_name,
+                workload_root=workload_root,
+                lh=lh,
+                catalog=catalog,
+                schema=schema,
+                pattern=pattern,
+                force_recompute=force_recompute,
+                plan_workers=plan_workers,
+            )
+            rows.append({
+                "workload": bundle.get("workload_name", workload_path.name),
+                "workload_path": str(workload_path),
+                "query_count": bundle.get("query_count"),
+                "ok": bundle.get("ok"),
+                "failed": bundle.get("failed"),
+                "plans_path": str(workload_path / "plans.json"),
+            })
+        except Exception as e:
+            failures.append({
+                "workload": workload_path.name,
+                "workload_path": str(workload_path),
+                "error": repr(e),
+            })
+            print(f"FAILED: {workload_path.name}")
+            print(repr(e))
+
+    return pd.DataFrame(rows), pd.DataFrame(failures)
 
 
 # ---------------------------------------------------------------------------

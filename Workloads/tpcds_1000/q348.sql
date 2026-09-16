@@ -1,19 +1,27 @@
-select  cast(amc as decimal(15,4))/cast(pmc as decimal(15,4)) am_pm_ratio
- from ( select count(*) amc
-       from web_sales, household_demographics , time_dim, web_page
-       where ws_sold_time_sk = time_dim.t_time_sk
-         and ws_ship_hdemo_sk = household_demographics.hd_demo_sk
-         and ws_web_page_sk = web_page.wp_web_page_sk
-         and time_dim.t_hour between 10 and 10+1
-         and household_demographics.hd_dep_count = 7
-         and web_page.wp_char_count between 5000 and 5200) at,
-      ( select count(*) pmc
-       from web_sales, household_demographics , time_dim, web_page
-       where ws_sold_time_sk = time_dim.t_time_sk
-         and ws_ship_hdemo_sk = household_demographics.hd_demo_sk
-         and ws_web_page_sk = web_page.wp_web_page_sk
-         and time_dim.t_hour between 18 and 18+1
-         and household_demographics.hd_dep_count = 7
-         and web_page.wp_char_count between 5000 and 5200) pt
- order by am_pm_ratio
- limit 100;
+select  
+    sum(ss_net_profit)/sum(ss_ext_sales_price) as gross_margin
+   ,i_category
+   ,i_class
+   ,grouping(i_category)+grouping(i_class) as lochierarchy
+   ,rank() over (
+ 	partition by grouping(i_category)+grouping(i_class),
+ 	case when grouping(i_class) = 0 then i_category end 
+ 	order by sum(ss_net_profit)/sum(ss_ext_sales_price) asc) as rank_within_parent
+ from
+    store_sales
+   ,date_dim       d1
+   ,item
+   ,store
+ where
+    d1.d_year = 1999 
+ and d1.d_date_sk = ss_sold_date_sk
+ and i_item_sk  = ss_item_sk 
+ and s_store_sk  = ss_store_sk
+ and s_state in ('TN','TN','TN','TN',
+                 'TN','TN','TN','TN')
+ group by rollup(i_category,i_class)
+ order by
+   lochierarchy desc
+  ,case when lochierarchy = 0 then i_category end
+  ,rank_within_parent
+  limit 100

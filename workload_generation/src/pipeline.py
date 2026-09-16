@@ -64,11 +64,26 @@ def generate_query(
     value_cache: dict | None = None,
     value_cache_lock=None,
     variant: dict | None = None,
+    shape_sampler=None,
+    table_sampler=None,
+    task_augmenter=None,
 ) -> dict:
     """One query: v8 shape + deficit-hints (F-1) + coverage-weighted tables +
-    grounded prompt + LLM. Hint selection is driven by the tracker."""
+    grounded prompt + LLM. Hint selection is driven by the tracker.
+
+    ``shape_sampler``/``table_sampler``/``task_augmenter`` are injection seams for
+    experiments (e.g. ``workload_generation.hybrid``'s target-conditioned
+    generation) and default to the stock v8 behaviour, so every existing caller is
+    unaffected:
+      * ``shape_sampler(rng) -> spec``       default: :func:`sample_shape_spec`
+      * ``table_sampler(schema, n_tables, *, rng, table_usage, edge_usage,
+        connected_fraction) -> (tables, mode)``  default: :func:`sample_tables_v2`
+      * ``task_augmenter(task, selected_tables, rng, family=name) -> task``  default: identity
+    """
     tracker = tracker if tracker is not None else _DEFAULT_TRACKER
     policy = policy or DEFAULT_POLICY
+    shape_sampler = shape_sampler or sample_shape_spec
+    table_sampler = table_sampler or sample_tables_v2
     model_name = model_name or config.MODEL_NAME
     temperature = config.TEMPERATURE if temperature is None else temperature
     reasoning = reasoning or config.DEFAULT_REASONING
@@ -89,7 +104,7 @@ def generate_query(
     if variant is not None:
         spec = {"family": variant, "addons": [], "plan_shape": None}
     else:
-        spec = sample_shape_spec(rng)
+        spec = shape_sampler(rng)
     family = spec["family"]
 
     # Adaptive piece: ONE budgeted, coverage-weighted construct selection.
@@ -111,7 +126,7 @@ def generate_query(
 
     usage = tracker.usage_snapshot()
 
-    selected_tables, sampling_mode = sample_tables_v2(
+    selected_tables, sampling_mode = table_sampler(
         schema_json, n_tables, rng=rng,
         table_usage=usage["tables"], edge_usage=usage["edges"],
         connected_fraction=connected_fraction,
@@ -141,6 +156,8 @@ def generate_query(
     task = build_task_text(
         spec, n_tables=len(selected_tables), rng=rng, has_join_rules=has_join_rules,
     )
+    if task_augmenter is not None:
+        task = task_augmenter(task, selected_tables, rng, family=family["name"])
 
     base_temp = max(temperature, config.TEMPERATURE_FLOOR)
     query_temperature = min(1.0, max(0.0, base_temp + family["temp_delta"]))
@@ -199,6 +216,9 @@ def generate_query_batch(
     max_attempt_factor: float = None,
     progress_cb=None,
     policy=None,
+    shape_sampler=None,
+    table_sampler=None,
+    task_augmenter=None,
 ) -> list[dict]:
     model_name = model_name or config.MODEL_NAME
     temperature = config.TEMPERATURE if temperature is None else temperature
@@ -235,6 +255,8 @@ def generate_query_batch(
             min_tables=min_tables, max_tables=max_tables, random_seed=seed,
             ddl_cache=ddl_cache, ddl_cache_lock=ddl_cache_lock,
             connected_fraction=connected_fraction,
+            shape_sampler=shape_sampler, table_sampler=table_sampler,
+            task_augmenter=task_augmenter,
         )
         q["contention_retries"] = last_retry_count()
         if q.get("sql"):

@@ -1,18 +1,19 @@
-select  c_customer_id as customer_id
-       ,c_last_name || ', ' || c_first_name as customername
- from customer
-     ,customer_address
-     ,customer_demographics
-     ,household_demographics
-     ,income_band
-     ,store_returns
- where ca_city	        =  'Farmington'
-   and c_current_addr_sk = ca_address_sk
-   and ib_lower_bound   >=  21712
-   and ib_upper_bound   <=  21712 + 50000
-   and ib_income_band_sk = hd_income_band_sk
-   and cd_demo_sk = c_current_cdemo_sk
-   and hd_demo_sk = c_current_hdemo_sk
-   and sr_cdemo_sk = cd_demo_sk
- order by c_customer_id
- limit 100;
+select count(*) 
+from ((select distinct c_last_name, c_first_name, d_date
+       from store_sales, date_dim, customer
+       where store_sales.ss_sold_date_sk = date_dim.d_date_sk
+         and store_sales.ss_customer_sk = customer.c_customer_sk
+         and d_month_seq between 1179 and 1179+11)
+       except
+      (select distinct c_last_name, c_first_name, d_date
+       from catalog_sales, date_dim, customer
+       where catalog_sales.cs_sold_date_sk = date_dim.d_date_sk
+         and catalog_sales.cs_bill_customer_sk = customer.c_customer_sk
+         and d_month_seq between 1179 and 1179+11)
+       except
+      (select distinct c_last_name, c_first_name, d_date
+       from web_sales, date_dim, customer
+       where web_sales.ws_sold_date_sk = date_dim.d_date_sk
+         and web_sales.ws_bill_customer_sk = customer.c_customer_sk
+         and d_month_seq between 1179 and 1179+11)
+) cool_cust

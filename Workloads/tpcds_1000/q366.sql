@@ -1,50 +1,25 @@
-select  *
-from (select avg(ss_list_price) B1_LP
-            ,count(ss_list_price) B1_CNT
-            ,count(distinct ss_list_price) B1_CNTD
-      from store_sales
-      where ss_quantity between 0 and 5
-        and (ss_list_price between 90 and 90+10 
-             or ss_coupon_amt between 16789 and 16789+1000
-             or ss_wholesale_cost between 11 and 11+20)) B1,
-     (select avg(ss_list_price) B2_LP
-            ,count(ss_list_price) B2_CNT
-            ,count(distinct ss_list_price) B2_CNTD
-      from store_sales
-      where ss_quantity between 6 and 10
-        and (ss_list_price between 86 and 86+10
-          or ss_coupon_amt between 349 and 349+1000
-          or ss_wholesale_cost between 0 and 0+20)) B2,
-     (select avg(ss_list_price) B3_LP
-            ,count(ss_list_price) B3_CNT
-            ,count(distinct ss_list_price) B3_CNTD
-      from store_sales
-      where ss_quantity between 11 and 15
-        and (ss_list_price between 59 and 59+10
-          or ss_coupon_amt between 3232 and 3232+1000
-          or ss_wholesale_cost between 2 and 2+20)) B3,
-     (select avg(ss_list_price) B4_LP
-            ,count(ss_list_price) B4_CNT
-            ,count(distinct ss_list_price) B4_CNTD
-      from store_sales
-      where ss_quantity between 16 and 20
-        and (ss_list_price between 65 and 65+10
-          or ss_coupon_amt between 10190 and 10190+1000
-          or ss_wholesale_cost between 42 and 42+20)) B4,
-     (select avg(ss_list_price) B5_LP
-            ,count(ss_list_price) B5_CNT
-            ,count(distinct ss_list_price) B5_CNTD
-      from store_sales
-      where ss_quantity between 21 and 25
-        and (ss_list_price between 162 and 162+10
-          or ss_coupon_amt between 2867 and 2867+1000
-          or ss_wholesale_cost between 65 and 65+20)) B5,
-     (select avg(ss_list_price) B6_LP
-            ,count(ss_list_price) B6_CNT
-            ,count(distinct ss_list_price) B6_CNTD
-      from store_sales
-      where ss_quantity between 26 and 30
-        and (ss_list_price between 88 and 88+10
-          or ss_coupon_amt between 10531 and 10531+1000
-          or ss_wholesale_cost between 59 and 59+20)) B6
-limit 100;
+select  * from 
+(select i_manufact_id,
+sum(ss_sales_price) sum_sales,
+avg(sum(ss_sales_price)) over (partition by i_manufact_id) avg_quarterly_sales
+from item, store_sales, date_dim, store
+where ss_item_sk = i_item_sk and
+ss_sold_date_sk = d_date_sk and
+ss_store_sk = s_store_sk and
+d_month_seq in (1203,1203+1,1203+2,1203+3,1203+4,1203+5,1203+6,1203+7,1203+8,1203+9,1203+10,1203+11) and
+((i_category in ('Books','Children','Electronics') and
+i_class in ('personal','portable','reference','self-help') and
+i_brand in ('scholaramalgamalg #14','scholaramalgamalg #7',
+		'exportiunivamalg #9','scholaramalgamalg #9'))
+or(i_category in ('Women','Music','Men') and
+i_class in ('accessories','classical','fragrances','pants') and
+i_brand in ('amalgimporto #1','edu packscholar #1','exportiimporto #1',
+		'importoamalg #1')))
+group by i_manufact_id, d_qoy ) tmp1
+where case when avg_quarterly_sales > 0 
+	then abs (sum_sales - avg_quarterly_sales)/ avg_quarterly_sales 
+	else null end > 0.1
+order by avg_quarterly_sales,
+	 sum_sales,
+	 i_manufact_id
+limit 100

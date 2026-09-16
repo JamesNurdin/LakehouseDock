@@ -1,14 +1,22 @@
-select  i_item_id
-       ,i_item_desc
-       ,i_current_price
- from item, inventory, date_dim, store_sales
- where i_current_price between 90 and 90+30
- and inv_item_sk = i_item_sk
- and d_date_sk=inv_date_sk
- and d_date between cast('2002-03-17' as date) and (cast('2002-03-17' as date) +  60 days)
- and i_manufact_id in (445,340,914,239)
- and inv_quantity_on_hand between 100 and 500
- and ss_item_sk = i_item_sk
- group by i_item_id,i_item_desc,i_current_price
- order by i_item_id
- limit 100;
+with customer_total_return as
+(select sr_customer_sk as ctr_customer_sk
+,sr_store_sk as ctr_store_sk
+,sum(SR_REFUNDED_CASH) as ctr_total_return
+from store_returns
+,date_dim
+where sr_returned_date_sk = d_date_sk
+and d_year =2000
+group by sr_customer_sk
+,sr_store_sk)
+ select  c_customer_id
+from customer_total_return ctr1
+,store
+,customer
+where ctr1.ctr_total_return > (select avg(ctr_total_return)*1.2
+from customer_total_return ctr2
+where ctr1.ctr_store_sk = ctr2.ctr_store_sk)
+and s_store_sk = ctr1.ctr_store_sk
+and s_state = 'TN'
+and ctr1.ctr_customer_sk = c_customer_sk
+order by c_customer_id
+limit 100

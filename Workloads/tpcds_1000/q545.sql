@@ -1,22 +1,20 @@
-with ssci as (
-select ss_customer_sk customer_sk
-      ,ss_item_sk item_sk
-from store_sales,date_dim
-where ss_sold_date_sk = d_date_sk
-  and d_month_seq between 1210 and 1210 + 11
-group by ss_customer_sk
-        ,ss_item_sk),
-csci as(
- select cs_bill_customer_sk customer_sk
-      ,cs_item_sk item_sk
-from catalog_sales,date_dim
-where cs_sold_date_sk = d_date_sk
-  and d_month_seq between 1210 and 1210 + 11
-group by cs_bill_customer_sk
-        ,cs_item_sk)
- select  sum(case when ssci.customer_sk is not null and csci.customer_sk is null then 1 else 0 end) store_only
-      ,sum(case when ssci.customer_sk is null and csci.customer_sk is not null then 1 else 0 end) catalog_only
-      ,sum(case when ssci.customer_sk is not null and csci.customer_sk is not null then 1 else 0 end) store_and_catalog
-from ssci full outer join csci on (ssci.customer_sk=csci.customer_sk
-                               and ssci.item_sk = csci.item_sk)
-limit 100;
+select  i_item_id,
+        s_state, grouping(s_state) g_state,
+        avg(ss_quantity) agg1,
+        avg(ss_list_price) agg2,
+        avg(ss_coupon_amt) agg3,
+        avg(ss_sales_price) agg4
+ from store_sales, customer_demographics, date_dim, store, item
+ where ss_sold_date_sk = d_date_sk and
+       ss_item_sk = i_item_sk and
+       ss_store_sk = s_store_sk and
+       ss_cdemo_sk = cd_demo_sk and
+       cd_gender = 'M' and
+       cd_marital_status = 'D' and
+       cd_education_status = 'Primary' and
+       d_year = 2001 and
+       s_state in ('TN','TN', 'TN', 'TN', 'TN', 'TN')
+ group by rollup (i_item_id, s_state)
+ order by i_item_id
+         ,s_state
+ limit 100

@@ -1,41 +1,53 @@
-with wss as 
- (select d_week_seq,
-        ss_store_sk,
-        sum(case when (d_day_name='Sunday') then ss_sales_price else null end) sun_sales,
-        sum(case when (d_day_name='Monday') then ss_sales_price else null end) mon_sales,
-        sum(case when (d_day_name='Tuesday') then ss_sales_price else  null end) tue_sales,
-        sum(case when (d_day_name='Wednesday') then ss_sales_price else null end) wed_sales,
-        sum(case when (d_day_name='Thursday') then ss_sales_price else null end) thu_sales,
-        sum(case when (d_day_name='Friday') then ss_sales_price else null end) fri_sales,
-        sum(case when (d_day_name='Saturday') then ss_sales_price else null end) sat_sales
- from store_sales,date_dim
- where d_date_sk = ss_sold_date_sk
- group by d_week_seq,ss_store_sk
+with my_customers as (
+ select distinct c_customer_sk
+        , c_current_addr_sk
+ from   
+        ( select cs_sold_date_sk sold_date_sk,
+                 cs_bill_customer_sk customer_sk,
+                 cs_item_sk item_sk
+          from   catalog_sales
+          union all
+          select ws_sold_date_sk sold_date_sk,
+                 ws_bill_customer_sk customer_sk,
+                 ws_item_sk item_sk
+          from   web_sales
+         ) cs_or_ws_sales,
+         item,
+         date_dim,
+         customer
+ where   sold_date_sk = d_date_sk
+         and item_sk = i_item_sk
+         and i_category = 'Music'
+         and i_class = 'rock'
+         and c_customer_sk = cs_or_ws_sales.customer_sk
+         and d_moy = 1
+         and d_year = 1999
  )
-  select  s_store_name1,s_store_id1,d_week_seq1
-       ,sun_sales1/sun_sales2,mon_sales1/mon_sales2
-       ,tue_sales1/tue_sales2,wed_sales1/wed_sales2,thu_sales1/thu_sales2
-       ,fri_sales1/fri_sales2,sat_sales1/sat_sales2
- from
- (select s_store_name s_store_name1,wss.d_week_seq d_week_seq1
-        ,s_store_id s_store_id1,sun_sales sun_sales1
-        ,mon_sales mon_sales1,tue_sales tue_sales1
-        ,wed_sales wed_sales1,thu_sales thu_sales1
-        ,fri_sales fri_sales1,sat_sales sat_sales1
-  from wss,store,date_dim d
-  where d.d_week_seq = wss.d_week_seq and
-        ss_store_sk = s_store_sk and 
-        d_month_seq between 1176 and 1176 + 11) y,
- (select s_store_name s_store_name2,wss.d_week_seq d_week_seq2
-        ,s_store_id s_store_id2,sun_sales sun_sales2
-        ,mon_sales mon_sales2,tue_sales tue_sales2
-        ,wed_sales wed_sales2,thu_sales thu_sales2
-        ,fri_sales fri_sales2,sat_sales sat_sales2
-  from wss,store,date_dim d
-  where d.d_week_seq = wss.d_week_seq and
-        ss_store_sk = s_store_sk and 
-        d_month_seq between 1176+ 12 and 1176 + 23) x
- where s_store_id1=s_store_id2
-   and d_week_seq1=d_week_seq2-52
- order by s_store_name1,s_store_id1,d_week_seq1
-limit 100;
+ , my_revenue as (
+ select c_customer_sk,
+        sum(ss_ext_sales_price) as revenue
+ from   my_customers,
+        store_sales,
+        customer_address,
+        store,
+        date_dim
+ where  c_current_addr_sk = ca_address_sk
+        and ca_county = s_county
+        and ca_state = s_state
+        and ss_sold_date_sk = d_date_sk
+        and c_customer_sk = ss_customer_sk
+        and d_month_seq between (select distinct d_month_seq+1
+                                 from   date_dim where d_year = 1999 and d_moy = 1)
+                           and  (select distinct d_month_seq+3
+                                 from   date_dim where d_year = 1999 and d_moy = 1)
+ group by c_customer_sk
+ )
+ , segments as
+ (select cast((revenue/50) as int) as segment
+  from   my_revenue
+ )
+  select  segment, count(*) as num_customers, segment*50 as segment_base
+ from segments
+ group by segment
+ order by segment, num_customers
+ limit 100

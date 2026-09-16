@@ -1,19 +1,23 @@
-select  i_product_name
-             ,i_brand
-             ,i_class
-             ,i_category
-             ,avg(inv_quantity_on_hand) qoh
-       from inventory
-           ,date_dim
-           ,item
-           ,warehouse
-       where inv_date_sk=d_date_sk
-              and inv_item_sk=i_item_sk
-              and inv_warehouse_sk = w_warehouse_sk
-              and d_month_seq between 1203 and 1203 + 11
-       group by rollup(i_product_name
-                       ,i_brand
-                       ,i_class
-                       ,i_category)
-order by qoh, i_product_name, i_brand, i_class, i_category
-limit 100;
+select  a.ca_state state, count(*) cnt
+ from customer_address a
+     ,customer c
+     ,store_sales s
+     ,date_dim d
+     ,item i
+ where       a.ca_address_sk = c.c_current_addr_sk
+ 	and c.c_customer_sk = s.ss_customer_sk
+ 	and s.ss_sold_date_sk = d.d_date_sk
+ 	and s.ss_item_sk = i.i_item_sk
+ 	and d.d_month_seq = 
+ 	     (select distinct (d_month_seq)
+ 	      from date_dim
+               where d_year = 2001
+ 	        and d_moy = 7 )
+ 	and i.i_current_price > 1.2 * 
+             (select avg(j.i_current_price) 
+ 	     from item j 
+ 	     where j.i_category = i.i_category)
+ group by a.ca_state
+ having count(*) >= 10
+ order by cnt 
+ limit 100

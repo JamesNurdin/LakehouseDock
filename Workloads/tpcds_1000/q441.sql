@@ -1,19 +1,18 @@
-select  dt.d_year
- 	,item.i_brand_id brand_id
- 	,item.i_brand brand
- 	,sum(ss_ext_sales_price) ext_price
- from date_dim dt
-     ,store_sales
-     ,item
- where dt.d_date_sk = store_sales.ss_sold_date_sk
-    and store_sales.ss_item_sk = item.i_item_sk
-    and item.i_manager_id = 1
-    and dt.d_moy=11
-    and dt.d_year=2002
- group by dt.d_year
- 	,item.i_brand
- 	,item.i_brand_id
- order by dt.d_year
- 	,ext_price desc
- 	,brand_id
-limit 100 ;
+select  i_item_id, 
+        avg(cs_quantity) agg1,
+        avg(cs_list_price) agg2,
+        avg(cs_coupon_amt) agg3,
+        avg(cs_sales_price) agg4 
+ from catalog_sales, customer_demographics, date_dim, item, promotion
+ where cs_sold_date_sk = d_date_sk and
+       cs_item_sk = i_item_sk and
+       cs_bill_cdemo_sk = cd_demo_sk and
+       cs_promo_sk = p_promo_sk and
+       cd_gender = 'M' and 
+       cd_marital_status = 'U' and
+       cd_education_status = 'Advanced Degree' and
+       (p_channel_email = 'N' or p_channel_event = 'N') and
+       d_year = 1999 
+ group by i_item_id
+ order by i_item_id
+ limit 100

@@ -1,17 +1,47 @@
-select  ca_zip
-       ,sum(cs_sales_price)
- from catalog_sales
-     ,customer
-     ,customer_address
-     ,date_dim
- where cs_bill_customer_sk = c_customer_sk
- 	and c_current_addr_sk = ca_address_sk 
- 	and ( substr(ca_zip,1,5) in ('85669', '86197','88274','83405','86475',
-                                   '85392', '85460', '80348', '81792')
- 	      or ca_state in ('CA','WA','GA')
- 	      or cs_sales_price > 500)
- 	and cs_sold_date_sk = d_date_sk
- 	and d_qoy = 2 and d_year = 2001
- group by ca_zip
- order by ca_zip
- limit 100;
+with ssales as
+(select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,ca_state
+      ,s_state
+      ,i_color
+      ,i_current_price
+      ,i_manager_id
+      ,i_units
+      ,i_size
+      ,sum(ss_sales_price) netpaid
+from store_sales
+    ,store_returns
+    ,store
+    ,item
+    ,customer
+    ,customer_address
+where ss_ticket_number = sr_ticket_number
+  and ss_item_sk = sr_item_sk
+  and ss_customer_sk = c_customer_sk
+  and ss_item_sk = i_item_sk
+  and ss_store_sk = s_store_sk
+  and c_birth_country = upper(ca_country)
+  and s_zip = ca_zip
+and s_market_id=5
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+        ,ca_state
+        ,s_state
+        ,i_color
+        ,i_current_price
+        ,i_manager_id
+        ,i_units
+        ,i_size)
+select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,sum(netpaid) paid
+from ssales
+where i_color = 'linen'
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+having sum(netpaid) > (select 0.05*avg(netpaid)
+                                 from ssales)

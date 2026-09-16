@@ -1,195 +1,105 @@
-with  cross_items as
- (select i_item_sk ss_item_sk
- from item,
- (select iss.i_brand_id brand_id
-     ,iss.i_class_id class_id
-     ,iss.i_category_id category_id
+select  s_store_name
+      ,sum(ss_net_profit)
  from store_sales
-     ,item iss
-     ,date_dim d1
- where ss_item_sk = iss.i_item_sk
-   and ss_sold_date_sk = d1.d_date_sk
-   and d1.d_year between 1999 AND 1999 + 2
- intersect 
- select ics.i_brand_id
-     ,ics.i_class_id
-     ,ics.i_category_id
- from catalog_sales
-     ,item ics
-     ,date_dim d2
- where cs_item_sk = ics.i_item_sk
-   and cs_sold_date_sk = d2.d_date_sk
-   and d2.d_year between 1999 AND 1999 + 2
- intersect
- select iws.i_brand_id
-     ,iws.i_class_id
-     ,iws.i_category_id
- from web_sales
-     ,item iws
-     ,date_dim d3
- where ws_item_sk = iws.i_item_sk
-   and ws_sold_date_sk = d3.d_date_sk
-   and d3.d_year between 1999 AND 1999 + 2) x
- where i_brand_id = brand_id
-      and i_class_id = class_id
-      and i_category_id = category_id
-),
- avg_sales as
- (select avg(quantity*list_price) average_sales
-  from (select ss_quantity quantity
-             ,ss_list_price list_price
-       from store_sales
-           ,date_dim
-       where ss_sold_date_sk = d_date_sk
-         and d_year between 1999 and 2001 
-       union all 
-       select cs_quantity quantity 
-             ,cs_list_price list_price
-       from catalog_sales
-           ,date_dim
-       where cs_sold_date_sk = d_date_sk
-         and d_year between 1999 and 1999 + 2 
-       union all
-       select ws_quantity quantity
-             ,ws_list_price list_price
-       from web_sales
-           ,date_dim
-       where ws_sold_date_sk = d_date_sk
-         and d_year between 1999 and 1999 + 2) x)
-  select  channel, i_brand_id,i_class_id,i_category_id,sum(sales), sum(number_sales)
- from(
-       select 'store' channel, i_brand_id,i_class_id
-             ,i_category_id,sum(ss_quantity*ss_list_price) sales
-             , count(*) number_sales
-       from store_sales
-           ,item
-           ,date_dim
-       where ss_item_sk in (select ss_item_sk from cross_items)
-         and ss_item_sk = i_item_sk
-         and ss_sold_date_sk = d_date_sk
-         and d_year = 1999+2 
-         and d_moy = 11
-       group by i_brand_id,i_class_id,i_category_id
-       having sum(ss_quantity*ss_list_price) > (select average_sales from avg_sales)
-       union all
-       select 'catalog' channel, i_brand_id,i_class_id,i_category_id, sum(cs_quantity*cs_list_price) sales, count(*) number_sales
-       from catalog_sales
-           ,item
-           ,date_dim
-       where cs_item_sk in (select ss_item_sk from cross_items)
-         and cs_item_sk = i_item_sk
-         and cs_sold_date_sk = d_date_sk
-         and d_year = 1999+2 
-         and d_moy = 11
-       group by i_brand_id,i_class_id,i_category_id
-       having sum(cs_quantity*cs_list_price) > (select average_sales from avg_sales)
-       union all
-       select 'web' channel, i_brand_id,i_class_id,i_category_id, sum(ws_quantity*ws_list_price) sales , count(*) number_sales
-       from web_sales
-           ,item
-           ,date_dim
-       where ws_item_sk in (select ss_item_sk from cross_items)
-         and ws_item_sk = i_item_sk
-         and ws_sold_date_sk = d_date_sk
-         and d_year = 1999+2
-         and d_moy = 11
-       group by i_brand_id,i_class_id,i_category_id
-       having sum(ws_quantity*ws_list_price) > (select average_sales from avg_sales)
- ) y
- group by rollup (channel, i_brand_id,i_class_id,i_category_id)
- order by channel,i_brand_id,i_class_id,i_category_id
- limit 100;
-with  cross_items as
- (select i_item_sk ss_item_sk
- from item,
- (select iss.i_brand_id brand_id
-     ,iss.i_class_id class_id
-     ,iss.i_category_id category_id
- from store_sales
-     ,item iss
-     ,date_dim d1
- where ss_item_sk = iss.i_item_sk
-   and ss_sold_date_sk = d1.d_date_sk
-   and d1.d_year between 1999 AND 1999 + 2
- intersect
- select ics.i_brand_id
-     ,ics.i_class_id
-     ,ics.i_category_id
- from catalog_sales
-     ,item ics
-     ,date_dim d2
- where cs_item_sk = ics.i_item_sk
-   and cs_sold_date_sk = d2.d_date_sk
-   and d2.d_year between 1999 AND 1999 + 2
- intersect
- select iws.i_brand_id
-     ,iws.i_class_id
-     ,iws.i_category_id
- from web_sales
-     ,item iws
-     ,date_dim d3
- where ws_item_sk = iws.i_item_sk
-   and ws_sold_date_sk = d3.d_date_sk
-   and d3.d_year between 1999 AND 1999 + 2) x
- where i_brand_id = brand_id
-      and i_class_id = class_id
-      and i_category_id = category_id
-),
- avg_sales as
-(select avg(quantity*list_price) average_sales
-  from (select ss_quantity quantity
-             ,ss_list_price list_price
-       from store_sales
-           ,date_dim
-       where ss_sold_date_sk = d_date_sk
-         and d_year between 1999 and 1999 + 2
-       union all
-       select cs_quantity quantity
-             ,cs_list_price list_price
-       from catalog_sales
-           ,date_dim
-       where cs_sold_date_sk = d_date_sk
-         and d_year between 1999 and 1999 + 2
-       union all
-       select ws_quantity quantity
-             ,ws_list_price list_price
-       from web_sales
-           ,date_dim
-       where ws_sold_date_sk = d_date_sk
-         and d_year between 1999 and 1999 + 2) x)
-  select  * from
- (select 'store' channel, i_brand_id,i_class_id,i_category_id
-        ,sum(ss_quantity*ss_list_price) sales, count(*) number_sales
- from store_sales 
-     ,item
      ,date_dim
- where ss_item_sk in (select ss_item_sk from cross_items)
-   and ss_item_sk = i_item_sk
-   and ss_sold_date_sk = d_date_sk
-   and d_week_seq = (select d_week_seq
-                     from date_dim
-                     where d_year = 1999 + 1
-                       and d_moy = 12
-                       and d_dom = 4)
- group by i_brand_id,i_class_id,i_category_id
- having sum(ss_quantity*ss_list_price) > (select average_sales from avg_sales)) this_year,
- (select 'store' channel, i_brand_id,i_class_id
-        ,i_category_id, sum(ss_quantity*ss_list_price) sales, count(*) number_sales
- from store_sales
-     ,item
-     ,date_dim
- where ss_item_sk in (select ss_item_sk from cross_items)
-   and ss_item_sk = i_item_sk
-   and ss_sold_date_sk = d_date_sk
-   and d_week_seq = (select d_week_seq
-                     from date_dim
-                     where d_year = 1999
-                       and d_moy = 12
-                       and d_dom = 4)
- group by i_brand_id,i_class_id,i_category_id
- having sum(ss_quantity*ss_list_price) > (select average_sales from avg_sales)) last_year
- where this_year.i_brand_id= last_year.i_brand_id
-   and this_year.i_class_id = last_year.i_class_id
-   and this_year.i_category_id = last_year.i_category_id
- order by this_year.channel, this_year.i_brand_id, this_year.i_class_id, this_year.i_category_id
- limit 100;
+     ,store,
+     (select ca_zip
+     from (
+     (SELECT substr(ca_zip,1,5) ca_zip
+      FROM customer_address
+      WHERE substr(ca_zip,1,5) IN (
+                          '41932','51069','38494','51389','70234','29781',
+                          '64583','98210','37107','10677','60400',
+                          '85447','72526','35407','32819','64058',
+                          '40721','19228','23749','99851','47523',
+                          '63086','27885','79943','35037','93323',
+                          '83681','66120','49939','88371','71753',
+                          '33906','47894','39880','83996','22366',
+                          '95220','32749','36085','62902','34687',
+                          '57657','45561','35981','13526','65562',
+                          '73279','47688','50135','48159','61736',
+                          '96130','76523','58194','58688','91122',
+                          '67636','25756','33513','26954','70911',
+                          '18574','13098','95249','34782','78722',
+                          '85296','15086','59161','86168','80251',
+                          '28969','50861','25059','79802','59505',
+                          '30230','50702','55998','75429','16120',
+                          '11350','21186','87695','48515','65543',
+                          '38749','24967','21749','94282','43885',
+                          '95703','48227','73649','45846','81719',
+                          '54285','94106','88236','55467','16976',
+                          '59661','35446','87942','32799','32927',
+                          '35376','31068','64401','37736','93164',
+                          '79481','30968','89198','95063','35448',
+                          '55477','27111','64632','21207','18822',
+                          '49219','15610','22322','66053','68515',
+                          '33155','27604','22632','28443','85067',
+                          '73335','53833','65331','91178','36852',
+                          '74483','77568','66977','97133','30527',
+                          '57946','28368','89153','14941','94720',
+                          '28537','51769','57793','13815','33845',
+                          '58961','69941','28837','68397','91139',
+                          '87584','35479','90073','71329','66134',
+                          '49680','26606','44116','51351','51272',
+                          '81741','32222','30728','40502','66833',
+                          '83490','57340','92957','22830','54203',
+                          '44691','52660','96209','82808','78306',
+                          '98705','62010','17340','93214','64956',
+                          '56893','27055','96075','90132','61237',
+                          '93435','45838','16335','48631','27607',
+                          '88908','20220','27197','53182','90747',
+                          '20062','82953','28456','50762','79517',
+                          '25931','57486','16507','52176','86824',
+                          '42151','87454','38102','81757','87990',
+                          '12851','87733','26535','35139','10744',
+                          '33470','18426','21420','33095','75809',
+                          '27877','83914','31343','49352','45648',
+                          '86005','29283','48946','18522','67563',
+                          '56287','31606','98088','28206','26552',
+                          '66164','37155','24913','77104','29099',
+                          '42123','48426','51537','37778','30096',
+                          '68982','12931','84606','57124','73313',
+                          '91823','17956','83000','23282','10844',
+                          '88292','29183','87294','39421','66767',
+                          '24227','48151','13849','70582','69081',
+                          '55485','21713','20883','19212','72494',
+                          '41070','73281','49224','48077','38280',
+                          '74218','92795','64226','53704','80319',
+                          '35287','97233','71047','45985','62008',
+                          '19928','70680','86795','21504','97766',
+                          '83183','58031','27765','29558','10029',
+                          '16090','16812','62435','11515','97523',
+                          '47449','97149','82569','95958','34831',
+                          '53891','70035','69162','37633','32956',
+                          '51402','49796','23117','15392','65363',
+                          '84217','86573','30865','63797','15668',
+                          '97465','43037','59771','30196','30795',
+                          '34838','81092','13327','73548','60231',
+                          '85570','43352','85710','54106','64042',
+                          '85555','18776','54942','94367','49910',
+                          '82957','30585','66225','46124','78242',
+                          '39771','87220','81144','92003','36983',
+                          '16139','50876','62311','56975','68079',
+                          '39964','75819','60898','54362','97873',
+                          '11491','22080','38715','99535','25194',
+                          '91765','31404','68520','68108','77285',
+                          '73955','40213','57969','81177','96802',
+                          '32479','31936','26950','18221','67585',
+                          '21704','41354','45115','31750','46018',
+                          '24287','15376','18348','58009','65089',
+                          '76730','59908','68688','69918'))
+     intersect
+     (select ca_zip
+      from (SELECT substr(ca_zip,1,5) ca_zip,count(*) cnt
+            FROM customer_address, customer
+            WHERE ca_address_sk = c_current_addr_sk and
+                  c_preferred_cust_flag='Y'
+            group by ca_zip
+            having count(*) > 10)A1))A2) V1
+ where ss_store_sk = s_store_sk
+  and ss_sold_date_sk = d_date_sk
+  and d_qoy = 2 and d_year = 1999
+  and (substr(s_zip,1,2) = substr(V1.ca_zip,1,2))
+ group by s_store_name
+ order by s_store_name
+ limit 100

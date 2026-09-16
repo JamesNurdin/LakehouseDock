@@ -1,20 +1,18 @@
-select 
-  c_last_name,c_first_name,substr(s_city,1,30),ss_ticket_number,amt,profit
-  from
-   (select ss_ticket_number
-          ,ss_customer_sk
-          ,store.s_city
-          ,sum(ss_coupon_amt) amt
-          ,sum(ss_net_profit) profit
-    from store_sales,date_dim,store,household_demographics
-    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
-    and store_sales.ss_store_sk = store.s_store_sk  
-    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
-    and (household_demographics.hd_dep_count = 4 or household_demographics.hd_vehicle_count > 2)
-    and date_dim.d_dow = 1
-    and date_dim.d_year in (1999,1999+1,1999+2) 
-    and store.s_number_employees between 200 and 295
-    group by ss_ticket_number,ss_customer_sk,ss_addr_sk,store.s_city) ms,customer
-    where ss_customer_sk = c_customer_sk
- order by c_last_name,c_first_name,substr(s_city,1,30), profit
-limit 100;
+select  c_customer_id as customer_id
+       ,c_last_name || ', ' || c_first_name as customername
+ from customer
+     ,customer_address
+     ,customer_demographics
+     ,household_demographics
+     ,income_band
+     ,store_returns
+ where ca_city	        =  'Liberty'
+   and c_current_addr_sk = ca_address_sk
+   and ib_lower_bound   >=  11399
+   and ib_upper_bound   <=  11399 + 50000
+   and ib_income_band_sk = hd_income_band_sk
+   and cd_demo_sk = c_current_cdemo_sk
+   and hd_demo_sk = c_current_hdemo_sk
+   and sr_cdemo_sk = cd_demo_sk
+ order by c_customer_id
+ limit 100

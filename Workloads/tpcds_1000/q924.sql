@@ -1,26 +1,13 @@
-select  i_item_desc 
-       ,i_category 
-       ,i_class 
-       ,i_current_price
-       ,sum(cs_ext_sales_price) as itemrevenue 
-       ,sum(cs_ext_sales_price)*100/sum(sum(cs_ext_sales_price)) over
-           (partition by i_class) as revenueratio
- from	catalog_sales
-     ,item 
-     ,date_dim
- where cs_item_sk = i_item_sk 
-   and i_category in ('Books', 'Home', 'Men')
-   and cs_sold_date_sk = d_date_sk
- and d_date between cast('2000-05-07' as date) 
- 				and (cast('2000-05-07' as date) + 30 days)
- group by i_item_id
-         ,i_item_desc 
-         ,i_category
-         ,i_class
-         ,i_current_price
- order by i_category
-         ,i_class
-         ,i_item_id
-         ,i_item_desc
-         ,revenueratio
-limit 100;
+select  count(*) 
+from store_sales
+    ,household_demographics 
+    ,time_dim, store
+where ss_sold_time_sk = time_dim.t_time_sk   
+    and ss_hdemo_sk = household_demographics.hd_demo_sk 
+    and ss_store_sk = s_store_sk
+    and time_dim.t_hour = 15
+    and time_dim.t_minute >= 30
+    and household_demographics.hd_dep_count = 8
+    and store.s_store_name = 'ese'
+order by count(*)
+limit 100

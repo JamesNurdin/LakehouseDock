@@ -1,26 +1,22 @@
-select  i_item_desc 
-       ,i_category 
-       ,i_class 
-       ,i_current_price
-       ,sum(cs_ext_sales_price) as itemrevenue 
-       ,sum(cs_ext_sales_price)*100/sum(sum(cs_ext_sales_price)) over
-           (partition by i_class) as revenueratio
- from	catalog_sales
-     ,item 
-     ,date_dim
- where cs_item_sk = i_item_sk 
-   and i_category in ('Home', 'Music', 'Electronics')
-   and cs_sold_date_sk = d_date_sk
- and d_date between cast('1998-04-27' as date) 
- 				and (cast('1998-04-27' as date) + 30 days)
- group by i_item_id
-         ,i_item_desc 
-         ,i_category
-         ,i_class
-         ,i_current_price
- order by i_category
-         ,i_class
-         ,i_item_id
-         ,i_item_desc
-         ,revenueratio
-limit 100;
+with ssci as (
+select ss_customer_sk customer_sk
+      ,ss_item_sk item_sk
+from store_sales,date_dim
+where ss_sold_date_sk = d_date_sk
+  and d_month_seq between 1223 and 1223 + 11
+group by ss_customer_sk
+        ,ss_item_sk),
+csci as(
+ select cs_bill_customer_sk customer_sk
+      ,cs_item_sk item_sk
+from catalog_sales,date_dim
+where cs_sold_date_sk = d_date_sk
+  and d_month_seq between 1223 and 1223 + 11
+group by cs_bill_customer_sk
+        ,cs_item_sk)
+ select  sum(case when ssci.customer_sk is not null and csci.customer_sk is null then 1 else 0 end) store_only
+      ,sum(case when ssci.customer_sk is null and csci.customer_sk is not null then 1 else 0 end) catalog_only
+      ,sum(case when ssci.customer_sk is not null and csci.customer_sk is not null then 1 else 0 end) store_and_catalog
+from ssci full outer join csci on (ssci.customer_sk=csci.customer_sk
+                               and ssci.item_sk = csci.item_sk)
+limit 100

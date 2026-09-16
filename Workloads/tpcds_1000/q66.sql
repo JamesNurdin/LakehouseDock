@@ -1,91 +1,32 @@
-select  *
+select  
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,web_name
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk <= 30 ) then 1 else 0 end)  as "30 days" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 30) and 
+                 (ws_ship_date_sk - ws_sold_date_sk <= 60) then 1 else 0 end )  as "31- INTERVAL '60' DAY" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 60) and 
+                 (ws_ship_date_sk - ws_sold_date_sk <= 90) then 1 else 0 end)  as "61- INTERVAL '90' DAY" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 90) and
+                 (ws_ship_date_sk - ws_sold_date_sk <= 120) then 1 else 0 end)  as "91- INTERVAL '120' DAY" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk  > 120) then 1 else 0 end)  as ">120 days" 
 from
- (select count(*) h8_30_to_9
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk   
-     and ss_hdemo_sk = household_demographics.hd_demo_sk 
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 8
-     and time_dim.t_minute >= 30
-     and ((household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2) or
-          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2)) 
-     and store.s_store_name = 'ese') s1,
- (select count(*) h9_to_9_30 
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk 
-     and time_dim.t_hour = 9 
-     and time_dim.t_minute < 30
-     and ((household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2) or
-          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s2,
- (select count(*) h9_30_to_10 
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 9
-     and time_dim.t_minute >= 30
-     and ((household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2) or
-          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s3,
- (select count(*) h10_to_10_30
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 10 
-     and time_dim.t_minute < 30
-     and ((household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2) or
-          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s4,
- (select count(*) h10_30_to_11
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 10 
-     and time_dim.t_minute >= 30
-     and ((household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2) or
-          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s5,
- (select count(*) h11_to_11_30
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk 
-     and time_dim.t_hour = 11
-     and time_dim.t_minute < 30
-     and ((household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2) or
-          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s6,
- (select count(*) h11_30_to_12
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 11
-     and time_dim.t_minute >= 30
-     and ((household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2) or
-          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s7,
- (select count(*) h12_to_12_30
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 12
-     and time_dim.t_minute < 30
-     and ((household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2) or
-          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s8
-;
+   web_sales
+  ,warehouse
+  ,ship_mode
+  ,web_site
+  ,date_dim
+where
+    d_month_seq between 1207 and 1207 + 11
+and ws_ship_date_sk   = d_date_sk
+and ws_warehouse_sk   = w_warehouse_sk
+and ws_ship_mode_sk   = sm_ship_mode_sk
+and ws_web_site_sk    = web_site_sk
+group by
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,web_name
+order by substr(w_warehouse_name,1,20)
+        ,sm_type
+       ,web_name
+limit 100

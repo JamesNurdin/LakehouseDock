@@ -1,26 +1,30 @@
-select  * 
-from (select i_manager_id
-             ,sum(ss_sales_price) sum_sales
-             ,avg(sum(ss_sales_price)) over (partition by i_manager_id) avg_monthly_sales
-      from item
-          ,store_sales
-          ,date_dim
-          ,store
-      where ss_item_sk = i_item_sk
-        and ss_sold_date_sk = d_date_sk
-        and ss_store_sk = s_store_sk
-        and d_month_seq in (1187,1187+1,1187+2,1187+3,1187+4,1187+5,1187+6,1187+7,1187+8,1187+9,1187+10,1187+11)
-        and ((    i_category in ('Books','Children','Electronics')
-              and i_class in ('personal','portable','refernece','self-help')
-              and i_brand in ('scholaramalgamalg #14','scholaramalgamalg #7',
-		                  'exportiunivamalg #9','scholaramalgamalg #9'))
-           or(    i_category in ('Women','Music','Men')
-              and i_class in ('accessories','classical','fragrances','pants')
-              and i_brand in ('amalgimporto #1','edu packscholar #1','exportiimporto #1',
-		                 'importoamalg #1')))
-group by i_manager_id, d_moy) tmp1
-where case when avg_monthly_sales > 0 then abs (sum_sales - avg_monthly_sales) / avg_monthly_sales else null end > 0.1
-order by i_manager_id
-        ,avg_monthly_sales
-        ,sum_sales
-limit 100;
+select  i_item_desc 
+      ,i_category 
+      ,i_class 
+      ,i_current_price
+      ,sum(ws_ext_sales_price) as itemrevenue 
+      ,sum(ws_ext_sales_price)*100/sum(sum(ws_ext_sales_price)) over
+          (partition by i_class) as revenueratio
+from	
+	web_sales
+    	,item 
+    	,date_dim
+where 
+	ws_item_sk = i_item_sk 
+  	and i_category in ('Electronics', 'Home', 'Children')
+  	and ws_sold_date_sk = d_date_sk
+	and d_date between cast('1998-03-04' as date) 
+				and (cast('1998-03-04' as date) + INTERVAL '30' DAY)
+group by 
+	i_item_id
+        ,i_item_desc 
+        ,i_category
+        ,i_class
+        ,i_current_price
+order by 
+	i_category
+        ,i_class
+        ,i_item_id
+        ,i_item_desc
+        ,revenueratio
+limit 100

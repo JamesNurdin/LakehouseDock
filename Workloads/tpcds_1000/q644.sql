@@ -1,41 +1,47 @@
-select  promotions,total,cast(promotions as decimal(15,4))/cast(total as decimal(15,4))*100
-from
-  (select sum(ss_ext_sales_price) promotions
-   from  store_sales
-        ,store
-        ,promotion
-        ,date_dim
-        ,customer
-        ,customer_address 
-        ,item
-   where ss_sold_date_sk = d_date_sk
-   and   ss_store_sk = s_store_sk
-   and   ss_promo_sk = p_promo_sk
-   and   ss_customer_sk= c_customer_sk
-   and   ca_address_sk = c_current_addr_sk
-   and   ss_item_sk = i_item_sk 
-   and   ca_gmt_offset = -6
-   and   i_category = 'Books'
-   and   (p_channel_dmail = 'Y' or p_channel_email = 'Y' or p_channel_tv = 'Y')
-   and   s_gmt_offset = -6
-   and   d_year = 2001
-   and   d_moy  = 11) promotional_sales,
-  (select sum(ss_ext_sales_price) total
-   from  store_sales
-        ,store
-        ,date_dim
-        ,customer
-        ,customer_address
-        ,item
-   where ss_sold_date_sk = d_date_sk
-   and   ss_store_sk = s_store_sk
-   and   ss_customer_sk= c_customer_sk
-   and   ca_address_sk = c_current_addr_sk
-   and   ss_item_sk = i_item_sk
-   and   ca_gmt_offset = -6
-   and   i_category = 'Books'
-   and   s_gmt_offset = -6
-   and   d_year = 2001
-   and   d_moy  = 11) all_sales
-order by promotions, total
-limit 100;
+with ssales as
+(select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,ca_state
+      ,s_state
+      ,i_color
+      ,i_current_price
+      ,i_manager_id
+      ,i_units
+      ,i_size
+      ,sum(ss_net_paid_inc_tax) netpaid
+from store_sales
+    ,store_returns
+    ,store
+    ,item
+    ,customer
+    ,customer_address
+where ss_ticket_number = sr_ticket_number
+  and ss_item_sk = sr_item_sk
+  and ss_customer_sk = c_customer_sk
+  and ss_item_sk = i_item_sk
+  and ss_store_sk = s_store_sk
+  and c_birth_country = upper(ca_country)
+  and s_zip = ca_zip
+and s_market_id=5
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+        ,ca_state
+        ,s_state
+        ,i_color
+        ,i_current_price
+        ,i_manager_id
+        ,i_units
+        ,i_size)
+select c_last_name
+      ,c_first_name
+      ,s_store_name
+      ,sum(netpaid) paid
+from ssales
+where i_color = 'maroon'
+group by c_last_name
+        ,c_first_name
+        ,s_store_name
+having sum(netpaid) > (select 0.05*avg(netpaid)
+                                 from ssales)

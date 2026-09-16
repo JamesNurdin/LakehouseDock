@@ -1,49 +1,45 @@
-select  distinct(i_product_name)
- from item i1
- where i_manufact_id between 762 and 762+40 
-   and (select count(*) as item_cnt
-        from item
-        where (i_manufact = i1.i_manufact and
-        ((i_category = 'Women' and 
-        (i_color = 'tomato' or i_color = 'hot') and 
-        (i_units = 'Oz' or i_units = 'Gross') and
-        (i_size = 'medium' or i_size = 'small')
-        ) or
-        (i_category = 'Women' and
-        (i_color = 'black' or i_color = 'medium') and
-        (i_units = 'Unknown' or i_units = 'Pound') and
-        (i_size = 'petite' or i_size = 'extra large')
-        ) or
-        (i_category = 'Men' and
-        (i_color = 'peach' or i_color = 'khaki') and
-        (i_units = 'Ton' or i_units = 'Cup') and
-        (i_size = 'large' or i_size = 'economy')
-        ) or
-        (i_category = 'Men' and
-        (i_color = 'floral' or i_color = 'rose') and
-        (i_units = 'Dozen' or i_units = 'Tsp') and
-        (i_size = 'medium' or i_size = 'small')
-        ))) or
-       (i_manufact = i1.i_manufact and
-        ((i_category = 'Women' and 
-        (i_color = 'sky' or i_color = 'misty') and 
-        (i_units = 'Gram' or i_units = 'Case') and
-        (i_size = 'medium' or i_size = 'small')
-        ) or
-        (i_category = 'Women' and
-        (i_color = 'smoke' or i_color = 'plum') and
-        (i_units = 'Each' or i_units = 'Box') and
-        (i_size = 'petite' or i_size = 'extra large')
-        ) or
-        (i_category = 'Men' and
-        (i_color = 'puff' or i_color = 'brown') and
-        (i_units = 'Dram' or i_units = 'Tbl') and
-        (i_size = 'large' or i_size = 'economy')
-        ) or
-        (i_category = 'Men' and
-        (i_color = 'chiffon' or i_color = 'ghost') and
-        (i_units = 'Carton' or i_units = 'N/A') and
-        (i_size = 'medium' or i_size = 'small')
-        )))) > 0
- order by i_product_name
- limit 100;
+select  
+ i_item_id
+ ,i_item_desc
+ ,s_store_id
+ ,s_store_name
+ ,avg(ss_net_profit) as store_sales_profit
+ ,avg(sr_net_loss) as store_returns_loss
+ ,avg(cs_net_profit) as catalog_sales_profit
+ from
+ store_sales
+ ,store_returns
+ ,catalog_sales
+ ,date_dim d1
+ ,date_dim d2
+ ,date_dim d3
+ ,store
+ ,item
+ where
+ d1.d_moy = 4
+ and d1.d_year = 2001
+ and d1.d_date_sk = ss_sold_date_sk
+ and i_item_sk = ss_item_sk
+ and s_store_sk = ss_store_sk
+ and ss_customer_sk = sr_customer_sk
+ and ss_item_sk = sr_item_sk
+ and ss_ticket_number = sr_ticket_number
+ and sr_returned_date_sk = d2.d_date_sk
+ and d2.d_moy               between 4 and  10
+ and d2.d_year              = 2001
+ and sr_customer_sk = cs_bill_customer_sk
+ and sr_item_sk = cs_item_sk
+ and cs_sold_date_sk = d3.d_date_sk
+ and d3.d_moy               between 4 and  10 
+ and d3.d_year              = 2001
+ group by
+ i_item_id
+ ,i_item_desc
+ ,s_store_id
+ ,s_store_name
+ order by
+ i_item_id
+ ,i_item_desc
+ ,s_store_id
+ ,s_store_name
+ limit 100

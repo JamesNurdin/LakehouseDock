@@ -1,26 +1,45 @@
-select  * 
-from (select i_manager_id
-             ,sum(ss_sales_price) sum_sales
-             ,avg(sum(ss_sales_price)) over (partition by i_manager_id) avg_monthly_sales
-      from item
-          ,store_sales
-          ,date_dim
-          ,store
-      where ss_item_sk = i_item_sk
-        and ss_sold_date_sk = d_date_sk
-        and ss_store_sk = s_store_sk
-        and d_month_seq in (1215,1215+1,1215+2,1215+3,1215+4,1215+5,1215+6,1215+7,1215+8,1215+9,1215+10,1215+11)
-        and ((    i_category in ('Books','Children','Electronics')
-              and i_class in ('personal','portable','refernece','self-help')
-              and i_brand in ('scholaramalgamalg #14','scholaramalgamalg #7',
-		                  'exportiunivamalg #9','scholaramalgamalg #9'))
-           or(    i_category in ('Women','Music','Men')
-              and i_class in ('accessories','classical','fragrances','pants')
-              and i_brand in ('amalgimporto #1','edu packscholar #1','exportiimporto #1',
-		                 'importoamalg #1')))
-group by i_manager_id, d_moy) tmp1
-where case when avg_monthly_sales > 0 then abs (sum_sales - avg_monthly_sales) / avg_monthly_sales else null end > 0.1
-order by i_manager_id
-        ,avg_monthly_sales
-        ,sum_sales
-limit 100;
+select  
+ i_item_id
+ ,i_item_desc
+ ,s_store_id
+ ,s_store_name
+ ,avg(ss_net_profit) as store_sales_profit
+ ,avg(sr_net_loss) as store_returns_loss
+ ,avg(cs_net_profit) as catalog_sales_profit
+ from
+ store_sales
+ ,store_returns
+ ,catalog_sales
+ ,date_dim d1
+ ,date_dim d2
+ ,date_dim d3
+ ,store
+ ,item
+ where
+ d1.d_moy = 4
+ and d1.d_year = 2001
+ and d1.d_date_sk = ss_sold_date_sk
+ and i_item_sk = ss_item_sk
+ and s_store_sk = ss_store_sk
+ and ss_customer_sk = sr_customer_sk
+ and ss_item_sk = sr_item_sk
+ and ss_ticket_number = sr_ticket_number
+ and sr_returned_date_sk = d2.d_date_sk
+ and d2.d_moy               between 4 and  10
+ and d2.d_year              = 2001
+ and sr_customer_sk = cs_bill_customer_sk
+ and sr_item_sk = cs_item_sk
+ and cs_sold_date_sk = d3.d_date_sk
+ and d3.d_moy               between 4 and  10 
+ and d3.d_year              = 2001
+ group by
+ i_item_id
+ ,i_item_desc
+ ,s_store_id
+ ,s_store_name
+ order by
+ i_item_id
+ ,i_item_desc
+ ,s_store_id
+ ,s_store_name
+ limit 100

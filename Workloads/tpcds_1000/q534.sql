@@ -1,56 +1,31 @@
-select  
-   s_store_name
-  ,s_company_id
-  ,s_street_number
-  ,s_street_name
-  ,s_street_type
-  ,s_suite_number
-  ,s_city
-  ,s_county
-  ,s_state
-  ,s_zip
-  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk <= 30 ) then 1 else 0 end)  as "30 days" 
-  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk > 30) and 
-                 (sr_returned_date_sk - ss_sold_date_sk <= 60) then 1 else 0 end )  as "31-60 days" 
-  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk > 60) and 
-                 (sr_returned_date_sk - ss_sold_date_sk <= 90) then 1 else 0 end)  as "61-90 days" 
-  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk > 90) and
-                 (sr_returned_date_sk - ss_sold_date_sk <= 120) then 1 else 0 end)  as "91-120 days" 
-  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk  > 120) then 1 else 0 end)  as ">120 days" 
-from
-   store_sales
-  ,store_returns
-  ,store
-  ,date_dim d1
-  ,date_dim d2
-where
-    d2.d_year = 1999
-and d2.d_moy  = 10
-and ss_ticket_number = sr_ticket_number
-and ss_item_sk = sr_item_sk
-and ss_sold_date_sk   = d1.d_date_sk
-and sr_returned_date_sk   = d2.d_date_sk
-and ss_customer_sk = sr_customer_sk
-and ss_store_sk = s_store_sk
-group by
-   s_store_name
-  ,s_company_id
-  ,s_street_number
-  ,s_street_name
-  ,s_street_type
-  ,s_suite_number
-  ,s_city
-  ,s_county
-  ,s_state
-  ,s_zip
-order by s_store_name
-        ,s_company_id
-        ,s_street_number
-        ,s_street_name
-        ,s_street_type
-        ,s_suite_number
-        ,s_city
-        ,s_county
-        ,s_state
-        ,s_zip
-limit 100;
+select  i_item_id,
+        ca_country,
+        ca_state, 
+        ca_county,
+        avg( cast(cs_quantity as decimal(12,2))) agg1,
+        avg( cast(cs_list_price as decimal(12,2))) agg2,
+        avg( cast(cs_coupon_amt as decimal(12,2))) agg3,
+        avg( cast(cs_sales_price as decimal(12,2))) agg4,
+        avg( cast(cs_net_profit as decimal(12,2))) agg5,
+        avg( cast(c_birth_year as decimal(12,2))) agg6,
+        avg( cast(cd1.cd_dep_count as decimal(12,2))) agg7
+ from catalog_sales, customer_demographics cd1, 
+      customer_demographics cd2, customer, customer_address, date_dim, item
+ where cs_sold_date_sk = d_date_sk and
+       cs_item_sk = i_item_sk and
+       cs_bill_cdemo_sk = cd1.cd_demo_sk and
+       cs_bill_customer_sk = c_customer_sk and
+       cd1.cd_gender = 'F' and 
+       cd1.cd_education_status = '4 yr Degree' and
+       c_current_cdemo_sk = cd2.cd_demo_sk and
+       c_current_addr_sk = ca_address_sk and
+       c_birth_month in (5,2,6,1,10,4) and
+       d_year = 2001 and
+       ca_state in ('WA','MI','IN'
+                   ,'WV','NE','TX','IL')
+ group by rollup (i_item_id, ca_country, ca_state, ca_county)
+ order by ca_country,
+        ca_state, 
+        ca_county,
+	i_item_id
+ limit 100

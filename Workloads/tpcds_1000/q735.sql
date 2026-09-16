@@ -1,81 +1,101 @@
-select  substr(r_reason_desc,1,20)
-       ,avg(ws_quantity)
-       ,avg(wr_refunded_cash)
-       ,avg(wr_fee)
- from web_sales, web_returns, web_page, customer_demographics cd1,
-      customer_demographics cd2, customer_address, date_dim, reason 
- where ws_web_page_sk = wp_web_page_sk
-   and ws_item_sk = wr_item_sk
-   and ws_order_number = wr_order_number
-   and ws_sold_date_sk = d_date_sk and d_year = 2001
-   and cd1.cd_demo_sk = wr_refunded_cdemo_sk 
-   and cd2.cd_demo_sk = wr_returning_cdemo_sk
-   and ca_address_sk = wr_refunded_addr_sk
-   and r_reason_sk = wr_reason_sk
-   and
-   (
-    (
-     cd1.cd_marital_status = 'W'
-     and
-     cd1.cd_marital_status = cd2.cd_marital_status
-     and
-     cd1.cd_education_status = 'Secondary'
-     and 
-     cd1.cd_education_status = cd2.cd_education_status
-     and
-     ws_sales_price between 100.00 and 150.00
-    )
-   or
-    (
-     cd1.cd_marital_status = 'U'
-     and
-     cd1.cd_marital_status = cd2.cd_marital_status
-     and
-     cd1.cd_education_status = 'Primary' 
-     and
-     cd1.cd_education_status = cd2.cd_education_status
-     and
-     ws_sales_price between 50.00 and 100.00
-    )
-   or
-    (
-     cd1.cd_marital_status = 'S'
-     and
-     cd1.cd_marital_status = cd2.cd_marital_status
-     and
-     cd1.cd_education_status = 'College'
-     and
-     cd1.cd_education_status = cd2.cd_education_status
-     and
-     ws_sales_price between 150.00 and 200.00
-    )
-   )
-   and
-   (
-    (
-     ca_country = 'United States'
-     and
-     ca_state in ('AR', 'MO', 'MT')
-     and ws_net_profit between 100 and 200  
-    )
-    or
-    (
-     ca_country = 'United States'
-     and
-     ca_state in ('KS', 'KY', 'IA')
-     and ws_net_profit between 150 and 300  
-    )
-    or
-    (
-     ca_country = 'United States'
-     and
-     ca_state in ('PA', 'VA', 'NE')
-     and ws_net_profit between 50 and 250  
-    )
-   )
-group by r_reason_desc
-order by substr(r_reason_desc,1,20)
-        ,avg(ws_quantity)
-        ,avg(wr_refunded_cash)
-        ,avg(wr_fee)
-limit 100;
+with  cross_items as
+ (select i_item_sk ss_item_sk
+ from item,
+ (select iss.i_brand_id brand_id
+     ,iss.i_class_id class_id
+     ,iss.i_category_id category_id
+ from store_sales
+     ,item iss
+     ,date_dim d1
+ where ss_item_sk = iss.i_item_sk
+   and ss_sold_date_sk = d1.d_date_sk
+   and d1.d_year between 1999 AND 1999 + 2
+ intersect 
+ select ics.i_brand_id
+     ,ics.i_class_id
+     ,ics.i_category_id
+ from catalog_sales
+     ,item ics
+     ,date_dim d2
+ where cs_item_sk = ics.i_item_sk
+   and cs_sold_date_sk = d2.d_date_sk
+   and d2.d_year between 1999 AND 1999 + 2
+ intersect
+ select iws.i_brand_id
+     ,iws.i_class_id
+     ,iws.i_category_id
+ from web_sales
+     ,item iws
+     ,date_dim d3
+ where ws_item_sk = iws.i_item_sk
+   and ws_sold_date_sk = d3.d_date_sk
+   and d3.d_year between 1999 AND 1999 + 2) x
+ where i_brand_id = brand_id
+      and i_class_id = class_id
+      and i_category_id = category_id
+),
+ avg_sales as
+ (select avg(quantity*list_price) average_sales
+  from (select ss_quantity quantity
+             ,ss_list_price list_price
+       from store_sales
+           ,date_dim
+       where ss_sold_date_sk = d_date_sk
+         and d_year between 1999 and 2001 
+       union all 
+       select cs_quantity quantity 
+             ,cs_list_price list_price
+       from catalog_sales
+           ,date_dim
+       where cs_sold_date_sk = d_date_sk
+         and d_year between 2000 and 2000 + 2 
+       union all
+       select ws_quantity quantity
+             ,ws_list_price list_price
+       from web_sales
+           ,date_dim
+       where ws_sold_date_sk = d_date_sk
+         and d_year between 2000 and 2000 + 2) x)
+  select  channel, i_brand_id,i_class_id,i_category_id,sum(sales), sum(number_sales)
+ from(
+       select 'store' channel, i_brand_id,i_class_id
+             ,i_category_id,sum(ss_quantity*ss_list_price) sales
+             , count(*) number_sales
+       from store_sales
+           ,item
+           ,date_dim
+       where ss_item_sk in (select ss_item_sk from cross_items)
+         and ss_item_sk = i_item_sk
+         and ss_sold_date_sk = d_date_sk
+         and d_year = 2000+2 
+         and d_moy = 11
+       group by i_brand_id,i_class_id,i_category_id
+       having sum(ss_quantity*ss_list_price) > (select average_sales from avg_sales)
+       union all
+       select 'catalog' channel, i_brand_id,i_class_id,i_category_id, sum(cs_quantity*cs_list_price) sales, count(*) number_sales
+       from catalog_sales
+           ,item
+           ,date_dim
+       where cs_item_sk in (select ss_item_sk from cross_items)
+         and cs_item_sk = i_item_sk
+         and cs_sold_date_sk = d_date_sk
+         and d_year = 2000+2 
+         and d_moy = 11
+       group by i_brand_id,i_class_id,i_category_id
+       having sum(cs_quantity*cs_list_price) > (select average_sales from avg_sales)
+       union all
+       select 'web' channel, i_brand_id,i_class_id,i_category_id, sum(ws_quantity*ws_list_price) sales , count(*) number_sales
+       from web_sales
+           ,item
+           ,date_dim
+       where ws_item_sk in (select ss_item_sk from cross_items)
+         and ws_item_sk = i_item_sk
+         and ws_sold_date_sk = d_date_sk
+         and d_year = 2000+2
+         and d_moy = 11
+       group by i_brand_id,i_class_id,i_category_id
+       having sum(ws_quantity*ws_list_price) > (select average_sales from avg_sales)
+ ) y
+ group by rollup (channel, i_brand_id,i_class_id,i_category_id)
+ order by channel,i_brand_id,i_class_id,i_category_id
+ limit 100

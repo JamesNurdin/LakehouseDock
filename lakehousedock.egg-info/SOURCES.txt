@@ -27,6 +27,7 @@ trino_stack/old/query_generator.py
 workload_generation/__init__.py
 workload_generation/analysis/__init__.py
 workload_generation/analysis/analysis.py
+workload_generation/analysis/old/plan_collision_figure.py
 workload_generation/baselines/__init__.py
 workload_generation/baselines/bootstrapping_lcm.py
 workload_generation/baselines/common.py
@@ -35,8 +36,18 @@ workload_generation/baselines/query_generator.py
 workload_generation/baselines/sql_factory.py
 workload_generation/baselines/sqlbarber.py
 workload_generation/baselines/sqlstorm.py
+workload_generation/hybrid/v1/hybrid_harness.py
+workload_generation/hybrid/v2/hybrid_harness_v2.py
+workload_generation/motivation/redset_query_template_repetition.py
 workload_generation/old/query_generator_v4.py
 workload_generation/old/query_generator_v5.py
+workload_generation/old/qpp_eval/generate_tpcds_1200.py
+workload_generation/old/qpp_eval/qpp_harness.py
+workload_generation/old/qpp_eval/cold_start/results_lib.py
+workload_generation/qpp_evaluation/qpp_harness.py
+workload_generation/qpp_evaluation/results_lib.py
+workload_generation/qpp_evaluation/old/generate_tpcds_1200.py
+workload_generation/qpp_evaluation/old/cold_start/results_lib.py
 workload_generation/shared/__init__.py
 workload_generation/shared/sql_features.py
 workload_generation/src/__init__.py

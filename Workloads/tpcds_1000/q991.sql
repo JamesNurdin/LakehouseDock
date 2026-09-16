@@ -1,16 +1,75 @@
-select  s_store_name, s_store_id,
-        sum(case when (d_day_name='Sunday') then ss_sales_price else null end) sun_sales,
-        sum(case when (d_day_name='Monday') then ss_sales_price else null end) mon_sales,
-        sum(case when (d_day_name='Tuesday') then ss_sales_price else  null end) tue_sales,
-        sum(case when (d_day_name='Wednesday') then ss_sales_price else null end) wed_sales,
-        sum(case when (d_day_name='Thursday') then ss_sales_price else null end) thu_sales,
-        sum(case when (d_day_name='Friday') then ss_sales_price else null end) fri_sales,
-        sum(case when (d_day_name='Saturday') then ss_sales_price else null end) sat_sales
- from date_dim, store_sales, store
- where d_date_sk = ss_sold_date_sk and
-       s_store_sk = ss_store_sk and
-       s_gmt_offset = -5 and
-       d_year = 2002 
- group by s_store_name, s_store_id
- order by s_store_name, s_store_id,sun_sales,mon_sales,tue_sales,wed_sales,thu_sales,fri_sales,sat_sales
- limit 100;
+with ss as (
+ select
+          i_item_id,sum(ss_ext_sales_price) total_sales
+ from
+ 	store_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_item_id in (select
+  i_item_id
+from
+ item
+where i_category in ('Children'))
+ and     ss_item_sk              = i_item_sk
+ and     ss_sold_date_sk         = d_date_sk
+ and     d_year                  = 2002
+ and     d_moy                   = 10
+ and     ss_addr_sk              = ca_address_sk
+ and     ca_gmt_offset           = -5 
+ group by i_item_id),
+ cs as (
+ select
+          i_item_id,sum(cs_ext_sales_price) total_sales
+ from
+ 	catalog_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_item_id               in (select
+  i_item_id
+from
+ item
+where i_category in ('Children'))
+ and     cs_item_sk              = i_item_sk
+ and     cs_sold_date_sk         = d_date_sk
+ and     d_year                  = 2002
+ and     d_moy                   = 10
+ and     cs_bill_addr_sk         = ca_address_sk
+ and     ca_gmt_offset           = -5 
+ group by i_item_id),
+ ws as (
+ select
+          i_item_id,sum(ws_ext_sales_price) total_sales
+ from
+ 	web_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_item_id               in (select
+  i_item_id
+from
+ item
+where i_category in ('Children'))
+ and     ws_item_sk              = i_item_sk
+ and     ws_sold_date_sk         = d_date_sk
+ and     d_year                  = 2002
+ and     d_moy                   = 10
+ and     ws_bill_addr_sk         = ca_address_sk
+ and     ca_gmt_offset           = -5
+ group by i_item_id)
+  select   
+  i_item_id
+,sum(total_sales) total_sales
+ from  (select * from ss 
+        union all
+        select * from cs 
+        union all
+        select * from ws) tmp1
+ group by i_item_id
+ order by i_item_id
+      ,total_sales
+ limit 100

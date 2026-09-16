@@ -1,64 +1,26 @@
-select sum (ss_quantity)
- from store_sales, store, customer_demographics, customer_address, date_dim
- where s_store_sk = ss_store_sk
- and  ss_sold_date_sk = d_date_sk and d_year = 2002
- and  
- (
-  (
-   cd_demo_sk = ss_cdemo_sk
-   and 
-   cd_marital_status = 'D'
-   and 
-   cd_education_status = 'College'
-   and 
-   ss_sales_price between 100.00 and 150.00  
-   )
- or
-  (
-  cd_demo_sk = ss_cdemo_sk
-   and 
-   cd_marital_status = 'D'
-   and 
-   cd_education_status = 'College'
-   and 
-   ss_sales_price between 50.00 and 100.00   
-  )
- or 
- (
-  cd_demo_sk = ss_cdemo_sk
-  and 
-   cd_marital_status = 'D'
-   and 
-   cd_education_status = 'College'
-   and 
-   ss_sales_price between 150.00 and 200.00  
- )
- )
- and
- (
-  (
-  ss_addr_sk = ca_address_sk
-  and
-  ca_country = 'United States'
-  and
-  ca_state in ('AK', 'WY', 'WA')
-  and ss_net_profit between 0 and 2000  
-  )
- or
-  (ss_addr_sk = ca_address_sk
-  and
-  ca_country = 'United States'
-  and
-  ca_state in ('MS', 'OH', 'IN')
-  and ss_net_profit between 150 and 3000 
-  )
- or
-  (ss_addr_sk = ca_address_sk
-  and
-  ca_country = 'United States'
-  and
-  ca_state in ('MT', 'IL', 'VA')
-  and ss_net_profit between 50 and 25000 
-  )
- )
-;
+select  i_item_desc 
+       ,i_category 
+       ,i_class 
+       ,i_current_price
+       ,sum(cs_ext_sales_price) as itemrevenue 
+       ,sum(cs_ext_sales_price)*100/sum(sum(cs_ext_sales_price)) over
+           (partition by i_class) as revenueratio
+ from	catalog_sales
+     ,item 
+     ,date_dim
+ where cs_item_sk = i_item_sk 
+   and i_category in ('Sports', 'Books', 'Men')
+   and cs_sold_date_sk = d_date_sk
+ and d_date between cast('1999-01-08' as date) 
+ 				and (cast('1999-01-08' as date) + INTERVAL '30' DAY)
+ group by i_item_id
+         ,i_item_desc 
+         ,i_category
+         ,i_class
+         ,i_current_price
+ order by i_category
+         ,i_class
+         ,i_item_id
+         ,i_item_desc
+         ,revenueratio
+limit 100

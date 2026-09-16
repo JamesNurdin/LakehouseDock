@@ -1,27 +1,26 @@
-select  
-    sum(ss_net_profit)/sum(ss_ext_sales_price) as gross_margin
-   ,i_category
-   ,i_class
-   ,grouping(i_category)+grouping(i_class) as lochierarchy
-   ,rank() over (
- 	partition by grouping(i_category)+grouping(i_class),
- 	case when grouping(i_class) = 0 then i_category end 
- 	order by sum(ss_net_profit)/sum(ss_ext_sales_price) asc) as rank_within_parent
- from
-    store_sales
-   ,date_dim       d1
-   ,item
-   ,store
- where
-    d1.d_year = 1998 
- and d1.d_date_sk = ss_sold_date_sk
- and i_item_sk  = ss_item_sk 
- and s_store_sk  = ss_store_sk
- and s_state in ('TN','TN','TN','TN',
-                 'TN','TN','TN','TN')
- group by rollup(i_category,i_class)
- order by
-   lochierarchy desc
-  ,case when lochierarchy = 0 then i_category end
-  ,rank_within_parent
-  limit 100;
+select  i_item_desc 
+       ,i_category 
+       ,i_class 
+       ,i_current_price
+       ,sum(cs_ext_sales_price) as itemrevenue 
+       ,sum(cs_ext_sales_price)*100/sum(sum(cs_ext_sales_price)) over
+           (partition by i_class) as revenueratio
+ from	catalog_sales
+     ,item 
+     ,date_dim
+ where cs_item_sk = i_item_sk 
+   and i_category in ('Shoes', 'Women', 'Music')
+   and cs_sold_date_sk = d_date_sk
+ and d_date between cast('1998-05-08' as date) 
+ 				and (cast('1998-05-08' as date) + INTERVAL '30' DAY)
+ group by i_item_id
+         ,i_item_desc 
+         ,i_category
+         ,i_class
+         ,i_current_price
+ order by i_category
+         ,i_class
+         ,i_item_id
+         ,i_item_desc
+         ,revenueratio
+limit 100

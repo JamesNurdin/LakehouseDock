@@ -3,10 +3,17 @@ Datasets/BigBenchV2
 Datasets/Stats-CEB
 Datasets/ldbc_snb
 
+#Large results
 Results/
 Results
 Parsed_Results/
 old/
+*10000*
+Workloads/
+workload_generation/motivation/
+workload_generation/hybrid/
+workload_generation/qpp_evaluation/
+Datasets/iceberg_tpcds/iceberg-spark-tpcds-benchmark/
 
 profile_cluster/demo_results
 profile_cluster/results
@@ -48,5 +55,4 @@ git_token.txt
 carbon_scheduling/CI_data
 carbon_scheduling/gurobi/gurobi.lic
 carbon_scheduling/Studies
-
 

@@ -1,44 +1,30 @@
-select  
-  cd_gender,
-  cd_marital_status,
-  cd_education_status,
-  count(*) cnt1,
-  cd_purchase_estimate,
-  count(*) cnt2,
-  cd_credit_rating,
-  count(*) cnt3
- from
-  customer c,customer_address ca,customer_demographics
- where
-  c.c_current_addr_sk = ca.ca_address_sk and
-  ca_state in ('MN','NM','NC') and
-  cd_demo_sk = c.c_current_cdemo_sk and 
-  exists (select *
-          from store_sales,date_dim
-          where c.c_customer_sk = ss_customer_sk and
-                ss_sold_date_sk = d_date_sk and
-                d_year = 2000 and
-                d_moy between 1 and 1+2) and
-   (not exists (select *
-            from web_sales,date_dim
-            where c.c_customer_sk = ws_bill_customer_sk and
-                  ws_sold_date_sk = d_date_sk and
-                  d_year = 2000 and
-                  d_moy between 1 and 1+2) and
-    not exists (select * 
-            from catalog_sales,date_dim
-            where c.c_customer_sk = cs_ship_customer_sk and
-                  cs_sold_date_sk = d_date_sk and
-                  d_year = 2000 and
-                  d_moy between 1 and 1+2))
- group by cd_gender,
-          cd_marital_status,
-          cd_education_status,
-          cd_purchase_estimate,
-          cd_credit_rating
- order by cd_gender,
-          cd_marital_status,
-          cd_education_status,
-          cd_purchase_estimate,
-          cd_credit_rating
- limit 100;
+select  i_item_desc 
+      ,i_category 
+      ,i_class 
+      ,i_current_price
+      ,sum(ws_ext_sales_price) as itemrevenue 
+      ,sum(ws_ext_sales_price)*100/sum(sum(ws_ext_sales_price)) over
+          (partition by i_class) as revenueratio
+from	
+	web_sales
+    	,item 
+    	,date_dim
+where 
+	ws_item_sk = i_item_sk 
+  	and i_category in ('Home', 'Books', 'Electronics')
+  	and ws_sold_date_sk = d_date_sk
+	and d_date between cast('1998-05-01' as date) 
+				and (cast('1998-05-01' as date) + INTERVAL '30' DAY)
+group by 
+	i_item_id
+        ,i_item_desc 
+        ,i_category
+        ,i_class
+        ,i_current_price
+order by 
+	i_category
+        ,i_class
+        ,i_item_id
+        ,i_item_desc
+        ,revenueratio
+limit 100

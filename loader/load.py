@@ -464,6 +464,62 @@ def load_runs_by_query(
     return out
 
 
+def load_runs_by_query_scalar(
+    run_ids: Iterable[str],
+    *,
+    collection: str,
+    schema: str,
+    instance: str,
+    xcol: str,
+    ycol: str,
+    parsed_results_root: str | Path,
+    canon_fn: Optional[Callable[[str], str]] = None,
+    runtime_col: str = "runtime_s",
+    query_col: str = "query_id",
+    query_run_sep: str = "@",
+) -> Dict[str, List[pd.DataFrame]]:
+    """
+    Build synthetic two-point [xcol, ycol] traces directly from a collection's
+    runtimes.csv, for collections with no continuous per-query metric trace
+    (e.g. the profiler was disabled during execution). Each synthetic trace is
+    [(0, 0), (runtime_s, runtime_s)], so any consumer reading df[xcol].max()
+    or df.attrs['runtime_s'] resolves to the same true total runtime.
+    """
+    run_ids = list(run_ids)
+
+    runtime_map = load_runtime_map(
+        run_ids,
+        collection=collection,
+        schema=schema,
+        instance=instance,
+        parsed_results_root=parsed_results_root,
+        runtime_col=runtime_col,
+        query_col=query_col,
+        canon_fn=canon_fn,
+    )
+
+    out: Dict[str, List[pd.DataFrame]] = {}
+
+    for (run_id, query_name), runtime_s in runtime_map.items():
+        query_run_id = make_query_run_id(query_name, run_id, sep=query_run_sep)
+
+        df = pd.DataFrame({xcol: [0.0, runtime_s], ycol: [0.0, runtime_s]})
+        df["run_id"] = run_id
+        df["query_name"] = query_name
+        df["query_run_id"] = query_run_id
+        df["runtime_s"] = runtime_s
+
+        df.attrs["run_id"] = run_id
+        df.attrs["query_name"] = query_name
+        df.attrs["query_run_id"] = query_run_id
+        df.attrs["metric"] = "runtime_only"
+        df.attrs["runtime_s"] = runtime_s
+
+        out.setdefault(query_name, []).append(df)
+
+    return out
+
+
 # -----------------------------------------------------------------------------
 # Node profile loading
 # -----------------------------------------------------------------------------
@@ -777,6 +833,7 @@ def load_aligned_plans_and_runs(
     query_col: str = "query_id",
     query_run_sep: str = "@",
     require_runtime: bool = True,
+    use_scalar_runtime: bool = False,
 ) -> tuple[Dict[str, Any], Dict[str, List[pd.DataFrame]], list[str]]:
     """
     Load plans and metric traces.
@@ -786,6 +843,10 @@ def load_aligned_plans_and_runs(
         - query_name
         - query_run_id
         - runtime_s
+
+    Pass use_scalar_runtime=True for collections with no continuous per-query
+    metric trace (e.g. profiler was disabled) — builds synthetic two-point
+    traces from runtimes.csv instead of reading <query>/<metric>.parquet.
     """
     run_ids = list(run_ids)
 
@@ -797,21 +858,36 @@ def load_aligned_plans_and_runs(
         canon_fn=canon_fn,
     )
 
-    runs_by_query = load_runs_by_query(
-        run_ids,
-        collection=collection,
-        schema=schema,
-        instance=instance,
-        metric=metric,
-        xcol=xcol,
-        ycol=ycol,
-        canon_fn=canon_fn,
-        parsed_results_root=parsed_results_root,
-        runtime_col=runtime_col,
-        query_col=query_col,
-        query_run_sep=query_run_sep,
-        require_runtime=require_runtime,
-    )
+    if use_scalar_runtime:
+        runs_by_query = load_runs_by_query_scalar(
+            run_ids,
+            collection=collection,
+            schema=schema,
+            instance=instance,
+            xcol=xcol,
+            ycol=ycol,
+            canon_fn=canon_fn,
+            parsed_results_root=parsed_results_root,
+            runtime_col=runtime_col,
+            query_col=query_col,
+            query_run_sep=query_run_sep,
+        )
+    else:
+        runs_by_query = load_runs_by_query(
+            run_ids,
+            collection=collection,
+            schema=schema,
+            instance=instance,
+            metric=metric,
+            xcol=xcol,
+            ycol=ycol,
+            canon_fn=canon_fn,
+            parsed_results_root=parsed_results_root,
+            runtime_col=runtime_col,
+            query_col=query_col,
+            query_run_sep=query_run_sep,
+            require_runtime=require_runtime,
+        )
 
     plans_by_query, runs_by_query, common = align_plans_and_runs(
         plans_by_query,

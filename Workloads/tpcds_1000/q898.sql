@@ -1,56 +1,35 @@
 select  
-   s_store_name
-  ,s_company_id
-  ,s_street_number
-  ,s_street_name
-  ,s_street_type
-  ,s_suite_number
-  ,s_city
-  ,s_county
-  ,s_state
-  ,s_zip
-  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk <= 30 ) then 1 else 0 end)  as "30 days" 
-  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk > 30) and 
-                 (sr_returned_date_sk - ss_sold_date_sk <= 60) then 1 else 0 end )  as "31-60 days" 
-  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk > 60) and 
-                 (sr_returned_date_sk - ss_sold_date_sk <= 90) then 1 else 0 end)  as "61-90 days" 
-  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk > 90) and
-                 (sr_returned_date_sk - ss_sold_date_sk <= 120) then 1 else 0 end)  as "91-120 days" 
-  ,sum(case when (sr_returned_date_sk - ss_sold_date_sk  > 120) then 1 else 0 end)  as ">120 days" 
-from
-   store_sales
-  ,store_returns
-  ,store
-  ,date_dim d1
-  ,date_dim d2
-where
-    d2.d_year = 1998
-and d2.d_moy  = 9
-and ss_ticket_number = sr_ticket_number
-and ss_item_sk = sr_item_sk
-and ss_sold_date_sk   = d1.d_date_sk
-and sr_returned_date_sk   = d2.d_date_sk
-and ss_customer_sk = sr_customer_sk
-and ss_store_sk = s_store_sk
-group by
-   s_store_name
-  ,s_company_id
-  ,s_street_number
-  ,s_street_name
-  ,s_street_type
-  ,s_suite_number
-  ,s_city
-  ,s_county
-  ,s_state
-  ,s_zip
-order by s_store_name
-        ,s_company_id
-        ,s_street_number
-        ,s_street_name
-        ,s_street_type
-        ,s_suite_number
-        ,s_city
-        ,s_county
-        ,s_state
-        ,s_zip
-limit 100;
+    sum(ss_net_profit) as total_sum
+   ,s_state
+   ,s_county
+   ,grouping(s_state)+grouping(s_county) as lochierarchy
+   ,rank() over (
+ 	partition by grouping(s_state)+grouping(s_county),
+ 	case when grouping(s_county) = 0 then s_state end 
+ 	order by sum(ss_net_profit) desc) as rank_within_parent
+ from
+    store_sales
+   ,date_dim       d1
+   ,store
+ where
+    d1.d_month_seq between 1210 and 1210+11
+ and d1.d_date_sk = ss_sold_date_sk
+ and s_store_sk  = ss_store_sk
+ and s_state in
+             ( select s_state
+               from  (select s_state as s_state,
+ 			    rank() over ( partition by s_state order by sum(ss_net_profit) desc) as ranking
+                      from   store_sales, store, date_dim
+                      where  d_month_seq between 1210 and 1210+11
+ 			    and d_date_sk = ss_sold_date_sk
+ 			    and s_store_sk  = ss_store_sk
+                      group by s_state
+                     ) tmp1 
+               where ranking <= 5
+             )
+ group by rollup(s_state,s_county)
+ order by
+   lochierarchy desc
+  ,case when lochierarchy = 0 then s_state end
+  ,rank_within_parent
+ limit 100

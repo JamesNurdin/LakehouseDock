@@ -1,25 +1,32 @@
-select  
-   w_state
-  ,i_item_id
-  ,sum(case when (cast(d_date as date) < cast ('2000-02-29' as date)) 
- 		then cs_sales_price - coalesce(cr_refunded_cash,0) else 0 end) as sales_before
-  ,sum(case when (cast(d_date as date) >= cast ('2000-02-29' as date)) 
- 		then cs_sales_price - coalesce(cr_refunded_cash,0) else 0 end) as sales_after
- from
-   catalog_sales left outer join catalog_returns on
-       (cs_order_number = cr_order_number 
-        and cs_item_sk = cr_item_sk)
-  ,warehouse 
-  ,item
-  ,date_dim
- where
-     i_current_price between 0.99 and 1.49
- and i_item_sk          = cs_item_sk
- and cs_warehouse_sk    = w_warehouse_sk 
- and cs_sold_date_sk    = d_date_sk
- and d_date between (cast ('2000-02-29' as date) - 30 days)
-                and (cast ('2000-02-29' as date) + 30 days) 
- group by
-    w_state,i_item_id
- order by w_state,i_item_id
-limit 100;
+select  asceding.rnk, i1.i_product_name best_performing, i2.i_product_name worst_performing
+from(select *
+     from (select item_sk,rank() over (order by rank_col asc) rnk
+           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col 
+                 from store_sales ss1
+                 where ss_store_sk = 6
+                 group by ss_item_sk
+                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
+                                                  from store_sales
+                                                  where ss_store_sk = 6
+                                                    and ss_promo_sk is null
+                                                  group by ss_store_sk))V1)V11
+     where rnk  < 11) asceding,
+    (select *
+     from (select item_sk,rank() over (order by rank_col desc) rnk
+           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col
+                 from store_sales ss1
+                 where ss_store_sk = 6
+                 group by ss_item_sk
+                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
+                                                  from store_sales
+                                                  where ss_store_sk = 6
+                                                    and ss_promo_sk is null
+                                                  group by ss_store_sk))V2)V21
+     where rnk  < 11) descending,
+item i1,
+item i2
+where asceding.rnk = descending.rnk 
+  and i1.i_item_sk=asceding.item_sk
+  and i2.i_item_sk=descending.item_sk
+order by asceding.rnk
+limit 100

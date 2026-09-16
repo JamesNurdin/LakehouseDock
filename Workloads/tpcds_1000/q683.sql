@@ -1,16 +1,41 @@
-select  s_store_name, s_store_id,
-        sum(case when (d_day_name='Sunday') then ss_sales_price else null end) sun_sales,
-        sum(case when (d_day_name='Monday') then ss_sales_price else null end) mon_sales,
-        sum(case when (d_day_name='Tuesday') then ss_sales_price else  null end) tue_sales,
-        sum(case when (d_day_name='Wednesday') then ss_sales_price else null end) wed_sales,
-        sum(case when (d_day_name='Thursday') then ss_sales_price else null end) thu_sales,
-        sum(case when (d_day_name='Friday') then ss_sales_price else null end) fri_sales,
-        sum(case when (d_day_name='Saturday') then ss_sales_price else null end) sat_sales
- from date_dim, store_sales, store
- where d_date_sk = ss_sold_date_sk and
-       s_store_sk = ss_store_sk and
-       s_gmt_offset = -5 and
-       d_year = 2001 
- group by s_store_name, s_store_id
- order by s_store_name, s_store_id,sun_sales,mon_sales,tue_sales,wed_sales,thu_sales,fri_sales,sat_sales
- limit 100;
+select  promotions,total,cast(promotions as decimal(15,4))/cast(total as decimal(15,4))*100
+from
+  (select sum(ss_ext_sales_price) promotions
+   from  store_sales
+        ,store
+        ,promotion
+        ,date_dim
+        ,customer
+        ,customer_address 
+        ,item
+   where ss_sold_date_sk = d_date_sk
+   and   ss_store_sk = s_store_sk
+   and   ss_promo_sk = p_promo_sk
+   and   ss_customer_sk= c_customer_sk
+   and   ca_address_sk = c_current_addr_sk
+   and   ss_item_sk = i_item_sk 
+   and   ca_gmt_offset = -7
+   and   i_category = 'Books'
+   and   (p_channel_dmail = 'Y' or p_channel_email = 'Y' or p_channel_tv = 'Y')
+   and   s_gmt_offset = -7
+   and   d_year = 2002
+   and   d_moy  = 12) promotional_sales,
+  (select sum(ss_ext_sales_price) total
+   from  store_sales
+        ,store
+        ,date_dim
+        ,customer
+        ,customer_address
+        ,item
+   where ss_sold_date_sk = d_date_sk
+   and   ss_store_sk = s_store_sk
+   and   ss_customer_sk= c_customer_sk
+   and   ca_address_sk = c_current_addr_sk
+   and   ss_item_sk = i_item_sk
+   and   ca_gmt_offset = -7
+   and   i_category = 'Books'
+   and   s_gmt_offset = -7
+   and   d_year = 2002
+   and   d_moy  = 12) all_sales
+order by promotions, total
+limit 100

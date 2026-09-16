@@ -1,26 +1,22 @@
-select  
-   count(distinct ws_order_number) as "order count"
-  ,sum(ws_ext_ship_cost) as "total shipping cost"
-  ,sum(ws_net_profit) as "total net profit"
-from
-   web_sales ws1
-  ,date_dim
-  ,customer_address
-  ,web_site
-where
-    d_date between '1999-5-01' and 
-           (cast('1999-5-01' as date) + 60 days)
-and ws1.ws_ship_date_sk = d_date_sk
-and ws1.ws_ship_addr_sk = ca_address_sk
-and ca_state = 'KY'
-and ws1.ws_web_site_sk = web_site_sk
-and web_company_name = 'pri'
-and exists (select *
-            from web_sales ws2
-            where ws1.ws_order_number = ws2.ws_order_number
-              and ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk)
-and not exists(select *
-               from web_returns wr1
-               where ws1.ws_order_number = wr1.wr_order_number)
-order by count(distinct ws_order_number)
-limit 100;
+select  i_brand_id brand_id, i_brand brand, i_manufact_id, i_manufact,
+ 	sum(ss_ext_sales_price) ext_price
+ from date_dim, store_sales, item,customer,customer_address,store
+ where d_date_sk = ss_sold_date_sk
+   and ss_item_sk = i_item_sk
+   and i_manager_id=57
+   and d_moy=12
+   and d_year=2001
+   and ss_customer_sk = c_customer_sk 
+   and c_current_addr_sk = ca_address_sk
+   and substr(ca_zip,1,5) <> substr(s_zip,1,5) 
+   and ss_store_sk = s_store_sk 
+ group by i_brand
+      ,i_brand_id
+      ,i_manufact_id
+      ,i_manufact
+ order by ext_price desc
+         ,i_brand
+         ,i_brand_id
+         ,i_manufact_id
+         ,i_manufact
+limit 100

@@ -1,21 +1,23 @@
-select  channel, col_name, d_year, d_qoy, i_category, COUNT(*) sales_cnt, SUM(ext_sales_price) sales_amt FROM (
-        SELECT 'store' as channel, 'ss_promo_sk' col_name, d_year, d_qoy, i_category, ss_ext_sales_price ext_sales_price
-         FROM store_sales, item, date_dim
-         WHERE ss_promo_sk IS NULL
-           AND ss_sold_date_sk=d_date_sk
-           AND ss_item_sk=i_item_sk
-        UNION ALL
-        SELECT 'web' as channel, 'ws_web_page_sk' col_name, d_year, d_qoy, i_category, ws_ext_sales_price ext_sales_price
-         FROM web_sales, item, date_dim
-         WHERE ws_web_page_sk IS NULL
-           AND ws_sold_date_sk=d_date_sk
-           AND ws_item_sk=i_item_sk
-        UNION ALL
-        SELECT 'catalog' as channel, 'cs_ship_cdemo_sk' col_name, d_year, d_qoy, i_category, cs_ext_sales_price ext_sales_price
-         FROM catalog_sales, item, date_dim
-         WHERE cs_ship_cdemo_sk IS NULL
-           AND cs_sold_date_sk=d_date_sk
-           AND cs_item_sk=i_item_sk) foo
-GROUP BY channel, col_name, d_year, d_qoy, i_category
-ORDER BY channel, col_name, d_year, d_qoy, i_category
-limit 100;
+select   
+    sum(ws_net_paid) as total_sum
+   ,i_category
+   ,i_class
+   ,grouping(i_category)+grouping(i_class) as lochierarchy
+   ,rank() over (
+ 	partition by grouping(i_category)+grouping(i_class),
+ 	case when grouping(i_class) = 0 then i_category end 
+ 	order by sum(ws_net_paid) desc) as rank_within_parent
+ from
+    web_sales
+   ,date_dim       d1
+   ,item
+ where
+    d1.d_month_seq between 1183 and 1183+11
+ and d1.d_date_sk = ws_sold_date_sk
+ and i_item_sk  = ws_item_sk
+ group by rollup(i_category,i_class)
+ order by
+   lochierarchy desc,
+   case when lochierarchy = 0 then i_category end,
+   rank_within_parent
+ limit 100

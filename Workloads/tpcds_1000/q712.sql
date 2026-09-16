@@ -1,29 +1,19 @@
-select i_item_desc 
-      ,i_category 
-      ,i_class 
-      ,i_current_price
-      ,sum(ss_ext_sales_price) as itemrevenue 
-      ,sum(ss_ext_sales_price)*100/sum(sum(ss_ext_sales_price)) over
-          (partition by i_class) as revenueratio
-from	
-	store_sales
-    	,item 
-    	,date_dim
-where 
-	ss_item_sk = i_item_sk 
-  	and i_category in ('Home', 'Men', 'Books')
-  	and ss_sold_date_sk = d_date_sk
-	and d_date between cast('1999-02-16' as date) 
-				and (cast('1999-02-16' as date) + 30 days)
-group by 
-	i_item_id
-        ,i_item_desc 
-        ,i_category
-        ,i_class
-        ,i_current_price
-order by 
-	i_category
-        ,i_class
-        ,i_item_id
-        ,i_item_desc
-        ,revenueratio;
+select  cast(amc as decimal(15,4))/cast(pmc as decimal(15,4)) am_pm_ratio
+ from ( select count(*) amc
+       from web_sales, household_demographics , time_dim, web_page
+       where ws_sold_time_sk = time_dim.t_time_sk
+         and ws_ship_hdemo_sk = household_demographics.hd_demo_sk
+         and ws_web_page_sk = web_page.wp_web_page_sk
+         and time_dim.t_hour between 12 and 12+1
+         and household_demographics.hd_dep_count = 1
+         and web_page.wp_char_count between 5000 and 5200) at,
+      ( select count(*) pmc
+       from web_sales, household_demographics , time_dim, web_page
+       where ws_sold_time_sk = time_dim.t_time_sk
+         and ws_ship_hdemo_sk = household_demographics.hd_demo_sk
+         and ws_web_page_sk = web_page.wp_web_page_sk
+         and time_dim.t_hour between 18 and 18+1
+         and household_demographics.hd_dep_count = 1
+         and web_page.wp_char_count between 5000 and 5200) pt
+ order by am_pm_ratio
+ limit 100

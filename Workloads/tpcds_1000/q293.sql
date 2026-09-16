@@ -1,32 +1,64 @@
-select  c_last_name
-       ,c_first_name
-       ,ca_city
-       ,bought_city
-       ,ss_ticket_number
-       ,amt,profit 
- from
-   (select ss_ticket_number
-          ,ss_customer_sk
-          ,ca_city bought_city
-          ,sum(ss_coupon_amt) amt
-          ,sum(ss_net_profit) profit
-    from store_sales,date_dim,store,household_demographics,customer_address 
-    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
-    and store_sales.ss_store_sk = store.s_store_sk  
-    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
-    and store_sales.ss_addr_sk = customer_address.ca_address_sk
-    and (household_demographics.hd_dep_count = 6 or
-         household_demographics.hd_vehicle_count= 4)
-    and date_dim.d_dow in (6,0)
-    and date_dim.d_year in (1998,1998+1,1998+2) 
-    and store.s_city in ('Fairview','Midway','Fairview','Fairview','Fairview') 
-    group by ss_ticket_number,ss_customer_sk,ss_addr_sk,ca_city) dn,customer,customer_address current_addr
-    where ss_customer_sk = c_customer_sk
-      and customer.c_current_addr_sk = current_addr.ca_address_sk
-      and current_addr.ca_city <> bought_city
-  order by c_last_name
-          ,c_first_name
-          ,ca_city
-          ,bought_city
-          ,ss_ticket_number
-  limit 100;
+with sr_items as
+ (select i_item_id item_id,
+        sum(sr_return_quantity) sr_item_qty
+ from store_returns,
+      item,
+      date_dim
+ where sr_item_sk = i_item_sk
+ and   d_date    in 
+	(select d_date
+	from date_dim
+	where d_week_seq in 
+		(select d_week_seq
+		from date_dim
+	  where d_date in (DATE '1999-04-17',DATE '1999-09-22',DATE '1999-11-19')))
+ and   sr_returned_date_sk   = d_date_sk
+ group by i_item_id),
+ cr_items as
+ (select i_item_id item_id,
+        sum(cr_return_quantity) cr_item_qty
+ from catalog_returns,
+      item,
+      date_dim
+ where cr_item_sk = i_item_sk
+ and   d_date    in 
+	(select d_date
+	from date_dim
+	where d_week_seq in 
+		(select d_week_seq
+		from date_dim
+	  where d_date in (DATE '1999-04-17',DATE '1999-09-22',DATE '1999-11-19')))
+ and   cr_returned_date_sk   = d_date_sk
+ group by i_item_id),
+ wr_items as
+ (select i_item_id item_id,
+        sum(wr_return_quantity) wr_item_qty
+ from web_returns,
+      item,
+      date_dim
+ where wr_item_sk = i_item_sk
+ and   d_date    in 
+	(select d_date
+	from date_dim
+	where d_week_seq in 
+		(select d_week_seq
+		from date_dim
+		where d_date in (DATE '1999-04-17',DATE '1999-09-22',DATE '1999-11-19')))
+ and   wr_returned_date_sk   = d_date_sk
+ group by i_item_id)
+  select  sr_items.item_id
+       ,sr_item_qty
+       ,sr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 sr_dev
+       ,cr_item_qty
+       ,cr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 cr_dev
+       ,wr_item_qty
+       ,wr_item_qty/(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 * 100 wr_dev
+       ,(sr_item_qty+cr_item_qty+wr_item_qty)/3.0 average
+ from sr_items
+     ,cr_items
+     ,wr_items
+ where sr_items.item_id=cr_items.item_id
+   and sr_items.item_id=wr_items.item_id 
+ order by sr_items.item_id
+         ,sr_item_qty
+ limit 100

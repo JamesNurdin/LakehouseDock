@@ -1,29 +1,72 @@
-with ws_wh as
-(select ws1.ws_order_number,ws1.ws_warehouse_sk wh1,ws2.ws_warehouse_sk wh2
- from web_sales ws1,web_sales ws2
- where ws1.ws_order_number = ws2.ws_order_number
-   and ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk)
- select  
-   count(distinct ws_order_number) as "order count"
-  ,sum(ws_ext_ship_cost) as "total shipping cost"
-  ,sum(ws_net_profit) as "total net profit"
-from
-   web_sales ws1
-  ,date_dim
-  ,customer_address
-  ,web_site
-where
-    d_date between '2000-5-01' and 
-           (cast('2000-5-01' as date) + 60 days)
-and ws1.ws_ship_date_sk = d_date_sk
-and ws1.ws_ship_addr_sk = ca_address_sk
-and ca_state = 'IN'
-and ws1.ws_web_site_sk = web_site_sk
-and web_company_name = 'pri'
-and ws1.ws_order_number in (select ws_order_number
-                            from ws_wh)
-and ws1.ws_order_number in (select wr_order_number
-                            from web_returns,ws_wh
-                            where wr_order_number = ws_wh.ws_order_number)
-order by count(distinct ws_order_number)
-limit 100;
+with year_total as (
+ select c_customer_id customer_id
+       ,c_first_name customer_first_name
+       ,c_last_name customer_last_name
+       ,c_preferred_cust_flag customer_preferred_cust_flag
+       ,c_birth_country customer_birth_country
+       ,c_login customer_login
+       ,c_email_address customer_email_address
+       ,d_year dyear
+       ,sum(ss_ext_list_price-ss_ext_discount_amt) year_total
+       ,'s' sale_type
+ from customer
+     ,store_sales
+     ,date_dim
+ where c_customer_sk = ss_customer_sk
+   and ss_sold_date_sk = d_date_sk
+ group by c_customer_id
+         ,c_first_name
+         ,c_last_name
+         ,d_year
+         ,c_preferred_cust_flag
+         ,c_birth_country
+         ,c_login
+         ,c_email_address
+         ,d_year 
+ union all
+ select c_customer_id customer_id
+       ,c_first_name customer_first_name
+       ,c_last_name customer_last_name
+       ,c_preferred_cust_flag customer_preferred_cust_flag
+       ,c_birth_country customer_birth_country
+       ,c_login customer_login
+       ,c_email_address customer_email_address
+       ,d_year dyear
+       ,sum(ws_ext_list_price-ws_ext_discount_amt) year_total
+       ,'w' sale_type
+ from customer
+     ,web_sales
+     ,date_dim
+ where c_customer_sk = ws_bill_customer_sk
+   and ws_sold_date_sk = d_date_sk
+ group by c_customer_id
+         ,c_first_name
+         ,c_last_name
+         ,c_preferred_cust_flag
+         ,c_birth_country
+         ,c_login
+         ,c_email_address
+         ,d_year
+         )
+  select  t_s_secyear.customer_login
+ from year_total t_s_firstyear
+     ,year_total t_s_secyear
+     ,year_total t_w_firstyear
+     ,year_total t_w_secyear
+ where t_s_secyear.customer_id = t_s_firstyear.customer_id
+         and t_s_firstyear.customer_id = t_w_secyear.customer_id
+         and t_s_firstyear.customer_id = t_w_firstyear.customer_id
+         and t_s_firstyear.sale_type = 's'
+         and t_w_firstyear.sale_type = 'w'
+         and t_s_secyear.sale_type = 's'
+         and t_w_secyear.sale_type = 'w'
+         and t_s_firstyear.dyear = 2000
+         and t_s_secyear.dyear = 2000+1
+         and t_w_firstyear.dyear = 2000
+         and t_w_secyear.dyear = 2000+1
+         and t_s_firstyear.year_total > 0
+         and t_w_firstyear.year_total > 0
+         and case when t_w_firstyear.year_total > 0 then t_w_secyear.year_total / t_w_firstyear.year_total else null end
+             > case when t_s_firstyear.year_total > 0 then t_s_secyear.year_total / t_s_firstyear.year_total else null end
+ order by t_s_secyear.customer_login
+limit 100

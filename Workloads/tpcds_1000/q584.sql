@@ -1,17 +1,26 @@
-select  ca_zip
-       ,sum(cs_sales_price)
- from catalog_sales
-     ,customer
-     ,customer_address
-     ,date_dim
- where cs_bill_customer_sk = c_customer_sk
- 	and c_current_addr_sk = ca_address_sk 
- 	and ( substr(ca_zip,1,5) in ('85669', '86197','88274','83405','86475',
-                                   '85392', '85460', '80348', '81792')
- 	      or ca_state in ('CA','WA','GA')
- 	      or cs_sales_price > 500)
- 	and cs_sold_date_sk = d_date_sk
- 	and d_qoy = 1 and d_year = 1999
- group by ca_zip
- order by ca_zip
- limit 100;
+select 
+	s_store_name,
+	i_item_desc,
+	sc.revenue,
+	i_current_price,
+	i_wholesale_cost,
+	i_brand
+ from store, item,
+     (select ss_store_sk, avg(revenue) as ave
+ 	from
+ 	    (select  ss_store_sk, ss_item_sk, 
+ 		     sum(ss_sales_price) as revenue
+ 		from store_sales, date_dim
+ 		where ss_sold_date_sk = d_date_sk and d_month_seq between 1207 and 1207+11
+ 		group by ss_store_sk, ss_item_sk) sa
+ 	group by ss_store_sk) sb,
+     (select  ss_store_sk, ss_item_sk, sum(ss_sales_price) as revenue
+ 	from store_sales, date_dim
+ 	where ss_sold_date_sk = d_date_sk and d_month_seq between 1207 and 1207+11
+ 	group by ss_store_sk, ss_item_sk) sc
+ where sb.ss_store_sk = sc.ss_store_sk and 
+       sc.revenue <= 0.1 * sb.ave and
+       s_store_sk = sc.ss_store_sk and
+       i_item_sk = sc.ss_item_sk
+ order by s_store_name, i_item_desc
+limit 100

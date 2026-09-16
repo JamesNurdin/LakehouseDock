@@ -1,45 +1,62 @@
-select  
- i_item_id
- ,i_item_desc
- ,s_store_id
- ,s_store_name
- ,min(ss_net_profit) as store_sales_profit
- ,min(sr_net_loss) as store_returns_loss
- ,min(cs_net_profit) as catalog_sales_profit
- from
- store_sales
- ,store_returns
- ,catalog_sales
- ,date_dim d1
- ,date_dim d2
- ,date_dim d3
- ,store
- ,item
- where
- d1.d_moy = 4
- and d1.d_year = 1998
- and d1.d_date_sk = ss_sold_date_sk
- and i_item_sk = ss_item_sk
- and s_store_sk = ss_store_sk
- and ss_customer_sk = sr_customer_sk
- and ss_item_sk = sr_item_sk
- and ss_ticket_number = sr_ticket_number
- and sr_returned_date_sk = d2.d_date_sk
- and d2.d_moy               between 4 and  10
- and d2.d_year              = 1998
- and sr_customer_sk = cs_bill_customer_sk
- and sr_item_sk = cs_item_sk
- and cs_sold_date_sk = d3.d_date_sk
- and d3.d_moy               between 4 and  10 
- and d3.d_year              = 1998
- group by
- i_item_id
- ,i_item_desc
- ,s_store_id
- ,s_store_name
- order by
- i_item_id
- ,i_item_desc
- ,s_store_id
- ,s_store_name
- limit 100;
+with ss_items as
+ (select i_item_id item_id
+        ,sum(ss_ext_sales_price) ss_item_rev 
+ from store_sales
+     ,item
+     ,date_dim
+ where ss_item_sk = i_item_sk
+   and d_date in (select d_date
+                  from date_dim
+                  where d_week_seq = (select d_week_seq 
+                                      from date_dim
+                                      where d_date = DATE '1998-01-19'))
+   and ss_sold_date_sk   = d_date_sk
+ group by i_item_id),
+ cs_items as
+ (select i_item_id item_id
+        ,sum(cs_ext_sales_price) cs_item_rev
+  from catalog_sales
+      ,item
+      ,date_dim
+ where cs_item_sk = i_item_sk
+  and  d_date in (select d_date
+                  from date_dim
+                  where d_week_seq = (select d_week_seq 
+                                      from date_dim
+                                      where d_date = DATE '1998-01-19'))
+  and  cs_sold_date_sk = d_date_sk
+ group by i_item_id),
+ ws_items as
+ (select i_item_id item_id
+        ,sum(ws_ext_sales_price) ws_item_rev
+  from web_sales
+      ,item
+      ,date_dim
+ where ws_item_sk = i_item_sk
+  and  d_date in (select d_date
+                  from date_dim
+                  where d_week_seq =(select d_week_seq 
+                                     from date_dim
+                                     where d_date = DATE '1998-01-19'))
+  and ws_sold_date_sk   = d_date_sk
+ group by i_item_id)
+  select  ss_items.item_id
+       ,ss_item_rev
+       ,ss_item_rev/(ss_item_rev+cs_item_rev+ws_item_rev)/3 * 100 ss_dev
+       ,cs_item_rev
+       ,cs_item_rev/(ss_item_rev+cs_item_rev+ws_item_rev)/3 * 100 cs_dev
+       ,ws_item_rev
+       ,ws_item_rev/(ss_item_rev+cs_item_rev+ws_item_rev)/3 * 100 ws_dev
+       ,(ss_item_rev+cs_item_rev+ws_item_rev)/3 average
+ from ss_items,cs_items,ws_items
+ where ss_items.item_id=cs_items.item_id
+   and ss_items.item_id=ws_items.item_id 
+   and ss_item_rev between 0.9 * cs_item_rev and 1.1 * cs_item_rev
+   and ss_item_rev between 0.9 * ws_item_rev and 1.1 * ws_item_rev
+   and cs_item_rev between 0.9 * ss_item_rev and 1.1 * ss_item_rev
+   and cs_item_rev between 0.9 * ws_item_rev and 1.1 * ws_item_rev
+   and ws_item_rev between 0.9 * ss_item_rev and 1.1 * ss_item_rev
+   and ws_item_rev between 0.9 * cs_item_rev and 1.1 * cs_item_rev
+ order by item_id
+         ,ss_item_rev
+ limit 100

@@ -71,7 +71,7 @@ union all
          ,c_email_address
          ,d_year
          )
-  select  t_s_secyear.customer_id
+  select  t_s_secyear.customer_last_name
  from year_total t_s_firstyear
      ,year_total t_s_secyear
      ,year_total t_c_firstyear
@@ -89,12 +89,12 @@ union all
    and t_s_secyear.sale_type = 's'
    and t_c_secyear.sale_type = 'c'
    and t_w_secyear.sale_type = 'w'
-   and t_s_firstyear.dyear =  1999
-   and t_s_secyear.dyear = 1999+1
-   and t_c_firstyear.dyear =  1999
-   and t_c_secyear.dyear =  1999+1
-   and t_w_firstyear.dyear = 1999
-   and t_w_secyear.dyear = 1999+1
+   and t_s_firstyear.dyear =  2001
+   and t_s_secyear.dyear = 2001+1
+   and t_c_firstyear.dyear =  2001
+   and t_c_secyear.dyear =  2001+1
+   and t_w_firstyear.dyear = 2001
+   and t_w_secyear.dyear = 2001+1
    and t_s_firstyear.year_total > 0
    and t_c_firstyear.year_total > 0
    and t_w_firstyear.year_total > 0
@@ -102,5 +102,5 @@ union all
            > case when t_s_firstyear.year_total > 0 then t_s_secyear.year_total / t_s_firstyear.year_total else null end
    and case when t_c_firstyear.year_total > 0 then t_c_secyear.year_total / t_c_firstyear.year_total else null end
            > case when t_w_firstyear.year_total > 0 then t_w_secyear.year_total / t_w_firstyear.year_total else null end
- order by t_s_secyear.customer_id
-limit 100;
+ order by t_s_secyear.customer_last_name
+limit 100

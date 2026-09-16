@@ -1,21 +1,25 @@
-select  channel, col_name, d_year, d_qoy, i_category, COUNT(*) sales_cnt, SUM(ext_sales_price) sales_amt FROM (
-        SELECT 'store' as channel, 'ss_promo_sk' col_name, d_year, d_qoy, i_category, ss_ext_sales_price ext_sales_price
-         FROM store_sales, item, date_dim
-         WHERE ss_promo_sk IS NULL
-           AND ss_sold_date_sk=d_date_sk
-           AND ss_item_sk=i_item_sk
-        UNION ALL
-        SELECT 'web' as channel, 'ws_warehouse_sk' col_name, d_year, d_qoy, i_category, ws_ext_sales_price ext_sales_price
-         FROM web_sales, item, date_dim
-         WHERE ws_warehouse_sk IS NULL
-           AND ws_sold_date_sk=d_date_sk
-           AND ws_item_sk=i_item_sk
-        UNION ALL
-        SELECT 'catalog' as channel, 'cs_ship_cdemo_sk' col_name, d_year, d_qoy, i_category, cs_ext_sales_price ext_sales_price
-         FROM catalog_sales, item, date_dim
-         WHERE cs_ship_cdemo_sk IS NULL
-           AND cs_sold_date_sk=d_date_sk
-           AND cs_item_sk=i_item_sk) foo
-GROUP BY channel, col_name, d_year, d_qoy, i_category
-ORDER BY channel, col_name, d_year, d_qoy, i_category
-limit 100;
+select  * from 
+(select i_manufact_id,
+sum(ss_sales_price) sum_sales,
+avg(sum(ss_sales_price)) over (partition by i_manufact_id) avg_quarterly_sales
+from item, store_sales, date_dim, store
+where ss_item_sk = i_item_sk and
+ss_sold_date_sk = d_date_sk and
+ss_store_sk = s_store_sk and
+d_month_seq in (1196,1196+1,1196+2,1196+3,1196+4,1196+5,1196+6,1196+7,1196+8,1196+9,1196+10,1196+11) and
+((i_category in ('Books','Children','Electronics') and
+i_class in ('personal','portable','reference','self-help') and
+i_brand in ('scholaramalgamalg #14','scholaramalgamalg #7',
+		'exportiunivamalg #9','scholaramalgamalg #9'))
+or(i_category in ('Women','Music','Men') and
+i_class in ('accessories','classical','fragrances','pants') and
+i_brand in ('amalgimporto #1','edu packscholar #1','exportiimporto #1',
+		'importoamalg #1')))
+group by i_manufact_id, d_qoy ) tmp1
+where case when avg_quarterly_sales > 0 
+	then abs (sum_sales - avg_quarterly_sales)/ avg_quarterly_sales 
+	else null end > 0.1
+order by avg_quarterly_sales,
+	 sum_sales,
+	 i_manufact_id
+limit 100

@@ -1,54 +1,47 @@
-select   
-  ca_state,
-  cd_gender,
-  cd_marital_status,
-  count(*) cnt1,
-  max(cd_dep_count),
-  stddev_samp(cd_dep_count),
-  max(cd_dep_count),
-  cd_dep_employed_count,
-  count(*) cnt2,
-  max(cd_dep_employed_count),
-  stddev_samp(cd_dep_employed_count),
-  max(cd_dep_employed_count),
-  cd_dep_college_count,
-  count(*) cnt3,
-  max(cd_dep_college_count),
-  stddev_samp(cd_dep_college_count),
-  max(cd_dep_college_count)
- from
-  customer c,customer_address ca,customer_demographics
- where
-  c.c_current_addr_sk = ca.ca_address_sk and
-  cd_demo_sk = c.c_current_cdemo_sk and 
-  exists (select *
-          from store_sales,date_dim
-          where c.c_customer_sk = ss_customer_sk and
-                ss_sold_date_sk = d_date_sk and
-                d_year = 2000 and
-                d_qoy < 4) and
-   (exists (select *
-            from web_sales,date_dim
-            where c.c_customer_sk = ws_bill_customer_sk and
-                  ws_sold_date_sk = d_date_sk and
-                  d_year = 2000 and
-                  d_qoy < 4) or 
-    exists (select * 
-            from catalog_sales,date_dim
-            where c.c_customer_sk = cs_ship_customer_sk and
-                  cs_sold_date_sk = d_date_sk and
-                  d_year = 2000 and
-                  d_qoy < 4))
- group by ca_state,
-          cd_gender,
-          cd_marital_status,
-          cd_dep_count,
-          cd_dep_employed_count,
-          cd_dep_college_count
- order by ca_state,
-          cd_gender,
-          cd_marital_status,
-          cd_dep_count,
-          cd_dep_employed_count,
-          cd_dep_college_count
- limit 100;
+select case when (select count(*) 
+                  from store_sales 
+                  where ss_quantity between 1 and 20) > 16540
+            then (select avg(ss_ext_tax) 
+                  from store_sales 
+                  where ss_quantity between 1 and 20) 
+            else (select avg(ss_net_profit)
+                  from store_sales
+                  where ss_quantity between 1 and 20) end bucket1 ,
+       case when (select count(*)
+                  from store_sales
+                  where ss_quantity between 21 and 40) > 3613
+            then (select avg(ss_ext_tax)
+                  from store_sales
+                  where ss_quantity between 21 and 40) 
+            else (select avg(ss_net_profit)
+                  from store_sales
+                  where ss_quantity between 21 and 40) end bucket2,
+       case when (select count(*)
+                  from store_sales
+                  where ss_quantity between 41 and 60) > 43453
+            then (select avg(ss_ext_tax)
+                  from store_sales
+                  where ss_quantity between 41 and 60)
+            else (select avg(ss_net_profit)
+                  from store_sales
+                  where ss_quantity between 41 and 60) end bucket3,
+       case when (select count(*)
+                  from store_sales
+                  where ss_quantity between 61 and 80) > 18903
+            then (select avg(ss_ext_tax)
+                  from store_sales
+                  where ss_quantity between 61 and 80)
+            else (select avg(ss_net_profit)
+                  from store_sales
+                  where ss_quantity between 61 and 80) end bucket4,
+       case when (select count(*)
+                  from store_sales
+                  where ss_quantity between 81 and 100) > 2125
+            then (select avg(ss_ext_tax)
+                  from store_sales
+                  where ss_quantity between 81 and 100)
+            else (select avg(ss_net_profit)
+                  from store_sales
+                  where ss_quantity between 81 and 100) end bucket5
+from reason
+where r_reason_sk = 1

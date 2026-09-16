@@ -1,25 +1,72 @@
-select c_last_name
-       ,c_first_name
-       ,c_salutation
-       ,c_preferred_cust_flag 
-       ,ss_ticket_number
-       ,cnt from
-   (select ss_ticket_number
-          ,ss_customer_sk
-          ,count(*) cnt
-    from store_sales,date_dim,store,household_demographics
-    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
-    and store_sales.ss_store_sk = store.s_store_sk  
-    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
-    and date_dim.d_dom between 1 and 2 
-    and (household_demographics.hd_buy_potential = '>10000' or
-         household_demographics.hd_buy_potential = '0-500')
-    and household_demographics.hd_vehicle_count > 0
-    and case when household_demographics.hd_vehicle_count > 0 then 
-             household_demographics.hd_dep_count/ household_demographics.hd_vehicle_count else null end > 1
-    and date_dim.d_year in (1998,1998+1,1998+2)
-    and store.s_county in ('Williamson County','Williamson County','Williamson County','Williamson County')
-    group by ss_ticket_number,ss_customer_sk) dj,customer
-    where ss_customer_sk = c_customer_sk
-      and cnt between 1 and 5
-    order by cnt desc;
+with ss as (
+ select
+          i_manufact_id,sum(ss_ext_sales_price) total_sales
+ from
+ 	store_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_manufact_id in (select
+  i_manufact_id
+from
+ item
+where i_category in ('Electronics'))
+ and     ss_item_sk              = i_item_sk
+ and     ss_sold_date_sk         = d_date_sk
+ and     d_year                  = 2000
+ and     d_moy                   = 5
+ and     ss_addr_sk              = ca_address_sk
+ and     ca_gmt_offset           = -5 
+ group by i_manufact_id),
+ cs as (
+ select
+          i_manufact_id,sum(cs_ext_sales_price) total_sales
+ from
+ 	catalog_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_manufact_id               in (select
+  i_manufact_id
+from
+ item
+where i_category in ('Electronics'))
+ and     cs_item_sk              = i_item_sk
+ and     cs_sold_date_sk         = d_date_sk
+ and     d_year                  = 2000
+ and     d_moy                   = 5
+ and     cs_bill_addr_sk         = ca_address_sk
+ and     ca_gmt_offset           = -5 
+ group by i_manufact_id),
+ ws as (
+ select
+          i_manufact_id,sum(ws_ext_sales_price) total_sales
+ from
+ 	web_sales,
+ 	date_dim,
+         customer_address,
+         item
+ where
+         i_manufact_id               in (select
+  i_manufact_id
+from
+ item
+where i_category in ('Electronics'))
+ and     ws_item_sk              = i_item_sk
+ and     ws_sold_date_sk         = d_date_sk
+ and     d_year                  = 2000
+ and     d_moy                   = 5
+ and     ws_bill_addr_sk         = ca_address_sk
+ and     ca_gmt_offset           = -5
+ group by i_manufact_id)
+  select  i_manufact_id ,sum(total_sales) total_sales
+ from  (select * from ss 
+        union all
+        select * from cs 
+        union all
+        select * from ws) tmp1
+ group by i_manufact_id
+ order by total_sales
+limit 100

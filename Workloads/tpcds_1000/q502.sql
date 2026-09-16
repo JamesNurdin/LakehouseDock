@@ -1,91 +1,23 @@
-select  *
-from
- (select count(*) h8_30_to_9
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk   
-     and ss_hdemo_sk = household_demographics.hd_demo_sk 
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 8
-     and time_dim.t_minute >= 30
-     and ((household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2) or
-          (household_demographics.hd_dep_count = 1 and household_demographics.hd_vehicle_count<=1+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2)) 
-     and store.s_store_name = 'ese') s1,
- (select count(*) h9_to_9_30 
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk 
-     and time_dim.t_hour = 9 
-     and time_dim.t_minute < 30
-     and ((household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2) or
-          (household_demographics.hd_dep_count = 1 and household_demographics.hd_vehicle_count<=1+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s2,
- (select count(*) h9_30_to_10 
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 9
-     and time_dim.t_minute >= 30
-     and ((household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2) or
-          (household_demographics.hd_dep_count = 1 and household_demographics.hd_vehicle_count<=1+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s3,
- (select count(*) h10_to_10_30
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 10 
-     and time_dim.t_minute < 30
-     and ((household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2) or
-          (household_demographics.hd_dep_count = 1 and household_demographics.hd_vehicle_count<=1+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s4,
- (select count(*) h10_30_to_11
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 10 
-     and time_dim.t_minute >= 30
-     and ((household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2) or
-          (household_demographics.hd_dep_count = 1 and household_demographics.hd_vehicle_count<=1+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s5,
- (select count(*) h11_to_11_30
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk 
-     and time_dim.t_hour = 11
-     and time_dim.t_minute < 30
-     and ((household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2) or
-          (household_demographics.hd_dep_count = 1 and household_demographics.hd_vehicle_count<=1+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s6,
- (select count(*) h11_30_to_12
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 11
-     and time_dim.t_minute >= 30
-     and ((household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2) or
-          (household_demographics.hd_dep_count = 1 and household_demographics.hd_vehicle_count<=1+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s7,
- (select count(*) h12_to_12_30
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 12
-     and time_dim.t_minute < 30
-     and ((household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2) or
-          (household_demographics.hd_dep_count = 1 and household_demographics.hd_vehicle_count<=1+2) or
-          (household_demographics.hd_dep_count = 0 and household_demographics.hd_vehicle_count<=0+2))
-     and store.s_store_name = 'ese') s8
-;
+select   
+    sum(ws_net_paid) as total_sum
+   ,i_category
+   ,i_class
+   ,grouping(i_category)+grouping(i_class) as lochierarchy
+   ,rank() over (
+ 	partition by grouping(i_category)+grouping(i_class),
+ 	case when grouping(i_class) = 0 then i_category end 
+ 	order by sum(ws_net_paid) desc) as rank_within_parent
+ from
+    web_sales
+   ,date_dim       d1
+   ,item
+ where
+    d1.d_month_seq between 1184 and 1184+11
+ and d1.d_date_sk = ws_sold_date_sk
+ and i_item_sk  = ws_item_sk
+ group by rollup(i_category,i_class)
+ order by
+   lochierarchy desc,
+   case when lochierarchy = 0 then i_category end,
+   rank_within_parent
+ limit 100

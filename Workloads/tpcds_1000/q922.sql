@@ -1,41 +1,26 @@
-select  *
-from (select i_category
-            ,i_class
-            ,i_brand
-            ,i_product_name
-            ,d_year
-            ,d_qoy
-            ,d_moy
-            ,s_store_id
-            ,sumsales
-            ,rank() over (partition by i_category order by sumsales desc) rk
-      from (select i_category
-                  ,i_class
-                  ,i_brand
-                  ,i_product_name
-                  ,d_year
-                  ,d_qoy
-                  ,d_moy
-                  ,s_store_id
-                  ,sum(coalesce(ss_sales_price*ss_quantity,0)) sumsales
-            from store_sales
-                ,date_dim
-                ,store
-                ,item
-       where  ss_sold_date_sk=d_date_sk
-          and ss_item_sk=i_item_sk
-          and ss_store_sk = s_store_sk
-          and d_month_seq between 1214 and 1214+11
-       group by  rollup(i_category, i_class, i_brand, i_product_name, d_year, d_qoy, d_moy,s_store_id))dw1) dw2
-where rk <= 100
-order by i_category
-        ,i_class
-        ,i_brand
-        ,i_product_name
-        ,d_year
-        ,d_qoy
-        ,d_moy
-        ,s_store_id
-        ,sumsales
-        ,rk
-limit 100;
+select  
+   count(distinct ws_order_number) as "order count"
+  ,sum(ws_ext_ship_cost) as "total shipping cost"
+  ,sum(ws_net_profit) as "total net profit"
+from
+   web_sales ws1
+  ,date_dim
+  ,customer_address
+  ,web_site
+where
+    d_date between DATE '2000-04-01' and 
+           (cast('2000-04-01' as date) + INTERVAL '60' DAY)
+and ws1.ws_ship_date_sk = d_date_sk
+and ws1.ws_ship_addr_sk = ca_address_sk
+and ca_state = 'VA'
+and ws1.ws_web_site_sk = web_site_sk
+and web_company_name = 'pri'
+and exists (select *
+            from web_sales ws2
+            where ws1.ws_order_number = ws2.ws_order_number
+              and ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk)
+and not exists(select *
+               from web_returns wr1
+               where ws1.ws_order_number = wr1.wr_order_number)
+order by count(distinct ws_order_number)
+limit 100

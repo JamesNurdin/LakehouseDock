@@ -1,25 +1,19 @@
-select  sum(cs_ext_discount_amt)  as "excess discount amount" 
-from 
-   catalog_sales 
-   ,item 
-   ,date_dim
-where
-i_manufact_id = 638
-and i_item_sk = cs_item_sk 
-and d_date between '1998-03-20' and 
-        (cast('1998-03-20' as date) + 90 days)
-and d_date_sk = cs_sold_date_sk 
-and cs_ext_discount_amt  
-     > ( 
-         select 
-            1.3 * avg(cs_ext_discount_amt) 
-         from 
-            catalog_sales 
-           ,date_dim
-         where 
-              cs_item_sk = i_item_sk 
-          and d_date between '1998-03-20' and
-                             (cast('1998-03-20' as date) + 90 days)
-          and d_date_sk = cs_sold_date_sk 
-      ) 
-limit 100;
+select  cast(amc as decimal(15,4))/cast(pmc as decimal(15,4)) am_pm_ratio
+ from ( select count(*) amc
+       from web_sales, household_demographics , time_dim, web_page
+       where ws_sold_time_sk = time_dim.t_time_sk
+         and ws_ship_hdemo_sk = household_demographics.hd_demo_sk
+         and ws_web_page_sk = web_page.wp_web_page_sk
+         and time_dim.t_hour between 11 and 11+1
+         and household_demographics.hd_dep_count = 8
+         and web_page.wp_char_count between 5000 and 5200) at,
+      ( select count(*) pmc
+       from web_sales, household_demographics , time_dim, web_page
+       where ws_sold_time_sk = time_dim.t_time_sk
+         and ws_ship_hdemo_sk = household_demographics.hd_demo_sk
+         and ws_web_page_sk = web_page.wp_web_page_sk
+         and time_dim.t_hour between 13 and 13+1
+         and household_demographics.hd_dep_count = 8
+         and web_page.wp_char_count between 5000 and 5200) pt
+ order by am_pm_ratio
+ limit 100

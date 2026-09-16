@@ -1,49 +1,32 @@
-with ss as
- (select ca_county,d_qoy, d_year,sum(ss_ext_sales_price) as store_sales
- from store_sales,date_dim,customer_address
- where ss_sold_date_sk = d_date_sk
-  and ss_addr_sk=ca_address_sk
- group by ca_county,d_qoy, d_year),
- ws as
- (select ca_county,d_qoy, d_year,sum(ws_ext_sales_price) as web_sales
- from web_sales,date_dim,customer_address
- where ws_sold_date_sk = d_date_sk
-  and ws_bill_addr_sk=ca_address_sk
- group by ca_county,d_qoy, d_year)
- select /* tt */
-        ss1.ca_county
-       ,ss1.d_year
-       ,ws2.web_sales/ws1.web_sales web_q1_q2_increase
-       ,ss2.store_sales/ss1.store_sales store_q1_q2_increase
-       ,ws3.web_sales/ws2.web_sales web_q2_q3_increase
-       ,ss3.store_sales/ss2.store_sales store_q2_q3_increase
- from
-        ss ss1
-       ,ss ss2
-       ,ss ss3
-       ,ws ws1
-       ,ws ws2
-       ,ws ws3
- where
-    ss1.d_qoy = 1
-    and ss1.d_year = 2001
-    and ss1.ca_county = ss2.ca_county
-    and ss2.d_qoy = 2
-    and ss2.d_year = 2001
- and ss2.ca_county = ss3.ca_county
-    and ss3.d_qoy = 3
-    and ss3.d_year = 2001
-    and ss1.ca_county = ws1.ca_county
-    and ws1.d_qoy = 1
-    and ws1.d_year = 2001
-    and ws1.ca_county = ws2.ca_county
-    and ws2.d_qoy = 2
-    and ws2.d_year = 2001
-    and ws1.ca_county = ws3.ca_county
-    and ws3.d_qoy = 3
-    and ws3.d_year =2001
-    and case when ws1.web_sales > 0 then ws2.web_sales/ws1.web_sales else null end 
-       > case when ss1.store_sales > 0 then ss2.store_sales/ss1.store_sales else null end
-    and case when ws2.web_sales > 0 then ws3.web_sales/ws2.web_sales else null end
-       > case when ss2.store_sales > 0 then ss3.store_sales/ss2.store_sales else null end
- order by web_q2_q3_increase;
+select  
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,web_name
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk <= 30 ) then 1 else 0 end)  as "30 days" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 30) and 
+                 (ws_ship_date_sk - ws_sold_date_sk <= 60) then 1 else 0 end )  as "31- INTERVAL '60' DAY" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 60) and 
+                 (ws_ship_date_sk - ws_sold_date_sk <= 90) then 1 else 0 end)  as "61- INTERVAL '90' DAY" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk > 90) and
+                 (ws_ship_date_sk - ws_sold_date_sk <= 120) then 1 else 0 end)  as "91- INTERVAL '120' DAY" 
+  ,sum(case when (ws_ship_date_sk - ws_sold_date_sk  > 120) then 1 else 0 end)  as ">120 days" 
+from
+   web_sales
+  ,warehouse
+  ,ship_mode
+  ,web_site
+  ,date_dim
+where
+    d_month_seq between 1210 and 1210 + 11
+and ws_ship_date_sk   = d_date_sk
+and ws_warehouse_sk   = w_warehouse_sk
+and ws_ship_mode_sk   = sm_ship_mode_sk
+and ws_web_site_sk    = web_site_sk
+group by
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,web_name
+order by substr(w_warehouse_name,1,20)
+        ,sm_type
+       ,web_name
+limit 100

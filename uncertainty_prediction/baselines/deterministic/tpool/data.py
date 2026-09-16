@@ -729,8 +729,15 @@ def get_train_test_datasets_from_trino(
     max_condition_nodes=8,
     extra_dim=16,
     sample_dim=32,
+    vocab_qids=None,
 ):
-    train_plans = [plans_by_query[q] for q in train_qids if q in plans_by_query]
+    """`vocab_qids`, if given, fits the operator vocabulary (and hence the
+    model's `operator_dim`) from this query set instead of `train_qids` --
+    see `tlstm`'s data pipeline / `mscn`'s data pipeline docstrings for why
+    this is what makes pretrain-then-fine-tune weight transfer safe.
+    """
+    vocab_source_qids = vocab_qids if vocab_qids is not None else train_qids
+    train_plans = [plans_by_query[q] for q in vocab_source_qids if q in plans_by_query]
     operator_names = set(get_all_operator_names(train_plans))
     operator_names.add("UNKNOWN")
     operator_names.add("FOLD_NODE")

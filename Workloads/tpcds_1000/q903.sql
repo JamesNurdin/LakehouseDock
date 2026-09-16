@@ -1,45 +1,67 @@
-with v1 as(
- select i_category, i_brand,
-        cc_name,
-        d_year, d_moy,
-        sum(cs_sales_price) sum_sales,
-        avg(sum(cs_sales_price)) over
-          (partition by i_category, i_brand,
-                     cc_name, d_year)
-          avg_monthly_sales,
-        rank() over
-          (partition by i_category, i_brand,
-                     cc_name
-           order by d_year, d_moy) rn
- from item, catalog_sales, date_dim, call_center
- where cs_item_sk = i_item_sk and
-       cs_sold_date_sk = d_date_sk and
-       cc_call_center_sk= cs_call_center_sk and
-       (
-         d_year = 2001 or
-         ( d_year = 2001-1 and d_moy =12) or
-         ( d_year = 2001+1 and d_moy =1)
-       )
- group by i_category, i_brand,
-          cc_name , d_year, d_moy),
- v2 as(
- select v1.i_category, v1.i_brand, v1.cc_name
-        ,v1.d_year, v1.d_moy
-        ,v1.avg_monthly_sales
-        ,v1.sum_sales, v1_lag.sum_sales psum, v1_lead.sum_sales nsum
- from v1, v1 v1_lag, v1 v1_lead
- where v1.i_category = v1_lag.i_category and
-       v1.i_category = v1_lead.i_category and
-       v1.i_brand = v1_lag.i_brand and
-       v1.i_brand = v1_lead.i_brand and
-       v1. cc_name = v1_lag. cc_name and
-       v1. cc_name = v1_lead. cc_name and
-       v1.rn = v1_lag.rn + 1 and
-       v1.rn = v1_lead.rn - 1)
-  select  *
- from v2
- where  d_year = 2001 and
-        avg_monthly_sales > 0 and
-        case when avg_monthly_sales > 0 then abs(sum_sales - avg_monthly_sales) / avg_monthly_sales else null end > 0.1
- order by sum_sales - avg_monthly_sales, 3
- limit 100;
+WITH all_sales AS (
+ SELECT d_year
+       ,i_brand_id
+       ,i_class_id
+       ,i_category_id
+       ,i_manufact_id
+       ,SUM(sales_cnt) AS sales_cnt
+       ,SUM(sales_amt) AS sales_amt
+ FROM (SELECT d_year
+             ,i_brand_id
+             ,i_class_id
+             ,i_category_id
+             ,i_manufact_id
+             ,cs_quantity - COALESCE(cr_return_quantity,0) AS sales_cnt
+             ,cs_ext_sales_price - COALESCE(cr_return_amount,0.0) AS sales_amt
+       FROM catalog_sales JOIN item ON i_item_sk=cs_item_sk
+                          JOIN date_dim ON d_date_sk=cs_sold_date_sk
+                          LEFT JOIN catalog_returns ON (cs_order_number=cr_order_number 
+                                                    AND cs_item_sk=cr_item_sk)
+       WHERE i_category='Children'
+       UNION
+       SELECT d_year
+             ,i_brand_id
+             ,i_class_id
+             ,i_category_id
+             ,i_manufact_id
+             ,ss_quantity - COALESCE(sr_return_quantity,0) AS sales_cnt
+             ,ss_ext_sales_price - COALESCE(sr_return_amt,0.0) AS sales_amt
+       FROM store_sales JOIN item ON i_item_sk=ss_item_sk
+                        JOIN date_dim ON d_date_sk=ss_sold_date_sk
+                        LEFT JOIN store_returns ON (ss_ticket_number=sr_ticket_number 
+                                                AND ss_item_sk=sr_item_sk)
+       WHERE i_category='Children'
+       UNION
+       SELECT d_year
+             ,i_brand_id
+             ,i_class_id
+             ,i_category_id
+             ,i_manufact_id
+             ,ws_quantity - COALESCE(wr_return_quantity,0) AS sales_cnt
+             ,ws_ext_sales_price - COALESCE(wr_return_amt,0.0) AS sales_amt
+       FROM web_sales JOIN item ON i_item_sk=ws_item_sk
+                      JOIN date_dim ON d_date_sk=ws_sold_date_sk
+                      LEFT JOIN web_returns ON (ws_order_number=wr_order_number 
+                                            AND ws_item_sk=wr_item_sk)
+       WHERE i_category='Children') sales_detail
+ GROUP BY d_year, i_brand_id, i_class_id, i_category_id, i_manufact_id)
+ SELECT  prev_yr.d_year AS prev_year
+                          ,curr_yr.d_year AS year
+                          ,curr_yr.i_brand_id
+                          ,curr_yr.i_class_id
+                          ,curr_yr.i_category_id
+                          ,curr_yr.i_manufact_id
+                          ,prev_yr.sales_cnt AS prev_yr_cnt
+                          ,curr_yr.sales_cnt AS curr_yr_cnt
+                          ,curr_yr.sales_cnt-prev_yr.sales_cnt AS sales_cnt_diff
+                          ,curr_yr.sales_amt-prev_yr.sales_amt AS sales_amt_diff
+ FROM all_sales curr_yr, all_sales prev_yr
+ WHERE curr_yr.i_brand_id=prev_yr.i_brand_id
+   AND curr_yr.i_class_id=prev_yr.i_class_id
+   AND curr_yr.i_category_id=prev_yr.i_category_id
+   AND curr_yr.i_manufact_id=prev_yr.i_manufact_id
+   AND curr_yr.d_year=2000
+   AND prev_yr.d_year=2000-1
+   AND CAST(curr_yr.sales_cnt AS DECIMAL(17,2))/CAST(prev_yr.sales_cnt AS DECIMAL(17,2))<0.9
+ ORDER BY sales_cnt_diff
+ limit 100

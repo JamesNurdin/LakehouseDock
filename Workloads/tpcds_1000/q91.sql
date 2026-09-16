@@ -1,49 +1,19 @@
-select avg(ss_quantity)
-       ,avg(ss_ext_sales_price)
-       ,avg(ss_ext_wholesale_cost)
-       ,sum(ss_ext_wholesale_cost)
- from store_sales
-     ,store
-     ,customer_demographics
-     ,household_demographics
-     ,customer_address
-     ,date_dim
- where s_store_sk = ss_store_sk
- and  ss_sold_date_sk = d_date_sk and d_year = 2001
- and((ss_hdemo_sk=hd_demo_sk
-  and cd_demo_sk = ss_cdemo_sk
-  and cd_marital_status = 'M'
-  and cd_education_status = 'Secondary'
-  and ss_sales_price between 100.00 and 150.00
-  and hd_dep_count = 3   
-     )or
-     (ss_hdemo_sk=hd_demo_sk
-  and cd_demo_sk = ss_cdemo_sk
-  and cd_marital_status = 'S'
-  and cd_education_status = 'College'
-  and ss_sales_price between 50.00 and 100.00   
-  and hd_dep_count = 1
-     ) or 
-     (ss_hdemo_sk=hd_demo_sk
-  and cd_demo_sk = ss_cdemo_sk
-  and cd_marital_status = 'U'
-  and cd_education_status = 'Primary'
-  and ss_sales_price between 150.00 and 200.00 
-  and hd_dep_count = 1  
-     ))
- and((ss_addr_sk = ca_address_sk
-  and ca_country = 'United States'
-  and ca_state in ('FL', 'TX', 'CA')
-  and ss_net_profit between 100 and 200  
-     ) or
-     (ss_addr_sk = ca_address_sk
-  and ca_country = 'United States'
-  and ca_state in ('IA', 'IN', 'MO')
-  and ss_net_profit between 150 and 300  
-     ) or
-     (ss_addr_sk = ca_address_sk
-  and ca_country = 'United States'
-  and ca_state in ('TN', 'KY', 'CT')
-  and ss_net_profit between 50 and 250  
-     ))
-;
+select count(*) 
+from ((select distinct c_last_name, c_first_name, d_date
+       from store_sales, date_dim, customer
+       where store_sales.ss_sold_date_sk = date_dim.d_date_sk
+         and store_sales.ss_customer_sk = customer.c_customer_sk
+         and d_month_seq between 1211 and 1211+11)
+       except
+      (select distinct c_last_name, c_first_name, d_date
+       from catalog_sales, date_dim, customer
+       where catalog_sales.cs_sold_date_sk = date_dim.d_date_sk
+         and catalog_sales.cs_bill_customer_sk = customer.c_customer_sk
+         and d_month_seq between 1211 and 1211+11)
+       except
+      (select distinct c_last_name, c_first_name, d_date
+       from web_sales, date_dim, customer
+       where web_sales.ws_sold_date_sk = date_dim.d_date_sk
+         and web_sales.ws_bill_customer_sk = customer.c_customer_sk
+         and d_month_seq between 1211 and 1211+11)
+) cool_cust

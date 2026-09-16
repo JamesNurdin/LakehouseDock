@@ -1,31 +1,14 @@
-select  i_item_id,
-        ca_country,
-        ca_state, 
-        ca_county,
-        avg( cast(cs_quantity as numeric(12,2))) agg1,
-        avg( cast(cs_list_price as numeric(12,2))) agg2,
-        avg( cast(cs_coupon_amt as numeric(12,2))) agg3,
-        avg( cast(cs_sales_price as numeric(12,2))) agg4,
-        avg( cast(cs_net_profit as numeric(12,2))) agg5,
-        avg( cast(c_birth_year as numeric(12,2))) agg6,
-        avg( cast(cd1.cd_dep_count as numeric(12,2))) agg7
- from catalog_sales, customer_demographics cd1, 
-      customer_demographics cd2, customer, customer_address, date_dim, item
- where cs_sold_date_sk = d_date_sk and
-       cs_item_sk = i_item_sk and
-       cs_bill_cdemo_sk = cd1.cd_demo_sk and
-       cs_bill_customer_sk = c_customer_sk and
-       cd1.cd_gender = 'F' and 
-       cd1.cd_education_status = 'Primary' and
-       c_current_cdemo_sk = cd2.cd_demo_sk and
-       c_current_addr_sk = ca_address_sk and
-       c_birth_month in (3,8,7,1,5,6) and
-       d_year = 2001 and
-       ca_state in ('NH','KY','MS'
-                   ,'SC','TX','MO','KS')
- group by rollup (i_item_id, ca_country, ca_state, ca_county)
- order by ca_country,
-        ca_state, 
-        ca_county,
-	i_item_id
- limit 100;
+select  i_item_id
+       ,i_item_desc
+       ,i_current_price
+ from item, inventory, date_dim, catalog_sales
+ where i_current_price between 50 and 50 + 30
+ and inv_item_sk = i_item_sk
+ and d_date_sk=inv_date_sk
+ and d_date between cast('1999-07-10' as date) and (cast('1999-07-10' as date) + INTERVAL '60' DAY)
+ and i_manufact_id in (944,811,988,749)
+ and inv_quantity_on_hand between 100 and 500
+ and cs_item_sk = i_item_sk
+ group by i_item_id,i_item_desc,i_current_price
+ order by i_item_id
+ limit 100

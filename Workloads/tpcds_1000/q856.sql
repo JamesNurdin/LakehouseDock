@@ -1,28 +1,44 @@
-select c_last_name
-       ,c_first_name
-       ,c_salutation
-       ,c_preferred_cust_flag
-       ,ss_ticket_number
-       ,cnt from
-   (select ss_ticket_number
-          ,ss_customer_sk
-          ,count(*) cnt
-    from store_sales,date_dim,store,household_demographics
-    where store_sales.ss_sold_date_sk = date_dim.d_date_sk
-    and store_sales.ss_store_sk = store.s_store_sk  
-    and store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk
-    and (date_dim.d_dom between 1 and 3 or date_dim.d_dom between 25 and 28)
-    and (household_demographics.hd_buy_potential = '>10000' or
-         household_demographics.hd_buy_potential = 'unknown')
-    and household_demographics.hd_vehicle_count > 0
-    and (case when household_demographics.hd_vehicle_count > 0 
-	then household_demographics.hd_dep_count/ household_demographics.hd_vehicle_count 
-	else null 
-	end)  > 1.2
-    and date_dim.d_year in (1999,1999+1,1999+2)
-    and store.s_county in ('Williamson County','Williamson County','Williamson County','Williamson County',
-                           'Williamson County','Williamson County','Williamson County','Williamson County')
-    group by ss_ticket_number,ss_customer_sk) dn,customer
-    where ss_customer_sk = c_customer_sk
-      and cnt between 15 and 20
-    order by c_last_name,c_first_name,c_salutation,c_preferred_cust_flag desc;
+select   
+     i_item_id
+    ,i_item_desc
+    ,s_store_id
+    ,s_store_name
+    ,min(ss_quantity)        as store_sales_quantity
+    ,min(sr_return_quantity) as store_returns_quantity
+    ,min(cs_quantity)        as catalog_sales_quantity
+ from
+    store_sales
+   ,store_returns
+   ,catalog_sales
+   ,date_dim             d1
+   ,date_dim             d2
+   ,date_dim             d3
+   ,store
+   ,item
+ where
+     d1.d_moy               = 4 
+ and d1.d_year              = 2000
+ and d1.d_date_sk           = ss_sold_date_sk
+ and i_item_sk              = ss_item_sk
+ and s_store_sk             = ss_store_sk
+ and ss_customer_sk         = sr_customer_sk
+ and ss_item_sk             = sr_item_sk
+ and ss_ticket_number       = sr_ticket_number
+ and sr_returned_date_sk    = d2.d_date_sk
+ and d2.d_moy               between 4 and  4 + 3 
+ and d2.d_year              = 2000
+ and sr_customer_sk         = cs_bill_customer_sk
+ and sr_item_sk             = cs_item_sk
+ and cs_sold_date_sk        = d3.d_date_sk     
+ and d3.d_year              in (2000,2000+1,2000+2)
+ group by
+    i_item_id
+   ,i_item_desc
+   ,s_store_id
+   ,s_store_name
+ order by
+    i_item_id 
+   ,i_item_desc
+   ,s_store_id
+   ,s_store_name
+ limit 100

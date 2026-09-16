@@ -1,21 +1,47 @@
-select  channel, col_name, d_year, d_qoy, i_category, COUNT(*) sales_cnt, SUM(ext_sales_price) sales_amt FROM (
-        SELECT 'store' as channel, 'ss_cdemo_sk' col_name, d_year, d_qoy, i_category, ss_ext_sales_price ext_sales_price
-         FROM store_sales, item, date_dim
-         WHERE ss_cdemo_sk IS NULL
-           AND ss_sold_date_sk=d_date_sk
-           AND ss_item_sk=i_item_sk
-        UNION ALL
-        SELECT 'web' as channel, 'ws_warehouse_sk' col_name, d_year, d_qoy, i_category, ws_ext_sales_price ext_sales_price
-         FROM web_sales, item, date_dim
-         WHERE ws_warehouse_sk IS NULL
-           AND ws_sold_date_sk=d_date_sk
-           AND ws_item_sk=i_item_sk
-        UNION ALL
-        SELECT 'catalog' as channel, 'cs_ship_cdemo_sk' col_name, d_year, d_qoy, i_category, cs_ext_sales_price ext_sales_price
-         FROM catalog_sales, item, date_dim
-         WHERE cs_ship_cdemo_sk IS NULL
-           AND cs_sold_date_sk=d_date_sk
-           AND cs_item_sk=i_item_sk) foo
-GROUP BY channel, col_name, d_year, d_qoy, i_category
-ORDER BY channel, col_name, d_year, d_qoy, i_category
-limit 100;
+select case when (select count(*) 
+                  from store_sales 
+                  where ss_quantity between 1 and 20) > 11687
+            then (select avg(ss_ext_tax) 
+                  from store_sales 
+                  where ss_quantity between 1 and 20) 
+            else (select avg(ss_net_paid_inc_tax)
+                  from store_sales
+                  where ss_quantity between 1 and 20) end bucket1 ,
+       case when (select count(*)
+                  from store_sales
+                  where ss_quantity between 21 and 40) > 23858
+            then (select avg(ss_ext_tax)
+                  from store_sales
+                  where ss_quantity between 21 and 40) 
+            else (select avg(ss_net_paid_inc_tax)
+                  from store_sales
+                  where ss_quantity between 21 and 40) end bucket2,
+       case when (select count(*)
+                  from store_sales
+                  where ss_quantity between 41 and 60) > 3443
+            then (select avg(ss_ext_tax)
+                  from store_sales
+                  where ss_quantity between 41 and 60)
+            else (select avg(ss_net_paid_inc_tax)
+                  from store_sales
+                  where ss_quantity between 41 and 60) end bucket3,
+       case when (select count(*)
+                  from store_sales
+                  where ss_quantity between 61 and 80) > 2836
+            then (select avg(ss_ext_tax)
+                  from store_sales
+                  where ss_quantity between 61 and 80)
+            else (select avg(ss_net_paid_inc_tax)
+                  from store_sales
+                  where ss_quantity between 61 and 80) end bucket4,
+       case when (select count(*)
+                  from store_sales
+                  where ss_quantity between 81 and 100) > 8544
+            then (select avg(ss_ext_tax)
+                  from store_sales
+                  where ss_quantity between 81 and 100)
+            else (select avg(ss_net_paid_inc_tax)
+                  from store_sales
+                  where ss_quantity between 81 and 100) end bucket5
+from reason
+where r_reason_sk = 1

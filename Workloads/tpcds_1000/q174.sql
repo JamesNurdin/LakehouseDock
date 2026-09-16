@@ -1,41 +1,41 @@
-with wss as 
- (select d_week_seq,
-        ss_store_sk,
-        sum(case when (d_day_name='Sunday') then ss_sales_price else null end) sun_sales,
-        sum(case when (d_day_name='Monday') then ss_sales_price else null end) mon_sales,
-        sum(case when (d_day_name='Tuesday') then ss_sales_price else  null end) tue_sales,
-        sum(case when (d_day_name='Wednesday') then ss_sales_price else null end) wed_sales,
-        sum(case when (d_day_name='Thursday') then ss_sales_price else null end) thu_sales,
-        sum(case when (d_day_name='Friday') then ss_sales_price else null end) fri_sales,
-        sum(case when (d_day_name='Saturday') then ss_sales_price else null end) sat_sales
- from store_sales,date_dim
- where d_date_sk = ss_sold_date_sk
- group by d_week_seq,ss_store_sk
- )
-  select  s_store_name1,s_store_id1,d_week_seq1
-       ,sun_sales1/sun_sales2,mon_sales1/mon_sales2
-       ,tue_sales1/tue_sales2,wed_sales1/wed_sales2,thu_sales1/thu_sales2
-       ,fri_sales1/fri_sales2,sat_sales1/sat_sales2
- from
- (select s_store_name s_store_name1,wss.d_week_seq d_week_seq1
-        ,s_store_id s_store_id1,sun_sales sun_sales1
-        ,mon_sales mon_sales1,tue_sales tue_sales1
-        ,wed_sales wed_sales1,thu_sales thu_sales1
-        ,fri_sales fri_sales1,sat_sales sat_sales1
-  from wss,store,date_dim d
-  where d.d_week_seq = wss.d_week_seq and
-        ss_store_sk = s_store_sk and 
-        d_month_seq between 1180 and 1180 + 11) y,
- (select s_store_name s_store_name2,wss.d_week_seq d_week_seq2
-        ,s_store_id s_store_id2,sun_sales sun_sales2
-        ,mon_sales mon_sales2,tue_sales tue_sales2
-        ,wed_sales wed_sales2,thu_sales thu_sales2
-        ,fri_sales fri_sales2,sat_sales sat_sales2
-  from wss,store,date_dim d
-  where d.d_week_seq = wss.d_week_seq and
-        ss_store_sk = s_store_sk and 
-        d_month_seq between 1180+ 12 and 1180 + 23) x
- where s_store_id1=s_store_id2
-   and d_week_seq1=d_week_seq2-52
- order by s_store_name1,s_store_id1,d_week_seq1
-limit 100;
+select  *
+from (select i_category
+            ,i_class
+            ,i_brand
+            ,i_product_name
+            ,d_year
+            ,d_qoy
+            ,d_moy
+            ,s_store_id
+            ,sumsales
+            ,rank() over (partition by i_category order by sumsales desc) rk
+      from (select i_category
+                  ,i_class
+                  ,i_brand
+                  ,i_product_name
+                  ,d_year
+                  ,d_qoy
+                  ,d_moy
+                  ,s_store_id
+                  ,sum(coalesce(ss_sales_price*ss_quantity,0)) sumsales
+            from store_sales
+                ,date_dim
+                ,store
+                ,item
+       where  ss_sold_date_sk=d_date_sk
+          and ss_item_sk=i_item_sk
+          and ss_store_sk = s_store_sk
+          and d_month_seq between 1217 and 1217+11
+       group by  rollup(i_category, i_class, i_brand, i_product_name, d_year, d_qoy, d_moy,s_store_id))dw1) dw2
+where rk <= 100
+order by i_category
+        ,i_class
+        ,i_brand
+        ,i_product_name
+        ,d_year
+        ,d_qoy
+        ,d_moy
+        ,s_store_id
+        ,sumsales
+        ,rk
+limit 100

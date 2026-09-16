@@ -1,25 +1,27 @@
-select  *
-from(
-select i_category, i_class, i_brand,
-       s_store_name, s_company_name,
-       d_moy,
-       sum(ss_sales_price) sum_sales,
-       avg(sum(ss_sales_price)) over
-         (partition by i_category, i_brand, s_store_name, s_company_name)
-         avg_monthly_sales
-from item, store_sales, date_dim, store
-where ss_item_sk = i_item_sk and
-      ss_sold_date_sk = d_date_sk and
-      ss_store_sk = s_store_sk and
-      d_year in (2001) and
-        ((i_category in ('Jewelry','Men','Books') and
-          i_class in ('costume','shirts','computers')
-         )
-      or (i_category in ('Sports','Women','Children') and
-          i_class in ('camping','fragrances','infants') 
-        ))
-group by i_category, i_class, i_brand,
-         s_store_name, s_company_name, d_moy) tmp1
-where case when (avg_monthly_sales <> 0) then (abs(sum_sales - avg_monthly_sales) / avg_monthly_sales) else null end > 0.1
-order by sum_sales - avg_monthly_sales, s_store_name
-limit 100;
+select  
+    sum(ss_net_profit)/sum(ss_ext_sales_price) as gross_margin
+   ,i_category
+   ,i_class
+   ,grouping(i_category)+grouping(i_class) as lochierarchy
+   ,rank() over (
+ 	partition by grouping(i_category)+grouping(i_class),
+ 	case when grouping(i_class) = 0 then i_category end 
+ 	order by sum(ss_net_profit)/sum(ss_ext_sales_price) asc) as rank_within_parent
+ from
+    store_sales
+   ,date_dim       d1
+   ,item
+   ,store
+ where
+    d1.d_year = 2002 
+ and d1.d_date_sk = ss_sold_date_sk
+ and i_item_sk  = ss_item_sk 
+ and s_store_sk  = ss_store_sk
+ and s_state in ('TN','TN','TN','TN',
+                 'TN','TN','TN','TN')
+ group by rollup(i_category,i_class)
+ order by
+   lochierarchy desc
+  ,case when lochierarchy = 0 then i_category end
+  ,rank_within_parent
+  limit 100

@@ -1,22 +1,24 @@
-select  i_brand_id brand_id, i_brand brand, i_manufact_id, i_manufact,
- 	sum(ss_ext_sales_price) ext_price
- from date_dim, store_sales, item,customer,customer_address,store
- where d_date_sk = ss_sold_date_sk
-   and ss_item_sk = i_item_sk
-   and i_manager_id=24
-   and d_moy=12
-   and d_year=2002
-   and ss_customer_sk = c_customer_sk 
-   and c_current_addr_sk = ca_address_sk
-   and substr(ca_zip,1,5) <> substr(s_zip,1,5) 
-   and ss_store_sk = s_store_sk 
- group by i_brand
-      ,i_brand_id
-      ,i_manufact_id
-      ,i_manufact
- order by ext_price desc
-         ,i_brand
-         ,i_brand_id
-         ,i_manufact_id
-         ,i_manufact
-limit 100 ;
+with inv as
+(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
+       ,stdev,mean, case mean when 0 then null else stdev/mean end cov
+ from(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
+            ,stddev_samp(inv_quantity_on_hand) stdev,avg(inv_quantity_on_hand) mean
+      from inventory
+          ,item
+          ,warehouse
+          ,date_dim
+      where inv_item_sk = i_item_sk
+        and inv_warehouse_sk = w_warehouse_sk
+        and inv_date_sk = d_date_sk
+        and d_year =2001
+      group by w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy) foo
+ where case mean when 0 then 0 else stdev/mean end > 1)
+select inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean, inv1.cov
+        ,inv2.w_warehouse_sk,inv2.i_item_sk,inv2.d_moy,inv2.mean, inv2.cov
+from inv inv1,inv inv2
+where inv1.i_item_sk = inv2.i_item_sk
+  and inv1.w_warehouse_sk =  inv2.w_warehouse_sk
+  and inv1.d_moy=2
+  and inv2.d_moy=2+1
+order by inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean,inv1.cov
+        ,inv2.d_moy,inv2.mean, inv2.cov

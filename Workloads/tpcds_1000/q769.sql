@@ -1,26 +1,32 @@
-select  * 
-from (select i_manager_id
-             ,sum(ss_sales_price) sum_sales
-             ,avg(sum(ss_sales_price)) over (partition by i_manager_id) avg_monthly_sales
-      from item
-          ,store_sales
-          ,date_dim
-          ,store
-      where ss_item_sk = i_item_sk
-        and ss_sold_date_sk = d_date_sk
-        and ss_store_sk = s_store_sk
-        and d_month_seq in (1216,1216+1,1216+2,1216+3,1216+4,1216+5,1216+6,1216+7,1216+8,1216+9,1216+10,1216+11)
-        and ((    i_category in ('Books','Children','Electronics')
-              and i_class in ('personal','portable','refernece','self-help')
-              and i_brand in ('scholaramalgamalg #14','scholaramalgamalg #7',
-		                  'exportiunivamalg #9','scholaramalgamalg #9'))
-           or(    i_category in ('Women','Music','Men')
-              and i_class in ('accessories','classical','fragrances','pants')
-              and i_brand in ('amalgimporto #1','edu packscholar #1','exportiimporto #1',
-		                 'importoamalg #1')))
-group by i_manager_id, d_moy) tmp1
-where case when avg_monthly_sales > 0 then abs (sum_sales - avg_monthly_sales) / avg_monthly_sales else null end > 0.1
-order by i_manager_id
-        ,avg_monthly_sales
-        ,sum_sales
-limit 100;
+select  asceding.rnk, i1.i_product_name best_performing, i2.i_product_name worst_performing
+from(select *
+     from (select item_sk,rank() over (order by rank_col asc) rnk
+           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col 
+                 from store_sales ss1
+                 where ss_store_sk = 3
+                 group by ss_item_sk
+                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
+                                                  from store_sales
+                                                  where ss_store_sk = 3
+                                                    and ss_hdemo_sk is null
+                                                  group by ss_store_sk))V1)V11
+     where rnk  < 11) asceding,
+    (select *
+     from (select item_sk,rank() over (order by rank_col desc) rnk
+           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col
+                 from store_sales ss1
+                 where ss_store_sk = 3
+                 group by ss_item_sk
+                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
+                                                  from store_sales
+                                                  where ss_store_sk = 3
+                                                    and ss_hdemo_sk is null
+                                                  group by ss_store_sk))V2)V21
+     where rnk  < 11) descending,
+item i1,
+item i2
+where asceding.rnk = descending.rnk 
+  and i1.i_item_sk=asceding.item_sk
+  and i2.i_item_sk=descending.item_sk
+order by asceding.rnk
+limit 100

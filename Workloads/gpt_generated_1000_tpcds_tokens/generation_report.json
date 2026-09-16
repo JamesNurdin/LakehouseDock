@@ -59922,5 +59922,15 @@
       "recursive_cte": 0.0
     },
     "feedback_enabled": true
+  },
+  "query_plans": {
+    "path": "plans.json",
+    "captured_at_utc": "2026-08-10T12:30:00.664987+00:00",
+    "instance": "lakehouse-g",
+    "schema": "tpcds",
+    "catalog": "iceberg",
+    "query_count": 1000,
+    "ok": 1000,
+    "failed": 0
   }
 }

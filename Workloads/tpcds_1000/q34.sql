@@ -1,35 +1,49 @@
-select  
-    sum(ss_net_profit) as total_sum
-   ,s_state
-   ,s_county
-   ,grouping(s_state)+grouping(s_county) as lochierarchy
-   ,rank() over (
- 	partition by grouping(s_state)+grouping(s_county),
- 	case when grouping(s_county) = 0 then s_state end 
- 	order by sum(ss_net_profit) desc) as rank_within_parent
+with ss as
+ (select ca_county,d_qoy, d_year,sum(ss_ext_sales_price) as store_sales
+ from store_sales,date_dim,customer_address
+ where ss_sold_date_sk = d_date_sk
+  and ss_addr_sk=ca_address_sk
+ group by ca_county,d_qoy, d_year),
+ ws as
+ (select ca_county,d_qoy, d_year,sum(ws_ext_sales_price) as web_sales
+ from web_sales,date_dim,customer_address
+ where ws_sold_date_sk = d_date_sk
+  and ws_bill_addr_sk=ca_address_sk
+ group by ca_county,d_qoy, d_year)
+ select /* tt */
+        ss1.ca_county
+       ,ss1.d_year
+       ,ws2.web_sales/ws1.web_sales web_q1_q2_increase
+       ,ss2.store_sales/ss1.store_sales store_q1_q2_increase
+       ,ws3.web_sales/ws2.web_sales web_q2_q3_increase
+       ,ss3.store_sales/ss2.store_sales store_q2_q3_increase
  from
-    store_sales
-   ,date_dim       d1
-   ,store
+        ss ss1
+       ,ss ss2
+       ,ss ss3
+       ,ws ws1
+       ,ws ws2
+       ,ws ws3
  where
-    d1.d_month_seq between 1181 and 1181+11
- and d1.d_date_sk = ss_sold_date_sk
- and s_store_sk  = ss_store_sk
- and s_state in
-             ( select s_state
-               from  (select s_state as s_state,
- 			    rank() over ( partition by s_state order by sum(ss_net_profit) desc) as ranking
-                      from   store_sales, store, date_dim
-                      where  d_month_seq between 1181 and 1181+11
- 			    and d_date_sk = ss_sold_date_sk
- 			    and s_store_sk  = ss_store_sk
-                      group by s_state
-                     ) tmp1 
-               where ranking <= 5
-             )
- group by rollup(s_state,s_county)
- order by
-   lochierarchy desc
-  ,case when lochierarchy = 0 then s_state end
-  ,rank_within_parent
- limit 100;
+    ss1.d_qoy = 1
+    and ss1.d_year = 2002
+    and ss1.ca_county = ss2.ca_county
+    and ss2.d_qoy = 2
+    and ss2.d_year = 2002
+ and ss2.ca_county = ss3.ca_county
+    and ss3.d_qoy = 3
+    and ss3.d_year = 2002
+    and ss1.ca_county = ws1.ca_county
+    and ws1.d_qoy = 1
+    and ws1.d_year = 2002
+    and ws1.ca_county = ws2.ca_county
+    and ws2.d_qoy = 2
+    and ws2.d_year = 2002
+    and ws1.ca_county = ws3.ca_county
+    and ws3.d_qoy = 3
+    and ws3.d_year =2002
+    and case when ws1.web_sales > 0 then ws2.web_sales/ws1.web_sales else null end 
+       > case when ss1.store_sales > 0 then ss2.store_sales/ss1.store_sales else null end
+    and case when ws2.web_sales > 0 then ws3.web_sales/ws2.web_sales else null end
+       > case when ss2.store_sales > 0 then ss3.store_sales/ss2.store_sales else null end
+ order by web_q1_q2_increase

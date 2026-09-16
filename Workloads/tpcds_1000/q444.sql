@@ -1,20 +1,44 @@
-select  i_item_id,
-        s_state, grouping(s_state) g_state,
-        avg(ss_quantity) agg1,
-        avg(ss_list_price) agg2,
-        avg(ss_coupon_amt) agg3,
-        avg(ss_sales_price) agg4
- from store_sales, customer_demographics, date_dim, store, item
- where ss_sold_date_sk = d_date_sk and
-       ss_item_sk = i_item_sk and
-       ss_store_sk = s_store_sk and
-       ss_cdemo_sk = cd_demo_sk and
-       cd_gender = 'F' and
-       cd_marital_status = 'U' and
-       cd_education_status = 'College' and
-       d_year = 2000 and
-       s_state in ('TN','TN', 'TN', 'TN', 'TN', 'TN')
- group by rollup (i_item_id, s_state)
- order by i_item_id
-         ,s_state
- limit 100;
+select   
+     i_item_id
+    ,i_item_desc
+    ,s_store_id
+    ,s_store_name
+    ,min(ss_quantity)        as store_sales_quantity
+    ,min(sr_return_quantity) as store_returns_quantity
+    ,min(cs_quantity)        as catalog_sales_quantity
+ from
+    store_sales
+   ,store_returns
+   ,catalog_sales
+   ,date_dim             d1
+   ,date_dim             d2
+   ,date_dim             d3
+   ,store
+   ,item
+ where
+     d1.d_moy               = 4 
+ and d1.d_year              = 1998
+ and d1.d_date_sk           = ss_sold_date_sk
+ and i_item_sk              = ss_item_sk
+ and s_store_sk             = ss_store_sk
+ and ss_customer_sk         = sr_customer_sk
+ and ss_item_sk             = sr_item_sk
+ and ss_ticket_number       = sr_ticket_number
+ and sr_returned_date_sk    = d2.d_date_sk
+ and d2.d_moy               between 4 and  4 + 3 
+ and d2.d_year              = 1998
+ and sr_customer_sk         = cs_bill_customer_sk
+ and sr_item_sk             = cs_item_sk
+ and cs_sold_date_sk        = d3.d_date_sk     
+ and d3.d_year              in (1998,1998+1,1998+2)
+ group by
+    i_item_id
+   ,i_item_desc
+   ,s_store_id
+   ,s_store_name
+ order by
+    i_item_id 
+   ,i_item_desc
+   ,s_store_id
+   ,s_store_name
+ limit 100

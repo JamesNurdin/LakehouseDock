@@ -1,91 +1,44 @@
-select  *
-from
- (select count(*) h8_30_to_9
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk   
-     and ss_hdemo_sk = household_demographics.hd_demo_sk 
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 8
-     and time_dim.t_minute >= 30
-     and ((household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
-          (household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2)) 
-     and store.s_store_name = 'ese') s1,
- (select count(*) h9_to_9_30 
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk 
-     and time_dim.t_hour = 9 
-     and time_dim.t_minute < 30
-     and ((household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
-          (household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2))
-     and store.s_store_name = 'ese') s2,
- (select count(*) h9_30_to_10 
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 9
-     and time_dim.t_minute >= 30
-     and ((household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
-          (household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2))
-     and store.s_store_name = 'ese') s3,
- (select count(*) h10_to_10_30
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 10 
-     and time_dim.t_minute < 30
-     and ((household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
-          (household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2))
-     and store.s_store_name = 'ese') s4,
- (select count(*) h10_30_to_11
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 10 
-     and time_dim.t_minute >= 30
-     and ((household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
-          (household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2))
-     and store.s_store_name = 'ese') s5,
- (select count(*) h11_to_11_30
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk 
-     and time_dim.t_hour = 11
-     and time_dim.t_minute < 30
-     and ((household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
-          (household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2))
-     and store.s_store_name = 'ese') s6,
- (select count(*) h11_30_to_12
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 11
-     and time_dim.t_minute >= 30
-     and ((household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
-          (household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2))
-     and store.s_store_name = 'ese') s7,
- (select count(*) h12_to_12_30
- from store_sales, household_demographics , time_dim, store
- where ss_sold_time_sk = time_dim.t_time_sk
-     and ss_hdemo_sk = household_demographics.hd_demo_sk
-     and ss_store_sk = s_store_sk
-     and time_dim.t_hour = 12
-     and time_dim.t_minute < 30
-     and ((household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
-          (household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
-          (household_demographics.hd_dep_count = 4 and household_demographics.hd_vehicle_count<=4+2))
-     and store.s_store_name = 'ese') s8
-;
+select  
+  cd_gender,
+  cd_marital_status,
+  cd_education_status,
+  count(*) cnt1,
+  cd_purchase_estimate,
+  count(*) cnt2,
+  cd_credit_rating,
+  count(*) cnt3
+ from
+  customer c,customer_address ca,customer_demographics
+ where
+  c.c_current_addr_sk = ca.ca_address_sk and
+  ca_state in ('GA','VA','SC') and
+  cd_demo_sk = c.c_current_cdemo_sk and 
+  exists (select *
+          from store_sales,date_dim
+          where c.c_customer_sk = ss_customer_sk and
+                ss_sold_date_sk = d_date_sk and
+                d_year = 2004 and
+                d_moy between 4 and 4+2) and
+   (not exists (select *
+            from web_sales,date_dim
+            where c.c_customer_sk = ws_bill_customer_sk and
+                  ws_sold_date_sk = d_date_sk and
+                  d_year = 2004 and
+                  d_moy between 4 and 4+2) and
+    not exists (select * 
+            from catalog_sales,date_dim
+            where c.c_customer_sk = cs_ship_customer_sk and
+                  cs_sold_date_sk = d_date_sk and
+                  d_year = 2004 and
+                  d_moy between 4 and 4+2))
+ group by cd_gender,
+          cd_marital_status,
+          cd_education_status,
+          cd_purchase_estimate,
+          cd_credit_rating
+ order by cd_gender,
+          cd_marital_status,
+          cd_education_status,
+          cd_purchase_estimate,
+          cd_credit_rating
+ limit 100

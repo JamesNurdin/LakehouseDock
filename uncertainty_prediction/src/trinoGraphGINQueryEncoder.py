@@ -262,6 +262,7 @@ class TrinoGraphGINPlanEncoder:
     # vocab / misc
     min_op_freq: int = 1
     max_vocab: Optional[int] = None
+    fixed_vocab: Optional[Tuple[str, ...]] = None
     seed: int = 0
     device: str = "cpu"
     verbose: bool = False
@@ -297,6 +298,7 @@ class TrinoGraphGINPlanEncoder:
         w_graph: float = 1.0,
         min_op_freq: int = 1,
         max_vocab: Optional[int] = None,
+        fixed_vocab: Optional[Iterable[str]] = None,
         seed: int = 0,
         device: str = "cpu",
         verbose: bool = False,
@@ -327,6 +329,7 @@ class TrinoGraphGINPlanEncoder:
             w_graph=w_graph,
             min_op_freq=min_op_freq,
             max_vocab=max_vocab,
+            fixed_vocab=tuple(fixed_vocab) if fixed_vocab is not None else None,
             seed=seed,
             device=device,
             verbose=verbose,
@@ -411,6 +414,23 @@ class TrinoGraphGINPlanEncoder:
     # internals
     # ------------------------------------------------------------------
     def _build_vocab(self, graphs: List[nx.DiGraph]) -> Dict[str, int]:
+        if self.fixed_vocab is not None:
+            # Closed-world vocabulary supplied by the caller (e.g. the schema's
+            # full reachable-operator set), used verbatim instead of whatever
+            # this particular fit's plans happen to contain. Without this, a
+            # leg whose training plans simply never trigger some valid, real
+            # operator (a rare join/set-op type, say) would silently fold that
+            # operator into the single shared [MASK]/UNK-style embedding row
+            # the moment it *is* seen in another leg's held-out queries --
+            # collapsing exactly the structural signal this evaluation is
+            # trying to measure. min_op_freq/max_vocab are both frequency-based
+            # and can't help with "never observed in this fit's plans at all",
+            # so this is a separate knob, not a replacement for them.
+            vocab = sorted({str(op) for op in self.fixed_vocab})
+            if "UNK" not in vocab:
+                vocab.append("UNK")
+            return {op: i for i, op in enumerate(vocab)}
+
         from collections import Counter
         c: Counter = Counter()
         for G in graphs:

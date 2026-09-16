@@ -1,41 +1,94 @@
-with wss as 
- (select d_week_seq,
-        ss_store_sk,
-        sum(case when (d_day_name='Sunday') then ss_sales_price else null end) sun_sales,
-        sum(case when (d_day_name='Monday') then ss_sales_price else null end) mon_sales,
-        sum(case when (d_day_name='Tuesday') then ss_sales_price else  null end) tue_sales,
-        sum(case when (d_day_name='Wednesday') then ss_sales_price else null end) wed_sales,
-        sum(case when (d_day_name='Thursday') then ss_sales_price else null end) thu_sales,
-        sum(case when (d_day_name='Friday') then ss_sales_price else null end) fri_sales,
-        sum(case when (d_day_name='Saturday') then ss_sales_price else null end) sat_sales
- from store_sales,date_dim
- where d_date_sk = ss_sold_date_sk
- group by d_week_seq,ss_store_sk
- )
-  select  s_store_name1,s_store_id1,d_week_seq1
-       ,sun_sales1/sun_sales2,mon_sales1/mon_sales2
-       ,tue_sales1/tue_sales2,wed_sales1/wed_sales2,thu_sales1/thu_sales2
-       ,fri_sales1/fri_sales2,sat_sales1/sat_sales2
- from
- (select s_store_name s_store_name1,wss.d_week_seq d_week_seq1
-        ,s_store_id s_store_id1,sun_sales sun_sales1
-        ,mon_sales mon_sales1,tue_sales tue_sales1
-        ,wed_sales wed_sales1,thu_sales thu_sales1
-        ,fri_sales fri_sales1,sat_sales sat_sales1
-  from wss,store,date_dim d
-  where d.d_week_seq = wss.d_week_seq and
-        ss_store_sk = s_store_sk and 
-        d_month_seq between 1196 and 1196 + 11) y,
- (select s_store_name s_store_name2,wss.d_week_seq d_week_seq2
-        ,s_store_id s_store_id2,sun_sales sun_sales2
-        ,mon_sales mon_sales2,tue_sales tue_sales2
-        ,wed_sales wed_sales2,thu_sales thu_sales2
-        ,fri_sales fri_sales2,sat_sales sat_sales2
-  from wss,store,date_dim d
-  where d.d_week_seq = wss.d_week_seq and
-        ss_store_sk = s_store_sk and 
-        d_month_seq between 1196+ 12 and 1196 + 23) x
- where s_store_id1=s_store_id2
-   and d_week_seq1=d_week_seq2-52
- order by s_store_name1,s_store_id1,d_week_seq1
-limit 100;
+with  cross_items as
+ (select i_item_sk ss_item_sk
+ from item,
+ (select iss.i_brand_id brand_id
+     ,iss.i_class_id class_id
+     ,iss.i_category_id category_id
+ from store_sales
+     ,item iss
+     ,date_dim d1
+ where ss_item_sk = iss.i_item_sk
+   and ss_sold_date_sk = d1.d_date_sk
+   and d1.d_year between 1999 AND 1999 + 2
+ intersect
+ select ics.i_brand_id
+     ,ics.i_class_id
+     ,ics.i_category_id
+ from catalog_sales
+     ,item ics
+     ,date_dim d2
+ where cs_item_sk = ics.i_item_sk
+   and cs_sold_date_sk = d2.d_date_sk
+   and d2.d_year between 1999 AND 1999 + 2
+ intersect
+ select iws.i_brand_id
+     ,iws.i_class_id
+     ,iws.i_category_id
+ from web_sales
+     ,item iws
+     ,date_dim d3
+ where ws_item_sk = iws.i_item_sk
+   and ws_sold_date_sk = d3.d_date_sk
+   and d3.d_year between 1999 AND 1999 + 2) x
+ where i_brand_id = brand_id
+      and i_class_id = class_id
+      and i_category_id = category_id
+),
+ avg_sales as
+(select avg(quantity*list_price) average_sales
+  from (select ss_quantity quantity
+             ,ss_list_price list_price
+       from store_sales
+           ,date_dim
+       where ss_sold_date_sk = d_date_sk
+         and d_year between 1999 and 1999 + 2
+       union all
+       select cs_quantity quantity
+             ,cs_list_price list_price
+       from catalog_sales
+           ,date_dim
+       where cs_sold_date_sk = d_date_sk
+         and d_year between 1999 and 1999 + 2
+       union all
+       select ws_quantity quantity
+             ,ws_list_price list_price
+       from web_sales
+           ,date_dim
+       where ws_sold_date_sk = d_date_sk
+         and d_year between 1999 and 1999 + 2) x)
+  select  * from
+ (select 'store' channel, i_brand_id,i_class_id,i_category_id
+        ,sum(ss_quantity*ss_list_price) sales, count(*) number_sales
+ from store_sales 
+     ,item
+     ,date_dim
+ where ss_item_sk in (select ss_item_sk from cross_items)
+   and ss_item_sk = i_item_sk
+   and ss_sold_date_sk = d_date_sk
+   and d_week_seq = (select d_week_seq
+                     from date_dim
+                     where d_year = 1999 + 1
+                       and d_moy = 12
+                       and d_dom = 6)
+ group by i_brand_id,i_class_id,i_category_id
+ having sum(ss_quantity*ss_list_price) > (select average_sales from avg_sales)) this_year,
+ (select 'store' channel, i_brand_id,i_class_id
+        ,i_category_id, sum(ss_quantity*ss_list_price) sales, count(*) number_sales
+ from store_sales
+     ,item
+     ,date_dim
+ where ss_item_sk in (select ss_item_sk from cross_items)
+   and ss_item_sk = i_item_sk
+   and ss_sold_date_sk = d_date_sk
+   and d_week_seq = (select d_week_seq
+                     from date_dim
+                     where d_year = 1999
+                       and d_moy = 12
+                       and d_dom = 6)
+ group by i_brand_id,i_class_id,i_category_id
+ having sum(ss_quantity*ss_list_price) > (select average_sales from avg_sales)) last_year
+ where this_year.i_brand_id= last_year.i_brand_id
+   and this_year.i_class_id = last_year.i_class_id
+   and this_year.i_category_id = last_year.i_category_id
+ order by this_year.channel, this_year.i_brand_id, this_year.i_class_id, this_year.i_category_id
+ limit 100

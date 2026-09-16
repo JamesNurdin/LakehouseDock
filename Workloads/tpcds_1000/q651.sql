@@ -1,42 +1,28 @@
-WITH web_v1 as (
-select
-  ws_item_sk item_sk, d_date,
-  sum(sum(ws_sales_price))
-      over (partition by ws_item_sk order by d_date rows between unbounded preceding and current row) cume_sales
-from web_sales
-    ,date_dim
-where ws_sold_date_sk=d_date_sk
-  and d_month_seq between 1193 and 1193+11
-  and ws_item_sk is not NULL
-group by ws_item_sk, d_date),
-store_v1 as (
-select
-  ss_item_sk item_sk, d_date,
-  sum(sum(ss_sales_price))
-      over (partition by ss_item_sk order by d_date rows between unbounded preceding and current row) cume_sales
-from store_sales
-    ,date_dim
-where ss_sold_date_sk=d_date_sk
-  and d_month_seq between 1193 and 1193+11
-  and ss_item_sk is not NULL
-group by ss_item_sk, d_date)
- select  *
-from (select item_sk
-     ,d_date
-     ,web_sales
-     ,store_sales
-     ,max(web_sales)
-         over (partition by item_sk order by d_date rows between unbounded preceding and current row) web_cumulative
-     ,max(store_sales)
-         over (partition by item_sk order by d_date rows between unbounded preceding and current row) store_cumulative
-     from (select case when web.item_sk is not null then web.item_sk else store.item_sk end item_sk
-                 ,case when web.d_date is not null then web.d_date else store.d_date end d_date
-                 ,web.cume_sales web_sales
-                 ,store.cume_sales store_sales
-           from web_v1 web full outer join store_v1 store on (web.item_sk = store.item_sk
-                                                          and web.d_date = store.d_date)
-          )x )y
-where web_cumulative > store_cumulative
-order by item_sk
-        ,d_date
-limit 100;
+with customer_total_return as
+ (select wr_returning_customer_sk as ctr_customer_sk
+        ,ca_state as ctr_state, 
+ 	sum(wr_return_amt) as ctr_total_return
+ from web_returns
+     ,date_dim
+     ,customer_address
+ where wr_returned_date_sk = d_date_sk 
+   and d_year =1999
+   and wr_returning_addr_sk = ca_address_sk 
+ group by wr_returning_customer_sk
+         ,ca_state)
+  select  c_customer_id,c_salutation,c_first_name,c_last_name,c_preferred_cust_flag
+       ,c_birth_day,c_birth_month,c_birth_year,c_birth_country,c_login,c_email_address
+       ,c_last_review_date,ctr_total_return
+ from customer_total_return ctr1
+     ,customer_address
+     ,customer
+ where ctr1.ctr_total_return > (select avg(ctr_total_return)*1.2
+ 			  from customer_total_return ctr2 
+                  	  where ctr1.ctr_state = ctr2.ctr_state)
+       and ca_address_sk = c_current_addr_sk
+       and ca_state = 'CO'
+       and ctr1.ctr_customer_sk = c_customer_sk
+ order by c_customer_id,c_salutation,c_first_name,c_last_name,c_preferred_cust_flag
+                  ,c_birth_day,c_birth_month,c_birth_year,c_birth_country,c_login,c_email_address
+                  ,c_last_review_date,ctr_total_return
+limit 100

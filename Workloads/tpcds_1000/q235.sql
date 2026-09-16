@@ -1,20 +1,18 @@
-select  count(*) from (
-    select distinct c_last_name, c_first_name, d_date
-    from store_sales, date_dim, customer
-          where store_sales.ss_sold_date_sk = date_dim.d_date_sk
-      and store_sales.ss_customer_sk = customer.c_customer_sk
-      and d_month_seq between 1203 and 1203 + 11
-  intersect
-    select distinct c_last_name, c_first_name, d_date
-    from catalog_sales, date_dim, customer
-          where catalog_sales.cs_sold_date_sk = date_dim.d_date_sk
-      and catalog_sales.cs_bill_customer_sk = customer.c_customer_sk
-      and d_month_seq between 1203 and 1203 + 11
-  intersect
-    select distinct c_last_name, c_first_name, d_date
-    from web_sales, date_dim, customer
-          where web_sales.ws_sold_date_sk = date_dim.d_date_sk
-      and web_sales.ws_bill_customer_sk = customer.c_customer_sk
-      and d_month_seq between 1203 and 1203 + 11
-) hot_cust
-limit 100;
+select  i_item_id, 
+        avg(cs_quantity) agg1,
+        avg(cs_list_price) agg2,
+        avg(cs_coupon_amt) agg3,
+        avg(cs_sales_price) agg4 
+ from catalog_sales, customer_demographics, date_dim, item, promotion
+ where cs_sold_date_sk = d_date_sk and
+       cs_item_sk = i_item_sk and
+       cs_bill_cdemo_sk = cd_demo_sk and
+       cs_promo_sk = p_promo_sk and
+       cd_gender = 'F' and 
+       cd_marital_status = 'M' and
+       cd_education_status = 'Secondary' and
+       (p_channel_email = 'N' or p_channel_event = 'N') and
+       d_year = 2000 
+ group by i_item_id
+ order by i_item_id
+ limit 100

@@ -1,48 +1,81 @@
-with v1 as(
- select i_category, i_brand,
-        s_store_name, s_company_name,
-        d_year, d_moy,
-        sum(ss_sales_price) sum_sales,
-        avg(sum(ss_sales_price)) over
-          (partition by i_category, i_brand,
-                     s_store_name, s_company_name, d_year)
-          avg_monthly_sales,
-        rank() over
-          (partition by i_category, i_brand,
-                     s_store_name, s_company_name
-           order by d_year, d_moy) rn
- from item, store_sales, date_dim, store
- where ss_item_sk = i_item_sk and
-       ss_sold_date_sk = d_date_sk and
-       ss_store_sk = s_store_sk and
-       (
-         d_year = 1999 or
-         ( d_year = 1999-1 and d_moy =12) or
-         ( d_year = 1999+1 and d_moy =1)
-       )
- group by i_category, i_brand,
-          s_store_name, s_company_name,
-          d_year, d_moy),
- v2 as(
- select v1.i_brand
-        ,v1.d_year
-        ,v1.avg_monthly_sales
-        ,v1.sum_sales, v1_lag.sum_sales psum, v1_lead.sum_sales nsum
- from v1, v1 v1_lag, v1 v1_lead
- where v1.i_category = v1_lag.i_category and
-       v1.i_category = v1_lead.i_category and
-       v1.i_brand = v1_lag.i_brand and
-       v1.i_brand = v1_lead.i_brand and
-       v1.s_store_name = v1_lag.s_store_name and
-       v1.s_store_name = v1_lead.s_store_name and
-       v1.s_company_name = v1_lag.s_company_name and
-       v1.s_company_name = v1_lead.s_company_name and
-       v1.rn = v1_lag.rn + 1 and
-       v1.rn = v1_lead.rn - 1)
-  select  *
- from v2
- where  d_year = 1999 and    
-        avg_monthly_sales > 0 and
-        case when avg_monthly_sales > 0 then abs(sum_sales - avg_monthly_sales) / avg_monthly_sales else null end > 0.1
- order by sum_sales - avg_monthly_sales, 3
- limit 100;
+select  substr(r_reason_desc,1,20)
+       ,avg(ws_quantity)
+       ,avg(wr_refunded_cash)
+       ,avg(wr_fee)
+ from web_sales, web_returns, web_page, customer_demographics cd1,
+      customer_demographics cd2, customer_address, date_dim, reason 
+ where ws_web_page_sk = wp_web_page_sk
+   and ws_item_sk = wr_item_sk
+   and ws_order_number = wr_order_number
+   and ws_sold_date_sk = d_date_sk and d_year = 2001
+   and cd1.cd_demo_sk = wr_refunded_cdemo_sk 
+   and cd2.cd_demo_sk = wr_returning_cdemo_sk
+   and ca_address_sk = wr_refunded_addr_sk
+   and r_reason_sk = wr_reason_sk
+   and
+   (
+    (
+     cd1.cd_marital_status = 'W'
+     and
+     cd1.cd_marital_status = cd2.cd_marital_status
+     and
+     cd1.cd_education_status = 'Unknown'
+     and 
+     cd1.cd_education_status = cd2.cd_education_status
+     and
+     ws_sales_price between 100.00 and 150.00
+    )
+   or
+    (
+     cd1.cd_marital_status = 'D'
+     and
+     cd1.cd_marital_status = cd2.cd_marital_status
+     and
+     cd1.cd_education_status = 'College' 
+     and
+     cd1.cd_education_status = cd2.cd_education_status
+     and
+     ws_sales_price between 50.00 and 100.00
+    )
+   or
+    (
+     cd1.cd_marital_status = 'M'
+     and
+     cd1.cd_marital_status = cd2.cd_marital_status
+     and
+     cd1.cd_education_status = '2 yr Degree'
+     and
+     cd1.cd_education_status = cd2.cd_education_status
+     and
+     ws_sales_price between 150.00 and 200.00
+    )
+   )
+   and
+   (
+    (
+     ca_country = 'United States'
+     and
+     ca_state in ('OH', 'MT', 'TX')
+     and ws_net_profit between 100 and 200  
+    )
+    or
+    (
+     ca_country = 'United States'
+     and
+     ca_state in ('MO', 'PA', 'MI')
+     and ws_net_profit between 150 and 300  
+    )
+    or
+    (
+     ca_country = 'United States'
+     and
+     ca_state in ('WV', 'ID', 'SC')
+     and ws_net_profit between 50 and 250  
+    )
+   )
+group by r_reason_desc
+order by substr(r_reason_desc,1,20)
+        ,avg(ws_quantity)
+        ,avg(wr_refunded_cash)
+        ,avg(wr_fee)
+limit 100

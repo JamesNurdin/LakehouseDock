@@ -1,55 +1,72 @@
-with ws as
-  (select d_year AS ws_sold_year, ws_item_sk,
-    ws_bill_customer_sk ws_customer_sk,
-    sum(ws_quantity) ws_qty,
-    sum(ws_wholesale_cost) ws_wc,
-    sum(ws_sales_price) ws_sp
-   from web_sales
-   left join web_returns on wr_order_number=ws_order_number and ws_item_sk=wr_item_sk
-   join date_dim on ws_sold_date_sk = d_date_sk
-   where wr_order_number is null
-   group by d_year, ws_item_sk, ws_bill_customer_sk
-   ),
-cs as
-  (select d_year AS cs_sold_year, cs_item_sk,
-    cs_bill_customer_sk cs_customer_sk,
-    sum(cs_quantity) cs_qty,
-    sum(cs_wholesale_cost) cs_wc,
-    sum(cs_sales_price) cs_sp
-   from catalog_sales
-   left join catalog_returns on cr_order_number=cs_order_number and cs_item_sk=cr_item_sk
-   join date_dim on cs_sold_date_sk = d_date_sk
-   where cr_order_number is null
-   group by d_year, cs_item_sk, cs_bill_customer_sk
-   ),
-ss as
-  (select d_year AS ss_sold_year, ss_item_sk,
-    ss_customer_sk,
-    sum(ss_quantity) ss_qty,
-    sum(ss_wholesale_cost) ss_wc,
-    sum(ss_sales_price) ss_sp
-   from store_sales
-   left join store_returns on sr_ticket_number=ss_ticket_number and ss_item_sk=sr_item_sk
-   join date_dim on ss_sold_date_sk = d_date_sk
-   where sr_ticket_number is null
-   group by d_year, ss_item_sk, ss_customer_sk
-   )
- select 
-ss_sold_year,
-round(ss_qty/(coalesce(ws_qty+cs_qty,1)),2) ratio,
-ss_qty store_qty, ss_wc store_wholesale_cost, ss_sp store_sales_price,
-coalesce(ws_qty,0)+coalesce(cs_qty,0) other_chan_qty,
-coalesce(ws_wc,0)+coalesce(cs_wc,0) other_chan_wholesale_cost,
-coalesce(ws_sp,0)+coalesce(cs_sp,0) other_chan_sales_price
-from ss
-left join ws on (ws_sold_year=ss_sold_year and ws_item_sk=ss_item_sk and ws_customer_sk=ss_customer_sk)
-left join cs on (cs_sold_year=ss_sold_year and cs_item_sk=cs_item_sk and cs_customer_sk=ss_customer_sk)
-where coalesce(ws_qty,0)>0 and coalesce(cs_qty, 0)>0 and ss_sold_year=1998
-order by 
-  ss_sold_year,
-  ss_qty desc, ss_wc desc, ss_sp desc,
-  other_chan_qty,
-  other_chan_wholesale_cost,
-  other_chan_sales_price,
-  round(ss_qty/(coalesce(ws_qty+cs_qty,1)),2)
-limit 100;
+with year_total as (
+ select c_customer_id customer_id
+       ,c_first_name customer_first_name
+       ,c_last_name customer_last_name
+       ,c_preferred_cust_flag customer_preferred_cust_flag
+       ,c_birth_country customer_birth_country
+       ,c_login customer_login
+       ,c_email_address customer_email_address
+       ,d_year dyear
+       ,sum(ss_ext_list_price-ss_ext_discount_amt) year_total
+       ,'s' sale_type
+ from customer
+     ,store_sales
+     ,date_dim
+ where c_customer_sk = ss_customer_sk
+   and ss_sold_date_sk = d_date_sk
+ group by c_customer_id
+         ,c_first_name
+         ,c_last_name
+         ,d_year
+         ,c_preferred_cust_flag
+         ,c_birth_country
+         ,c_login
+         ,c_email_address
+         ,d_year 
+ union all
+ select c_customer_id customer_id
+       ,c_first_name customer_first_name
+       ,c_last_name customer_last_name
+       ,c_preferred_cust_flag customer_preferred_cust_flag
+       ,c_birth_country customer_birth_country
+       ,c_login customer_login
+       ,c_email_address customer_email_address
+       ,d_year dyear
+       ,sum(ws_ext_list_price-ws_ext_discount_amt) year_total
+       ,'w' sale_type
+ from customer
+     ,web_sales
+     ,date_dim
+ where c_customer_sk = ws_bill_customer_sk
+   and ws_sold_date_sk = d_date_sk
+ group by c_customer_id
+         ,c_first_name
+         ,c_last_name
+         ,c_preferred_cust_flag
+         ,c_birth_country
+         ,c_login
+         ,c_email_address
+         ,d_year
+         )
+  select  t_s_secyear.customer_last_name
+ from year_total t_s_firstyear
+     ,year_total t_s_secyear
+     ,year_total t_w_firstyear
+     ,year_total t_w_secyear
+ where t_s_secyear.customer_id = t_s_firstyear.customer_id
+         and t_s_firstyear.customer_id = t_w_secyear.customer_id
+         and t_s_firstyear.customer_id = t_w_firstyear.customer_id
+         and t_s_firstyear.sale_type = 's'
+         and t_w_firstyear.sale_type = 'w'
+         and t_s_secyear.sale_type = 's'
+         and t_w_secyear.sale_type = 'w'
+         and t_s_firstyear.dyear = 1998
+         and t_s_secyear.dyear = 1998+1
+         and t_w_firstyear.dyear = 1998
+         and t_w_secyear.dyear = 1998+1
+         and t_s_firstyear.year_total > 0
+         and t_w_firstyear.year_total > 0
+         and case when t_w_firstyear.year_total > 0 then t_w_secyear.year_total / t_w_firstyear.year_total else null end
+             > case when t_s_firstyear.year_total > 0 then t_s_secyear.year_total / t_s_firstyear.year_total else null end
+ order by t_s_secyear.customer_last_name
+limit 100

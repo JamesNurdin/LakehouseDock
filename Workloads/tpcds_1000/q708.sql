@@ -12,7 +12,7 @@ select
    ,date_dim       d1
    ,item
  where
-    d1.d_month_seq between 1204 and 1204+11
+    d1.d_month_seq between 1202 and 1202+11
  and d1.d_date_sk = ws_sold_date_sk
  and i_item_sk  = ws_item_sk
  group by rollup(i_category,i_class)
@@ -20,4 +20,4 @@ select
    lochierarchy desc,
    case when lochierarchy = 0 then i_category end,
    rank_within_parent
- limit 100;
+ limit 100

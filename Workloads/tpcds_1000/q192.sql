@@ -1,32 +1,81 @@
-select  asceding.rnk, i1.i_product_name best_performing, i2.i_product_name worst_performing
-from(select *
-     from (select item_sk,rank() over (order by rank_col asc) rnk
-           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col 
-                 from store_sales ss1
-                 where ss_store_sk = 4
-                 group by ss_item_sk
-                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
-                                                  from store_sales
-                                                  where ss_store_sk = 4
-                                                    and ss_addr_sk is null
-                                                  group by ss_store_sk))V1)V11
-     where rnk  < 11) asceding,
-    (select *
-     from (select item_sk,rank() over (order by rank_col desc) rnk
-           from (select ss_item_sk item_sk,avg(ss_net_profit) rank_col
-                 from store_sales ss1
-                 where ss_store_sk = 4
-                 group by ss_item_sk
-                 having avg(ss_net_profit) > 0.9*(select avg(ss_net_profit) rank_col
-                                                  from store_sales
-                                                  where ss_store_sk = 4
-                                                    and ss_addr_sk is null
-                                                  group by ss_store_sk))V2)V21
-     where rnk  < 11) descending,
-item i1,
-item i2
-where asceding.rnk = descending.rnk 
-  and i1.i_item_sk=asceding.item_sk
-  and i2.i_item_sk=descending.item_sk
-order by asceding.rnk
-limit 100;
+select  substr(r_reason_desc,1,20)
+       ,avg(ws_quantity)
+       ,avg(wr_refunded_cash)
+       ,avg(wr_fee)
+ from web_sales, web_returns, web_page, customer_demographics cd1,
+      customer_demographics cd2, customer_address, date_dim, reason 
+ where ws_web_page_sk = wp_web_page_sk
+   and ws_item_sk = wr_item_sk
+   and ws_order_number = wr_order_number
+   and ws_sold_date_sk = d_date_sk and d_year = 1998
+   and cd1.cd_demo_sk = wr_refunded_cdemo_sk 
+   and cd2.cd_demo_sk = wr_returning_cdemo_sk
+   and ca_address_sk = wr_refunded_addr_sk
+   and r_reason_sk = wr_reason_sk
+   and
+   (
+    (
+     cd1.cd_marital_status = 'W'
+     and
+     cd1.cd_marital_status = cd2.cd_marital_status
+     and
+     cd1.cd_education_status = 'Primary'
+     and 
+     cd1.cd_education_status = cd2.cd_education_status
+     and
+     ws_sales_price between 100.00 and 150.00
+    )
+   or
+    (
+     cd1.cd_marital_status = 'M'
+     and
+     cd1.cd_marital_status = cd2.cd_marital_status
+     and
+     cd1.cd_education_status = 'Advanced Degree' 
+     and
+     cd1.cd_education_status = cd2.cd_education_status
+     and
+     ws_sales_price between 50.00 and 100.00
+    )
+   or
+    (
+     cd1.cd_marital_status = 'U'
+     and
+     cd1.cd_marital_status = cd2.cd_marital_status
+     and
+     cd1.cd_education_status = '4 yr Degree'
+     and
+     cd1.cd_education_status = cd2.cd_education_status
+     and
+     ws_sales_price between 150.00 and 200.00
+    )
+   )
+   and
+   (
+    (
+     ca_country = 'United States'
+     and
+     ca_state in ('MS', 'GA', 'KS')
+     and ws_net_profit between 100 and 200  
+    )
+    or
+    (
+     ca_country = 'United States'
+     and
+     ca_state in ('VA', 'NC', 'NY')
+     and ws_net_profit between 150 and 300  
+    )
+    or
+    (
+     ca_country = 'United States'
+     and
+     ca_state in ('IN', 'WV', 'FL')
+     and ws_net_profit between 50 and 250  
+    )
+   )
+group by r_reason_desc
+order by substr(r_reason_desc,1,20)
+        ,avg(ws_quantity)
+        ,avg(wr_refunded_cash)
+        ,avg(wr_fee)
+limit 100

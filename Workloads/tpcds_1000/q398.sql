@@ -1,51 +1,81 @@
-with inv as
-(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
-       ,stdev,mean, case mean when 0 then null else stdev/mean end cov
- from(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
-            ,stddev_samp(inv_quantity_on_hand) stdev,avg(inv_quantity_on_hand) mean
-      from inventory
-          ,item
-          ,warehouse
-          ,date_dim
-      where inv_item_sk = i_item_sk
-        and inv_warehouse_sk = w_warehouse_sk
-        and inv_date_sk = d_date_sk
-        and d_year =1998
-      group by w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy) foo
- where case mean when 0 then 0 else stdev/mean end > 1)
-select inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean, inv1.cov
-        ,inv2.w_warehouse_sk,inv2.i_item_sk,inv2.d_moy,inv2.mean, inv2.cov
-from inv inv1,inv inv2
-where inv1.i_item_sk = inv2.i_item_sk
-  and inv1.w_warehouse_sk =  inv2.w_warehouse_sk
-  and inv1.d_moy=1
-  and inv2.d_moy=1+1
-order by inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean,inv1.cov
-        ,inv2.d_moy,inv2.mean, inv2.cov
-;
-with inv as
-(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
-       ,stdev,mean, case mean when 0 then null else stdev/mean end cov
- from(select w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy
-            ,stddev_samp(inv_quantity_on_hand) stdev,avg(inv_quantity_on_hand) mean
-      from inventory
-          ,item
-          ,warehouse
-          ,date_dim
-      where inv_item_sk = i_item_sk
-        and inv_warehouse_sk = w_warehouse_sk
-        and inv_date_sk = d_date_sk
-        and d_year =1998
-      group by w_warehouse_name,w_warehouse_sk,i_item_sk,d_moy) foo
- where case mean when 0 then 0 else stdev/mean end > 1)
-select inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean, inv1.cov
-        ,inv2.w_warehouse_sk,inv2.i_item_sk,inv2.d_moy,inv2.mean, inv2.cov
-from inv inv1,inv inv2
-where inv1.i_item_sk = inv2.i_item_sk
-  and inv1.w_warehouse_sk =  inv2.w_warehouse_sk
-  and inv1.d_moy=1
-  and inv2.d_moy=1+1
-  and inv1.cov > 1.5
-order by inv1.w_warehouse_sk,inv1.i_item_sk,inv1.d_moy,inv1.mean,inv1.cov
-        ,inv2.d_moy,inv2.mean, inv2.cov
-;
+select  substr(r_reason_desc,1,20)
+       ,avg(ws_quantity)
+       ,avg(wr_refunded_cash)
+       ,avg(wr_fee)
+ from web_sales, web_returns, web_page, customer_demographics cd1,
+      customer_demographics cd2, customer_address, date_dim, reason 
+ where ws_web_page_sk = wp_web_page_sk
+   and ws_item_sk = wr_item_sk
+   and ws_order_number = wr_order_number
+   and ws_sold_date_sk = d_date_sk and d_year = 2000
+   and cd1.cd_demo_sk = wr_refunded_cdemo_sk 
+   and cd2.cd_demo_sk = wr_returning_cdemo_sk
+   and ca_address_sk = wr_refunded_addr_sk
+   and r_reason_sk = wr_reason_sk
+   and
+   (
+    (
+     cd1.cd_marital_status = 'S'
+     and
+     cd1.cd_marital_status = cd2.cd_marital_status
+     and
+     cd1.cd_education_status = 'Primary'
+     and 
+     cd1.cd_education_status = cd2.cd_education_status
+     and
+     ws_sales_price between 100.00 and 150.00
+    )
+   or
+    (
+     cd1.cd_marital_status = 'D'
+     and
+     cd1.cd_marital_status = cd2.cd_marital_status
+     and
+     cd1.cd_education_status = 'Advanced Degree' 
+     and
+     cd1.cd_education_status = cd2.cd_education_status
+     and
+     ws_sales_price between 50.00 and 100.00
+    )
+   or
+    (
+     cd1.cd_marital_status = 'M'
+     and
+     cd1.cd_marital_status = cd2.cd_marital_status
+     and
+     cd1.cd_education_status = '4 yr Degree'
+     and
+     cd1.cd_education_status = cd2.cd_education_status
+     and
+     ws_sales_price between 150.00 and 200.00
+    )
+   )
+   and
+   (
+    (
+     ca_country = 'United States'
+     and
+     ca_state in ('CA', 'CO', 'OH')
+     and ws_net_profit between 100 and 200  
+    )
+    or
+    (
+     ca_country = 'United States'
+     and
+     ca_state in ('VA', 'TX', 'AR')
+     and ws_net_profit between 150 and 300  
+    )
+    or
+    (
+     ca_country = 'United States'
+     and
+     ca_state in ('NE', 'OK', 'SC')
+     and ws_net_profit between 50 and 250  
+    )
+   )
+group by r_reason_desc
+order by substr(r_reason_desc,1,20)
+        ,avg(ws_quantity)
+        ,avg(wr_refunded_cash)
+        ,avg(wr_fee)
+limit 100

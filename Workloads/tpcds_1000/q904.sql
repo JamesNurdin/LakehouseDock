@@ -1,49 +1,21 @@
-select avg(ss_quantity)
-       ,avg(ss_ext_sales_price)
-       ,avg(ss_ext_wholesale_cost)
-       ,sum(ss_ext_wholesale_cost)
- from store_sales
-     ,store
-     ,customer_demographics
-     ,household_demographics
-     ,customer_address
-     ,date_dim
- where s_store_sk = ss_store_sk
- and  ss_sold_date_sk = d_date_sk and d_year = 2001
- and((ss_hdemo_sk=hd_demo_sk
-  and cd_demo_sk = ss_cdemo_sk
-  and cd_marital_status = 'W'
-  and cd_education_status = 'Advanced Degree'
-  and ss_sales_price between 100.00 and 150.00
-  and hd_dep_count = 3   
-     )or
-     (ss_hdemo_sk=hd_demo_sk
-  and cd_demo_sk = ss_cdemo_sk
-  and cd_marital_status = 'U'
-  and cd_education_status = 'Unknown'
-  and ss_sales_price between 50.00 and 100.00   
-  and hd_dep_count = 1
-     ) or 
-     (ss_hdemo_sk=hd_demo_sk
-  and cd_demo_sk = ss_cdemo_sk
-  and cd_marital_status = 'D'
-  and cd_education_status = 'College'
-  and ss_sales_price between 150.00 and 200.00 
-  and hd_dep_count = 1  
-     ))
- and((ss_addr_sk = ca_address_sk
-  and ca_country = 'United States'
-  and ca_state in ('KS', 'TN', 'SD')
-  and ss_net_profit between 100 and 200  
-     ) or
-     (ss_addr_sk = ca_address_sk
-  and ca_country = 'United States'
-  and ca_state in ('IN', 'IA', 'KY')
-  and ss_net_profit between 150 and 300  
-     ) or
-     (ss_addr_sk = ca_address_sk
-  and ca_country = 'United States'
-  and ca_state in ('MO', 'LA', 'NE')
-  and ss_net_profit between 50 and 250  
-     ))
-;
+select  channel, col_name, d_year, d_qoy, i_category, COUNT(*) sales_cnt, SUM(ext_sales_price) sales_amt FROM (
+        SELECT 'store' as channel, 'ss_hdemo_sk' col_name, d_year, d_qoy, i_category, ss_ext_sales_price ext_sales_price
+         FROM store_sales, item, date_dim
+         WHERE ss_hdemo_sk IS NULL
+           AND ss_sold_date_sk=d_date_sk
+           AND ss_item_sk=i_item_sk
+        UNION ALL
+        SELECT 'web' as channel, 'ws_ship_cdemo_sk' col_name, d_year, d_qoy, i_category, ws_ext_sales_price ext_sales_price
+         FROM web_sales, item, date_dim
+         WHERE ws_ship_cdemo_sk IS NULL
+           AND ws_sold_date_sk=d_date_sk
+           AND ws_item_sk=i_item_sk
+        UNION ALL
+        SELECT 'catalog' as channel, 'cs_ship_mode_sk' col_name, d_year, d_qoy, i_category, cs_ext_sales_price ext_sales_price
+         FROM catalog_sales, item, date_dim
+         WHERE cs_ship_mode_sk IS NULL
+           AND cs_sold_date_sk=d_date_sk
+           AND cs_item_sk=i_item_sk) foo
+GROUP BY channel, col_name, d_year, d_qoy, i_category
+ORDER BY channel, col_name, d_year, d_qoy, i_category
+limit 100

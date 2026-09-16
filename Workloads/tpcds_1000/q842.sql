@@ -1,48 +1,42 @@
-with v1 as(
- select i_category, i_brand,
-        s_store_name, s_company_name,
-        d_year, d_moy,
-        sum(ss_sales_price) sum_sales,
-        avg(sum(ss_sales_price)) over
-          (partition by i_category, i_brand,
-                     s_store_name, s_company_name, d_year)
-          avg_monthly_sales,
-        rank() over
-          (partition by i_category, i_brand,
-                     s_store_name, s_company_name
-           order by d_year, d_moy) rn
- from item, store_sales, date_dim, store
- where ss_item_sk = i_item_sk and
-       ss_sold_date_sk = d_date_sk and
-       ss_store_sk = s_store_sk and
-       (
-         d_year = 2000 or
-         ( d_year = 2000-1 and d_moy =12) or
-         ( d_year = 2000+1 and d_moy =1)
-       )
- group by i_category, i_brand,
-          s_store_name, s_company_name,
-          d_year, d_moy),
- v2 as(
- select v1.i_brand
-        ,v1.d_year
-        ,v1.avg_monthly_sales
-        ,v1.sum_sales, v1_lag.sum_sales psum, v1_lead.sum_sales nsum
- from v1, v1 v1_lag, v1 v1_lead
- where v1.i_category = v1_lag.i_category and
-       v1.i_category = v1_lead.i_category and
-       v1.i_brand = v1_lag.i_brand and
-       v1.i_brand = v1_lead.i_brand and
-       v1.s_store_name = v1_lag.s_store_name and
-       v1.s_store_name = v1_lead.s_store_name and
-       v1.s_company_name = v1_lag.s_company_name and
-       v1.s_company_name = v1_lead.s_company_name and
-       v1.rn = v1_lag.rn + 1 and
-       v1.rn = v1_lead.rn - 1)
-  select  *
- from v2
- where  d_year = 2000 and    
-        avg_monthly_sales > 0 and
-        case when avg_monthly_sales > 0 then abs(sum_sales - avg_monthly_sales) / avg_monthly_sales else null end > 0.1
- order by sum_sales - avg_monthly_sales, 3
- limit 100;
+select  i_item_id
+       ,i_item_desc
+       ,s_state
+       ,count(ss_quantity) as store_sales_quantitycount
+       ,avg(ss_quantity) as store_sales_quantityave
+       ,stddev_samp(ss_quantity) as store_sales_quantitystdev
+       ,stddev_samp(ss_quantity)/avg(ss_quantity) as store_sales_quantitycov
+       ,count(sr_return_quantity) as_store_returns_quantitycount
+       ,avg(sr_return_quantity) as_store_returns_quantityave
+       ,stddev_samp(sr_return_quantity) as_store_returns_quantitystdev
+       ,stddev_samp(sr_return_quantity)/avg(sr_return_quantity) as store_returns_quantitycov
+       ,count(cs_quantity) as catalog_sales_quantitycount ,avg(cs_quantity) as catalog_sales_quantityave
+       ,stddev_samp(cs_quantity)/avg(cs_quantity) as catalog_sales_quantitystdev
+       ,stddev_samp(cs_quantity)/avg(cs_quantity) as catalog_sales_quantitycov
+ from store_sales
+     ,store_returns
+     ,catalog_sales
+     ,date_dim d1
+     ,date_dim d2
+     ,date_dim d3
+     ,store
+     ,item
+ where d1.d_quarter_name = '2001Q1'
+   and d1.d_date_sk = ss_sold_date_sk
+   and i_item_sk = ss_item_sk
+   and s_store_sk = ss_store_sk
+   and ss_customer_sk = sr_customer_sk
+   and ss_item_sk = sr_item_sk
+   and ss_ticket_number = sr_ticket_number
+   and sr_returned_date_sk = d2.d_date_sk
+   and d2.d_quarter_name in ('2001Q1','2001Q2','2001Q3')
+   and sr_customer_sk = cs_bill_customer_sk
+   and sr_item_sk = cs_item_sk
+   and cs_sold_date_sk = d3.d_date_sk
+   and d3.d_quarter_name in ('2001Q1','2001Q2','2001Q3')
+ group by i_item_id
+         ,i_item_desc
+         ,s_state
+ order by i_item_id
+         ,i_item_desc
+         ,s_state
+limit 100
