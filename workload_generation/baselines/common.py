@@ -217,14 +217,16 @@ class BaselineContext:
         return self.ddl_for(self.schema_tables())
 
     def columns_for(self, table: str) -> List[dict]:
-        return fetch_table_columns_cached(
+        """Column metadata for ``table``. Returns a copy, so callers may reorder
+        it without affecting the shared DDL cache."""
+        return list(fetch_table_columns_cached(
             conn_factory=self.conn_factory,
             catalog=self.catalog,
             schema=self.trino_schema,
             table=table,
             ddl_cache=self.ddl_cache,
             ddl_cache_lock=self.ddl_cache_lock,
-        )
+        ))
 
     def join_rules_text(self, tables: List[str]) -> List[str]:
         rels = get_relevant_relationships(self.schema_json, tables)
@@ -236,6 +238,51 @@ class BaselineContext:
         if not rels:
             return "-- no declared foreign-key relationships between these tables"
         return "\n".join(f"- {relationship_to_text(r)}" for r in rels)
+
+    def ddl_with_keys(
+        self,
+        tables: List[str],
+        columns: Optional[Dict[str, List[str]]] = None,
+    ) -> str:
+        """
+        ``CREATE TABLE`` statements for ``tables`` with the declared foreign keys
+        between them as ``FOREIGN KEY ... REFERENCES`` clauses.  ``columns``
+        optionally restricts each table to a subset of its columns (in schema
+        order); key columns are always kept.
+        """
+        rels = get_relevant_relationships(self.schema_json, tables)
+        key_cols: Dict[str, set] = {t: set() for t in tables}
+        for lt, lcols, rt, rcols in rels:
+            key_cols.setdefault(lt, set()).update(lcols)
+            key_cols.setdefault(rt, set()).update(rcols)
+
+        chunks = []
+        for table in tables:
+            cols = self.columns_for(table)
+            if not cols:
+                chunks.append(f"-- WARNING: no columns found for table {table}")
+                continue
+            if columns is not None and table in columns:
+                keep = set(columns[table]) | key_cols.get(table, set())
+                cols = [c for c in cols if c["name"] in keep]
+            lines = [f"    {c['name']} {c['type']}" for c in cols]
+            for lt, lcols, rt, rcols in rels:
+                if lt == table:
+                    lines.append(
+                        f"    FOREIGN KEY ({', '.join(lcols)}) REFERENCES {rt} ({', '.join(rcols)})"
+                    )
+            chunks.append(f"CREATE TABLE {table} (\n" + ",\n".join(lines) + "\n);")
+        return "\n\n".join(chunks)
+
+    def key_columns(self, table: str) -> set:
+        """Columns of ``table`` that take part in any declared foreign key."""
+        keys = set()
+        for lt, lcols, rt, rcols in self.schema_json.get("relationships", []):
+            if lt == table:
+                keys.update(lcols)
+            if rt == table:
+                keys.update(rcols)
+        return keys
 
     # ------------------------------------------------------------------
     # Validation / cost (live Trino)
@@ -268,9 +315,10 @@ class BaselineContext:
 
     def explain_cost(self, sql: str) -> Optional[Dict[str, float]]:
         """
-        Estimated cost from ``EXPLAIN (FORMAT JSON)`` -- used by the SQLBarber
-        cost-aware generator.  Returns ``{"output_rows", "cpu_cost", ...}`` or
-        ``None`` if the plan can't be produced/parsed.
+        Optimizer estimates from ``EXPLAIN (FORMAT JSON)`` -- used by the
+        SQLBarber cost-aware generator.  See :func:`_estimates_from_trino_plan`
+        for the returned fields.  ``None`` if the plan can't be produced/parsed
+        or carries no finite estimate.
         """
         sql = sanitize_sql(sql)
         if not sql:
@@ -326,6 +374,48 @@ class BaselineContext:
             except Exception:
                 pass
 
+    def table_stats(self, table: str) -> Dict[str, Any]:
+        """
+        ``SHOW STATS`` summary for ``table`` (cheap: served from Iceberg
+        metadata).  Returns ``{"row_count", "size_bytes", "columns": {name:
+        distinct_values_count}}``; fields Trino does not know are ``None``.
+        Best-effort: returns empty fields on error.
+        """
+        out: Dict[str, Any] = {"row_count": None, "size_bytes": None, "columns": {}}
+        conn = self.conn_factory()
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute(f"SHOW STATS FOR {self.catalog}.{self.trino_schema}.{table}")
+                rows = cur.fetchall()
+                names = [d[0] for d in (cur.description or [])]
+            finally:
+                cur.close()
+        except Exception:
+            return out
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        size = 0.0
+        have_size = False
+        for row in rows:
+            rec = dict(zip(names, row))
+            col = rec.get("column_name")
+            if col is None:
+                out["row_count"] = _to_float(rec.get("row_count"))
+                continue
+            ndv = _to_float(rec.get("distinct_values_count"))
+            out["columns"][col] = int(ndv) if ndv is not None else None
+            ds = _to_float(rec.get("data_size"))
+            if ds is not None:
+                size += ds
+                have_size = True
+        out["size_bytes"] = size if have_size else None
+        return out
+
     def validate_batch(
         self, candidates: List[dict], *, workers: int = 4
     ) -> Tuple[List[dict], List[dict]]:
@@ -350,39 +440,79 @@ class BaselineContext:
         return valid, invalid
 
 
+# Plan nodes that only move rows between operators / fragments (the "exchange"
+# category of resources/operators_ground_truth.csv) plus the Output sink. They
+# are skipped when summing per-operator estimates so rows are not double counted.
+_PLUMBING_NODES = frozenset({
+    "Output", "RemoteSource", "Exchange", "LocalExchange", "RemoteExchange",
+    "SystemExchange", "LocalMerge", "RemoteMerge", "SystemMerge",
+})
+
+
 def _estimates_from_trino_plan(doc: Any) -> Optional[Dict[str, float]]:
-    """Pull the root output-row / cpu-cost estimates from a Trino JSON plan."""
-    # Trino EXPLAIN (FORMAT JSON) is a nested dict with "estimates" lists.
-    best = {"output_rows": None, "cpu_cost": None, "memory_cost": None,
-            "network_cost": None}
+    """
+    Summarise the optimizer estimates of a Trino ``EXPLAIN (FORMAT JSON)`` plan
+    (a ``{fragment_id: root_node}`` map, or a single node tree).
+
+    Each rendered node carries an ``estimates`` list; fused nodes such as
+    ``ScanFilterProject`` list one entry per fused operator, the last being the
+    node's output.  Estimates Trino cannot derive are ``NaN`` and are skipped.
+
+    Returns ``None`` when no finite estimate exists, otherwise:
+      * ``output_rows``  -- estimated result cardinality (root node of fragment 0)
+      * ``sum_rows``     -- sum over operator nodes of their estimated output rows
+                            (the analogue of summing ``rows=`` over a PostgreSQL plan)
+      * ``sum_cpu_cost`` -- sum of the estimated CPU cost of every fused operator
+      * ``operator_nodes`` / ``unestimated_nodes`` -- node counts behind the sums
+    """
+    if isinstance(doc, dict) and "name" in doc and "children" in doc:
+        roots = [("0", doc)]
+    elif isinstance(doc, dict):
+        roots = sorted(doc.items(), key=lambda kv: (not str(kv[0]).isdigit(), str(kv[0]).zfill(8)))
+    else:
+        return None
+
+    sums = {"rows": 0.0, "cpu": 0.0}
+    seen = {"rows": False, "cpu": False, "nodes": 0, "unestimated": 0}
 
     def visit(node):
-        if isinstance(node, dict):
-            ests = node.get("estimates")
-            if isinstance(ests, list):
-                for e in ests:
-                    if not isinstance(e, dict):
-                        continue
-                    orc = e.get("outputRowCount")
-                    if orc is not None and best["output_rows"] is None:
-                        best["output_rows"] = _to_float(orc)
-                    cpu = e.get("cpuCost")
-                    if cpu is not None and best["cpu_cost"] is None:
-                        best["cpu_cost"] = _to_float(cpu)
-                    if e.get("memoryCost") is not None and best["memory_cost"] is None:
-                        best["memory_cost"] = _to_float(e.get("memoryCost"))
-                    if e.get("networkCost") is not None and best["network_cost"] is None:
-                        best["network_cost"] = _to_float(e.get("networkCost"))
-            for v in node.values():
-                visit(v)
-        elif isinstance(node, list):
-            for v in node:
-                visit(v)
+        if not isinstance(node, dict):
+            return
+        ests = [e for e in (node.get("estimates") or []) if isinstance(e, dict)]
+        if node.get("name") not in _PLUMBING_NODES:
+            seen["nodes"] += 1
+            rows = _to_float(ests[-1].get("outputRowCount")) if ests else None
+            if rows is None:
+                seen["unestimated"] += 1
+            else:
+                sums["rows"] += rows
+                seen["rows"] = True
+            for e in ests:
+                cpu = _to_float(e.get("cpuCost"))
+                if cpu is not None:
+                    sums["cpu"] += cpu
+                    seen["cpu"] = True
+        for child in node.get("children") or []:
+            visit(child)
 
-    visit(doc)
-    if all(v is None for v in best.values()):
+    for _, root in roots:
+        visit(root)
+
+    output_rows = None
+    if roots and isinstance(roots[0][1], dict):
+        root_ests = roots[0][1].get("estimates") or []
+        if root_ests and isinstance(root_ests[-1], dict):
+            output_rows = _to_float(root_ests[-1].get("outputRowCount"))
+
+    if output_rows is None and not seen["rows"] and not seen["cpu"]:
         return None
-    return best
+    return {
+        "output_rows": output_rows,
+        "sum_rows": sums["rows"] if seen["rows"] else None,
+        "sum_cpu_cost": sums["cpu"] if seen["cpu"] else None,
+        "operator_nodes": seen["nodes"],
+        "unestimated_nodes": seen["unestimated"],
+    }
 
 
 def _to_float(v):
@@ -391,6 +521,118 @@ def _to_float(v):
         return None if f != f or f in (float("inf"), float("-inf")) else f
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Typed Trino literals
+# ---------------------------------------------------------------------------
+
+def type_kind(trino_type: str) -> str:
+    """Coarse kind of a Trino ``information_schema`` data type."""
+    t = (trino_type or "").strip().lower()
+    if t in ("tinyint", "smallint", "integer", "int", "bigint"):
+        return "integer"
+    if t.startswith(("decimal", "double", "real")):
+        return "numeric"
+    if t.startswith("timestamp"):
+        return "timestamp"
+    if t == "date":
+        return "date"
+    if t == "boolean":
+        return "boolean"
+    if t.startswith(("varchar", "char")):
+        return "string"
+    return "other"
+
+
+def trino_literal(value: Any, trino_type: str) -> str:
+    """Render ``value`` as a Trino literal matching the column type."""
+    if value is None:
+        return "NULL"
+    kind = type_kind(trino_type)
+    if kind == "integer":
+        try:
+            return str(int(value))
+        except (TypeError, ValueError):
+            pass
+    if kind == "numeric":
+        try:
+            float(value)
+            return str(value)
+        except (TypeError, ValueError):
+            pass
+    if kind == "boolean":
+        return "TRUE" if str(value).lower() in ("true", "1", "t") else "FALSE"
+    if kind == "date":
+        iso = value.isoformat() if hasattr(value, "isoformat") else str(value)
+        return f"DATE '{iso}'"
+    if kind == "timestamp":
+        iso = value.isoformat(sep=" ") if hasattr(value, "isoformat") else str(value)
+        return f"TIMESTAMP '{iso}'"
+    s = str(value)
+    if (trino_type or "").lower().startswith("char"):
+        s = s.rstrip()
+    return "'" + s.replace("'", "''") + "'"
+
+
+# ---------------------------------------------------------------------------
+# Connected table subsets of the foreign-key graph
+# ---------------------------------------------------------------------------
+
+def enumerate_connected_subsets(
+    tables: List[str], graph: Dict[str, set], *, min_size: int, max_size: int,
+) -> List[Tuple[str, ...]]:
+    """
+    Every connected subset of the FK graph with ``min_size <= |S| <= max_size``,
+    each exactly once (Wernicke's ESU enumeration).  Subsets are sorted tuples.
+    """
+    order = {t: i for i, t in enumerate(sorted(tables))}
+    found: List[Tuple[str, ...]] = []
+
+    def nbrs(t):
+        return {u for u in graph.get(t, set()) if u in order}
+
+    def extend(sub: frozenset, extension: set, root: str):
+        if len(sub) >= min_size:
+            found.append(tuple(sorted(sub)))
+        if len(sub) >= max_size:
+            return
+        sub_nbrs = set().union(*(nbrs(u) for u in sub))
+        extension = set(extension)
+        while extension:
+            w = min(extension, key=order.__getitem__)
+            extension.discard(w)
+            exclusive = {
+                u for u in nbrs(w)
+                if order[u] > order[root] and u not in sub and u not in sub_nbrs
+            }
+            extend(sub | {w}, extension | exclusive, root)
+
+    for root in sorted(tables):
+        extend(frozenset([root]), {u for u in nbrs(root) if order[u] > order[root]}, root)
+    return found
+
+
+def random_connected_subset(
+    tables: List[str], graph: Dict[str, set], size: int, rng: random.Random,
+) -> List[str]:
+    """
+    A random connected subset of ``size`` tables grown from a random start
+    table by repeatedly adding a random frontier neighbour.  Falls back to the
+    whole connected component when it is smaller than ``size``.
+    """
+    if not tables:
+        return []
+    size = max(1, min(size, len(tables)))
+    selected = [rng.choice(sorted(tables))]
+    while len(selected) < size:
+        frontier = sorted(
+            {u for t in selected for u in graph.get(t, set()) if u in tables} - set(selected)
+        )
+        if not frontier:
+            break
+        selected.append(rng.choice(frontier))
+    return sorted(selected)
 
 
 # ---------------------------------------------------------------------------

@@ -3,43 +3,63 @@ Bootstrapping-LCM baseline (a.k.a. DiGiT SDG pipeline).
 
     Nidd, Miksovic, Gschwind, Fusco, Giovannini, Giurgiu.
     "Bootstrapping Learned Cost Models with Synthetic SQL Queries."
-    VLDB 2025 Workshop AIDB.  https://github.com/menidd/QueryGeneration2025
+    VLDB 2025 Workshop AIDB.  arXiv:2508.19807.
+    https://github.com/menidd/QueryGeneration2025
 
-Faithful adaptation of the DiGiT "Steering SDG towards Diversity" pipeline
-(paper Section 4) to Trino / Iceberg:
+Adaptation of the DiGiT "Steering SDG towards Diversity" pipeline (paper
+Section 4, prompt outline in Figure 2) to Trino / Iceberg:
 
-  * Preprocessing   -- extract schema (tables, columns, types) + FK graph
-                       (re-uses QueryDock's introspection).
-  * Create Subschema -- enumerate *connected* FK subschemas (connectable table
-                       subsets), as DiGiT does (187 groupings for TPC-H). We
-                       enumerate connected subsets up to a size cap.
-  * DataBuilder     -- for each subschema, build a "few-shot" prompt:
-                       CREATE TABLE statements + a few *mechanically generated*
-                       example SELECTs built algorithmically from the subschema,
-                       then ask for a fresh, more complex query that uses all
-                       the subschema's tables. Optional group-by / order-by bias
-                       prompt constraint. Multiple generations per prompt with
-                       temperature variation (0-shot vs 3-shot settings).
-  * Validators      -- filter + dedup by syntactic correctness (Trino EXPLAIN)
-                       and relevance.
-  * Coverage        -- count table/column/operator usage; bias later rounds
-                       toward under-covered tables to fill coverage gaps.
+  * Preprocessing    -- schema (tables, columns, types) + declared FK graph
+                        (QueryDock's introspection).
+  * Create Subschema -- every connected FK subschema ("connectable subset of
+                        tables") with ``min_subschema <= size <= max_subschema``
+                        is enumerated exactly once and shuffled.
+  * DataBuilder      -- loops through the subschemas; for each one builds the
+                        Figure 2 prompt: a ``CREATE TABLE`` statement per table
+                        (FK constraints included), the request for an
+                        "interesting and complicated" query using all of the
+                        tables, an optional clause-bias constraint (``group_by``
+                        / ``order_by``) and, in the few-shot setting, examples
+                        built mechanically from the subschema.  Mechanical
+                        examples join every table along a spanning tree of the
+                        FK edges and add filters (on sampled column values),
+                        GROUP BY and ORDER BY by configurable pseudo-random
+                        choice; the biased clause is included with 90%
+                        probability.  0-shot and n-shot prompts are mixed, and
+                        the sampling temperature is varied per prompt.
+  * Validators       -- deduplication + syntactic correctness (Trino EXPLAIN).
+  * Coverage         -- after each batch the accepted queries are parsed and
+                        table / column / operation usage is counted.  Later
+                        batches are steered towards the gaps as the paper
+                        describes: each table definition includes only a
+                        targeted subset of columns (key columns plus the least
+                        referenced ones), and the mechanical examples are tuned
+                        towards the least covered operation.
 
-The distinctive features vs QueryDock are: enumerated connected subschemas
-(not a single random walk), mechanically-generated few-shot seed examples,
-clause-bias prompt constraints, and coverage-gap-driven re-biasing.
+The LLM, the validator (EXPLAIN instead of the paper's Derby execution) and the
+target engine are those shared by all baselines.  ``generations_per_prompt``
+issues several completions of the same prompt (the paper requests multiple
+generations per prompt); the default is one.
 """
 
 from __future__ import annotations
 
+import math
 import random
+import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from workload_generation.baselines.common import BaselineContext, write_baseline_workload
-from workload_generation.shared.sql_features import query_features
+from workload_generation.baselines.common import (
+    BaselineContext,
+    enumerate_connected_subsets,
+    trino_literal,
+    type_kind,
+    write_baseline_workload,
+)
+from workload_generation.shared.sql_features import query_features, _tokens
 from workload_generation.baselines.query_generator import sanitize_sql, get_relevant_relationships
 
 
@@ -48,17 +68,15 @@ BASELINE = "bootstrapping_lcm"
 _INSTRUCTIONS = (
     "You are a SQL author generating synthetic training queries for a learned "
     "cost model. Write one valid Trino (Presto) SQL query over the given "
-    "Iceberg tables. Use explicit JOIN syntax and only the given tables, "
-    "columns and join keys. Avoid SELECT *. Output only the SQL query."
+    "Iceberg tables. Output only the SQL query."
 )
 
-# DiGiT "Figure 2" base prompt outline.
+# DiGiT Figure 2 prompt outline; the clause-bias constraint precedes the examples.
 _BASE_PROMPT = (
     "These tables have been created:\n{ddl}\n\n"
-    "Join keys:\n{joins}\n\n"
-    "{bias}"
     "Write an interesting and complicated SQL query that uses all of these tables:\n"
     "{table_list}\n"
+    "{bias}"
     "{examples_block}"
 )
 
@@ -68,94 +86,194 @@ _CLAUSE_BIAS = {
     "order_by": "Whenever possible, please use an ORDER BY clause to rank the output.\n",
 }
 
+# Operations the mechanical example generator can emit (and the coverage
+# report tracks for example tuning).
+_EXAMPLE_OPS = ("filter", "group_by", "order_by")
+_BIASED_CLAUSE_P = 0.9      # paper: desired clause included with 90% probability
+_DEFAULT_OP_P = 0.5
+
 
 # ---------------------------------------------------------------------------
-# Create Subschema: enumerate connected FK subschemas
+# Coverage state
 # ---------------------------------------------------------------------------
 
-def _enumerate_connected_subschemas(
-    tables: List[str], graph: Dict[str, set], *, min_size: int, max_size: int,
-    cap: int, rng: random.Random,
-) -> List[Tuple[str, ...]]:
-    """
-    Enumerate connected subsets of the FK graph with size in [min_size, max_size].
-    For small schemas this is exhaustive (like DiGiT's 187 TPC-H groupings);
-    for large schemas we cap the count and sample connected subsets via BFS.
-    """
-    found: set = set()
+class _Coverage:
+    """Table / column / operation usage counts over the accepted queries."""
 
-    # exhaustive connected-subset enumeration by growing frontiers
-    def grow(seed: str):
-        # BFS expansions from a seed, recording connected subsets
-        stack = [frozenset([seed])]
-        while stack and len(found) < cap:
-            cur = stack.pop()
-            if min_size <= len(cur) <= max_size:
-                found.add(tuple(sorted(cur)))
-            if len(cur) >= max_size:
+    def __init__(self) -> None:
+        self.tables: Counter = Counter()
+        self.columns: Counter = Counter()        # (table, column) -> count
+        self.ops: Counter = Counter()
+        self.queries = 0
+
+    def add(self, sql: str, subschema: Tuple[str, ...], ctx: BaselineContext) -> None:
+        feats = query_features(sql)
+        used_tables = set(feats.get("tables") or []) or set(subschema)
+        tokens = set(_tokens(sql))
+        for t in used_tables:
+            self.tables[t] += 1
+        for t in subschema:
+            if t not in used_tables:
                 continue
-            neighbours = set()
-            for t in cur:
-                neighbours |= graph.get(t, set())
-            for nb in neighbours - cur:
-                stack.append(cur | {nb})
+            for col in ctx.columns_for(t):
+                if col["name"].lower() in tokens:
+                    self.columns[(t, col["name"])] += 1
+        if feats.get("num_where"):
+            self.ops["filter"] += 1
+        if feats.get("num_group_by"):
+            self.ops["group_by"] += 1
+        if feats.get("num_order_by"):
+            self.ops["order_by"] += 1
+        if feats.get("num_having"):
+            self.ops["having"] += 1
+        if feats.get("num_aggregations"):
+            self.ops["aggregation"] += 1
+        if feats.get("num_joins"):
+            self.ops["join"] += 1
+        self.queries += 1
 
-    seeds = list(tables)
-    rng.shuffle(seeds)
-    for s in seeds:
-        if len(found) >= cap:
-            break
-        grow(s)
+    def snapshot(self) -> Dict[str, Any]:
+        return {
+            "queries": self.queries,
+            "columns": dict(self.columns),
+            "ops": dict(self.ops),
+        }
 
-    result = list(found)
-    rng.shuffle(result)
-    return result[:cap]
+
+def _targeted_columns(
+    ctx: BaselineContext, tables: Tuple[str, ...], snapshot: Optional[Dict[str, Any]],
+    rng: random.Random, fraction: float, min_columns: int,
+) -> Optional[Dict[str, List[str]]]:
+    """
+    Column subset per table for coverage-gap steering: key columns plus the
+    least-referenced ``fraction`` of the remaining columns.  ``None`` (all
+    columns) until a coverage report exists.
+    """
+    if not snapshot or not snapshot.get("queries"):
+        return None
+    counts = snapshot["columns"]
+    out: Dict[str, List[str]] = {}
+    for t in tables:
+        keys = ctx.key_columns(t)
+        others = [c["name"] for c in ctx.columns_for(t) if c["name"] not in keys]
+        rng.shuffle(others)  # random tie-breaking
+        others.sort(key=lambda c: counts.get((t, c), 0))
+        k = max(min_columns, math.ceil(fraction * len(others)))
+        out[t] = others[:k]
+    return out
+
+
+def _gap_operation(snapshot: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not snapshot or not snapshot.get("queries"):
+        return None
+    ops = snapshot["ops"]
+    return min(_EXAMPLE_OPS, key=lambda o: ops.get(o, 0))
 
 
 # ---------------------------------------------------------------------------
-# Mechanical example generation (DiGiT's algorithmic seed queries)
+# Mechanical example generation
 # ---------------------------------------------------------------------------
+
+class _ValueCache:
+    """Thread-safe cache of sampled column values for example filters."""
+
+    def __init__(self, ctx: BaselineContext, limit: int = 20) -> None:
+        self.ctx = ctx
+        self.limit = limit
+        self._data: Dict[Tuple[str, str], List[Any]] = {}
+        self._lock = threading.Lock()
+
+    def get(self, table: str, column: str) -> List[Any]:
+        key = (table, column)
+        with self._lock:
+            if key in self._data:
+                return self._data[key]
+        vals = self.ctx.sample_column_values(table, column, limit=self.limit)
+        with self._lock:
+            self._data[key] = vals
+        return vals
+
+
+def _join_tree(
+    tables: Tuple[str, ...], rels: List[tuple], rng: random.Random,
+) -> Tuple[str, List[Tuple[str, str]]]:
+    """
+    Spanning tree of the subschema's FK edges: a base table plus, for every
+    other table, ``(table, on_clause)`` joining it to an already-joined table.
+    """
+    base = rng.choice(list(tables))
+    joined = {base}
+    steps: List[Tuple[str, str]] = []
+    remaining = list(rels)
+    rng.shuffle(remaining)
+    progress = True
+    while progress and len(joined) < len(tables):
+        progress = False
+        for rel in list(remaining):
+            lt, lcols, rt, rcols = rel
+            if (lt in joined) == (rt in joined):
+                continue
+            new = rt if lt in joined else lt
+            on = " AND ".join(f"{lt}.{a} = {rt}.{b}" for a, b in zip(lcols, rcols))
+            steps.append((new, on))
+            joined.add(new)
+            remaining.remove(rel)
+            progress = True
+    return base, steps
+
 
 def _mechanical_example(
-    ctx: BaselineContext, tables: Tuple[str, ...], rng: random.Random,
-    bias: str,
+    ctx: BaselineContext,
+    tables: Tuple[str, ...],
+    shown: Dict[str, List[dict]],
+    ops: Dict[str, float],
+    rng: random.Random,
+    values: _ValueCache,
 ) -> str:
     """
-    Build a simple valid SELECT algorithmically from a subschema: pick columns,
-    join along FK edges, optionally add GROUP BY / ORDER BY per the bias.
-    These are used only as few-shot *examples* (not emitted into the workload).
+    One valid SELECT built algorithmically from the subschema: all tables
+    joined along FK edges, one projected column per table (up to four), and a
+    filter / GROUP BY / ORDER BY each included with probability ``ops[op]``.
+    Used only as a few-shot example (never emitted into the workload).
     """
     rels = get_relevant_relationships(ctx.schema_json, list(tables))
-    # projection columns
+    base, steps = _join_tree(tables, rels, rng)
+    order = [base] + [t for t, _ in steps]
+
     proj = []
-    for t in tables:
-        cols = ctx.columns_for(t)
+    for t in order:
+        cols = [c for c in shown.get(t, []) if c["name"] not in ctx.key_columns(t)] or shown.get(t, [])
         if cols:
-            c = rng.choice(cols)["name"]
-            proj.append(f"{t}.{c}")
-    if not proj:
-        proj = ["*"]
-    proj = proj[:4]
+            proj.append(f"{t}.{rng.choice(cols)['name']}")
+    proj = proj[:4] or [f"{base}.*"]
 
-    base = tables[0]
-    lines = [f"SELECT {', '.join(proj)}", f"FROM {base}"]
-    joined = {base}
-    for (lt, lcols, rt, rcols) in rels:
-        if lt in joined and rt not in joined:
-            on = " AND ".join(f"{lt}.{a} = {rt}.{b}" for a, b in zip(lcols, rcols))
-            lines.append(f"JOIN {rt} ON {on}")
-            joined.add(rt)
-        elif rt in joined and lt not in joined:
-            on = " AND ".join(f"{lt}.{a} = {rt}.{b}" for a, b in zip(lcols, rcols))
-            lines.append(f"JOIN {lt} ON {on}")
-            joined.add(lt)
+    where = None
+    if rng.random() < ops.get("filter", 0.0):
+        candidates = [(t, c) for t in order for c in shown.get(t, [])
+                      if type_kind(c["type"]) != "other" and c["name"] not in ctx.key_columns(t)]
+        rng.shuffle(candidates)
+        for t, c in candidates[:4]:
+            vals = values.get(t, c["name"])
+            if vals:
+                op = "=" if type_kind(c["type"]) in ("string", "boolean") else rng.choice(["=", "<", ">", "<=", ">="])
+                where = f"{t}.{c['name']} {op} {trino_literal(rng.choice(vals), c['type'])}"
+                break
 
-    if bias == "group_by" and proj:
-        grp = proj[0]
-        lines[0] = f"SELECT {grp}, COUNT(*) AS n"
-        lines.append(f"GROUP BY {grp}")
-    if bias == "order_by" and proj:
-        lines.append(f"ORDER BY {proj[0]}")
+    group = rng.random() < ops.get("group_by", 0.0)
+    order_by = rng.random() < ops.get("order_by", 0.0)
+
+    if group:
+        select = f"SELECT {proj[0]}, COUNT(*) AS cnt"
+    else:
+        select = f"SELECT {', '.join(proj)}"
+    lines = [select, f"FROM {base}"]
+    lines += [f"JOIN {t} ON {on}" for t, on in steps]
+    if where:
+        lines.append(f"WHERE {where}")
+    if group:
+        lines.append(f"GROUP BY {proj[0]}")
+    if order_by:
+        lines.append("ORDER BY cnt DESC" if group else f"ORDER BY {proj[0]}")
     lines.append("LIMIT 100")
     return "\n".join(lines)
 
@@ -165,44 +283,83 @@ def _mechanical_example(
 # ---------------------------------------------------------------------------
 
 def _build_prompt(
-    ctx: BaselineContext, tables: Tuple[str, ...], *, n_shot: int, bias: str,
+    ctx: BaselineContext,
+    tables: Tuple[str, ...],
+    *,
+    n_shot: int,
+    bias: str,
+    snapshot: Optional[Dict[str, Any]],
     rng: random.Random,
-) -> str:
-    ddl = ctx.ddl_for(list(tables))
-    joins = ctx.join_rules_text(list(tables))
-    join_block = "\n".join(f"- {j}" for j in joins) if joins else "- (no direct joins)"
+    values: _ValueCache,
+    column_fraction: float,
+    min_columns: int,
+) -> Tuple[str, Dict[str, Any]]:
+    subset = _targeted_columns(ctx, tables, snapshot, rng, column_fraction, min_columns)
+    ddl = ctx.ddl_with_keys(list(tables), subset)
+
+    # columns visible in the DDL: the targeted subset plus the subschema's join keys
+    join_keys: Dict[str, set] = {t: set() for t in tables}
+    for lt, lcols, rt, rcols in get_relevant_relationships(ctx.schema_json, list(tables)):
+        join_keys[lt].update(lcols)
+        join_keys[rt].update(rcols)
+    shown: Dict[str, List[dict]] = {}
+    for t in tables:
+        cols = ctx.columns_for(t)
+        if subset is not None:
+            keep = set(subset[t]) | join_keys[t]
+            cols = [c for c in cols if c["name"] in keep]
+        shown[t] = cols
+
+    gap_op = _gap_operation(snapshot)
+    ops = {op: _DEFAULT_OP_P for op in _EXAMPLE_OPS}
+    if bias in ops:
+        ops[bias] = _BIASED_CLAUSE_P
+    if gap_op:
+        ops[gap_op] = max(ops[gap_op], _BIASED_CLAUSE_P)
+
     if n_shot > 0:
-        examples = [
-            _mechanical_example(ctx, tables, rng, bias) for _ in range(n_shot)
-        ]
-        examples_block = "\nThese are some examples:\n" + "\n\n".join(
-            f"-- example {i+1}\n{e}" for i, e in enumerate(examples)
-        )
+        examples = [_mechanical_example(ctx, tables, shown, ops, rng, values) for _ in range(n_shot)]
+        examples_block = "\nThese are some examples:\n" + "\n\n".join(examples) + "\n"
     else:
         examples_block = ""
-    return _BASE_PROMPT.format(
+
+    prompt = _BASE_PROMPT.format(
         ddl=ddl,
-        joins=join_block,
+        table_list="\n".join(tables),
         bias=_CLAUSE_BIAS.get(bias, ""),
-        table_list="\n".join(f"- {t}" for t in tables),
         examples_block=examples_block,
     )
-
-
-def _generate_one(ctx, tables, n_shot, bias, temperature, seed) -> Dict[str, Any]:
-    rng = random.Random(seed)
-    prompt = _build_prompt(ctx, tables, n_shot=n_shot, bias=bias, rng=rng)
-    raw = ctx.responses_text(
-        instructions=_INSTRUCTIONS,
-        prompt=prompt,
-        temperature=temperature,
-    )
-    return {
-        "sql": sanitize_sql(raw),
-        "tables": list(tables),
-        "n_shot": n_shot,
-        "bias": bias,
+    steering = {
+        "targeted_columns": subset is not None,
+        "gap_operation": gap_op,
     }
+    return prompt, steering
+
+
+def _generate(job, ctx, tables, n_shot, bias, temperature, seed, snapshot, values,
+              column_fraction, min_columns, generations) -> List[Dict[str, Any]]:
+    rng = random.Random(seed)
+    prompt, steering = _build_prompt(
+        ctx, tables, n_shot=n_shot, bias=bias, snapshot=snapshot, rng=rng,
+        values=values, column_fraction=column_fraction, min_columns=min_columns,
+    )
+    out = []
+    for g in range(generations):
+        raw = ctx.responses_text(
+            instructions=_INSTRUCTIONS,
+            prompt=prompt,
+            temperature=temperature,
+        )
+        out.append({
+            "order": (job, g),
+            "sql": sanitize_sql(raw),
+            "tables": tables,
+            "n_shot": n_shot,
+            "bias": bias,
+            "temperature": temperature,
+            "steering": steering,
+        })
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -216,13 +373,17 @@ def generate_workload(
     num_queries: int = 100,
     min_subschema: int = 2,
     max_subschema: int = 5,
-    subschema_cap: int = 400,
     n_shot: int = 3,                 # DiGiT: 0-shot vs 3-shot settings
-    clause_bias: Optional[List[str]] = None,   # ["none","group_by","order_by"]
-    temperatures: Optional[List[float]] = None,  # multiple generations per prompt
+    zero_shot_fraction: float = 0.3,
+    clause_bias: Optional[List[str]] = None,     # ["none","group_by","order_by"]
+    temperatures: Optional[List[float]] = None,  # varied per prompt
+    generations_per_prompt: int = 1,
+    batch_size: int = 100,           # prompts per coverage iteration
+    column_fraction: float = 0.5,    # share of non-key columns kept when steering
+    min_columns: int = 3,
     generation_workers: int = 8,
     validation_workers: int = 8,
-    max_rounds: int = 12,
+    max_rounds: Optional[int] = None,
     warmup: bool = True,
     random_seed: Optional[int] = None,
     workload_root=None,
@@ -232,6 +393,9 @@ def generate_workload(
     rng = random.Random(random_seed)
     clause_bias = clause_bias or ["none", "group_by", "order_by"]
     temperatures = temperatures or [0.6, 0.9]
+    generations_per_prompt = max(1, int(generations_per_prompt))
+    if max_rounds is None:
+        max_rounds = max(12, 4 * math.ceil(num_queries / max(1, batch_size * generations_per_prompt)))
 
     if warmup:
         ctx.warm_up()
@@ -239,55 +403,56 @@ def generate_workload(
     schema_tables = ctx.schema_tables()
     graph = ctx.relationship_graph()
 
-    # Create Subschema
-    subschemas = _enumerate_connected_subschemas(
+    # Create Subschema: every connected FK subschema in the size range.
+    subschemas = enumerate_connected_subsets(
         schema_tables, graph, min_size=min_subschema, max_size=max_subschema,
-        cap=subschema_cap, rng=rng,
     )
-    if not subschemas:  # e.g. no FK edges -- fall back to singletons/pairs
-        subschemas = [tuple(sorted(rng.sample(schema_tables,
-                       k=min(min_subschema, len(schema_tables)))))
-                      for _ in range(min(subschema_cap, 50))]
+    fallback_subschemas = not subschemas
+    if fallback_subschemas:  # no FK edges: single tables
+        subschemas = [(t,) for t in schema_tables]
+    rng.shuffle(subschemas)
+    size_mix = Counter(len(s) for s in subschemas)
 
+    values = _ValueCache(ctx)
+    coverage = _Coverage()
     accepted: List[Dict[str, Any]] = []
     seen: set = set()
-    table_coverage: Counter = Counter()
-    op_coverage: Counter = Counter()
     rounds = 0
+    cursor = 0                        # DataBuilder position in the subschema loop
     total_generated = 0
     total_duplicates = 0
+    total_invalid = 0
+    batch_log: List[Dict[str, Any]] = []
 
     while len(accepted) < num_queries and rounds < max_rounds:
         rounds += 1
-        remaining = num_queries - len(accepted)
-        batch = max(4, int(remaining * 1.5))
-
-        # Coverage-gap biasing: prefer subschemas touching under-covered tables
-        def gap_score(sub):
-            return sum(1.0 / (1 + table_coverage[t]) for t in sub)
-        ranked = sorted(subschemas, key=gap_score, reverse=True)
-        # sample from the top slice with some randomness
-        top = ranked[: max(len(ranked) // 2, batch)]
-        chosen = [rng.choice(top) for _ in range(batch)]
+        snapshot = coverage.snapshot()
 
         jobs = []
-        for sub in chosen:
+        for _ in range(batch_size):
+            sub = subschemas[cursor % len(subschemas)]
+            cursor += 1
             bias = rng.choice(clause_bias)
             temp = rng.choice(temperatures)
-            shot = n_shot if rng.random() > 0.3 else 0  # mix 0-shot / n-shot
+            shot = 0 if rng.random() < zero_shot_fraction else n_shot
             jobs.append((sub, shot, bias, temp, rng.randint(0, 10**9)))
 
         candidates: List[Dict[str, Any]] = []
         with ThreadPoolExecutor(max_workers=max(1, generation_workers)) as ex:
-            futs = [ex.submit(_generate_one, ctx, *j) for j in jobs]
+            futs = [
+                ex.submit(_generate, j, ctx, sub, shot, bias, temp, seed, snapshot, values,
+                          column_fraction, min_columns, generations_per_prompt)
+                for j, (sub, shot, bias, temp, seed) in enumerate(jobs)
+            ]
             for fut in as_completed(futs):
                 try:
-                    candidates.append(fut.result())
+                    candidates.extend(fut.result())
                 except Exception as e:
                     print(f"[bootstrapping_lcm] generation failed: {type(e).__name__}: {e}")
         total_generated += len(candidates)
 
-        # Validators: dedup + syntactic correctness (EXPLAIN)
+        # Validators: dedup + syntactic correctness (EXPLAIN), in prompt order
+        candidates.sort(key=lambda c: c["order"])
         deduped = []
         for c in candidates:
             key = " ".join(c["sql"].lower().split())
@@ -297,59 +462,83 @@ def generate_workload(
             seen.add(key)
             deduped.append(c)
 
-        valid, _invalid = ctx.validate_batch(deduped, workers=validation_workers)
+        valid, invalid = ctx.validate_batch(deduped, workers=validation_workers)
+        total_invalid += len(invalid)
+        valid.sort(key=lambda c: c["order"])
         for c in valid:
-            feats = query_features(c["sql"])
-            for t in feats.get("tables", []) or c["tables"]:
-                table_coverage[t] += 1
-            if feats.get("num_group_by"):
-                op_coverage["group_by"] += 1
-            if feats.get("num_order_by"):
-                op_coverage["order_by"] += 1
-            if feats.get("num_joins"):
-                op_coverage["join"] += 1
-            if feats.get("num_aggregations"):
-                op_coverage["aggregation"] += 1
+            if len(accepted) >= num_queries:
+                break
+            coverage.add(c["sql"], c["tables"], ctx)
             accepted.append({
                 "sql": c["sql"],
                 "goal": "DiGiT synthetic LCM training query",
-                "selected_tables": c["tables"],
-                "extra": {"n_shot": c["n_shot"], "clause_bias": c["bias"]},
+                "selected_tables": list(c["tables"]),
+                "extra": {
+                    "n_shot": c["n_shot"],
+                    "clause_bias": c["bias"],
+                    "temperature": c["temperature"],
+                    "coverage_steering": c["steering"],
+                },
             })
+
+        batch_log.append({
+            "round": rounds,
+            "prompts": len(jobs),
+            "generated": len(candidates),
+            "valid": len(valid),
+            "accepted_total": len(accepted),
+            "steered": bool(snapshot["queries"]),
+            "gap_operation": _gap_operation(snapshot),
+        })
 
         if not candidates:
             break
 
     accepted = accepted[:num_queries]
+    n_tables = len(schema_tables)
 
     pipeline_report = {
         "method": "Bootstrapping-LCM / DiGiT (Nidd et al., VLDB AIDB 2025)",
         "steps": [
             "preprocessing (schema + FK graph)",
-            "create subschema (enumerate connected FK subschemas)",
-            "DataBuilder few-shot prompt with mechanically-generated examples",
+            "create subschema (all connected FK subschemas in the size range, shuffled)",
+            "DataBuilder loop over subschemas: Figure 2 prompt with CREATE TABLE + FK clauses, "
+            "clause-bias constraint, mechanically generated examples",
             "validators (dedup + Trino EXPLAIN)",
-            "coverage-gap-driven re-biasing",
+            "coverage report per batch -> targeted column subsets + example tuning towards gaps",
         ],
         "subschemas": {
             "size_range": [min_subschema, max_subschema],
             "enumerated": len(subschemas),
-            "cap": subschema_cap,
+            "size_mix": dict(sorted(size_mix.items())),
+            "prompted": min(cursor, len(subschemas)),
+            "wrapped_around": cursor > len(subschemas),
+            "no_fk_fallback": fallback_subschemas,
         },
         "prompting": {
             "n_shot": n_shot,
+            "zero_shot_fraction": zero_shot_fraction,
             "clause_bias_options": clause_bias,
+            "biased_clause_probability": _BIASED_CLAUSE_P,
             "temperatures": temperatures,
-            "example_source": "mechanically generated from subschema (algorithmic)",
+            "generations_per_prompt": generations_per_prompt,
+            "batch_size": batch_size,
+            "example_source": "mechanically generated from subschema (FK spanning-tree joins)",
         },
         "coverage": {
-            "table_usage": dict(table_coverage),
-            "operator_usage": dict(op_coverage),
+            "table_usage": dict(coverage.tables),
+            "tables_covered": len(coverage.tables),
+            "tables_total": n_tables,
+            "columns_covered": len(coverage.columns),
+            "operator_usage": dict(coverage.ops),
+            "column_fraction": column_fraction,
+            "batches": batch_log,
         },
         "counts": {
             "rounds": rounds,
             "total_generated": total_generated,
             "duplicates_removed": total_duplicates,
+            "invalid": total_invalid,
             "accepted": len(accepted),
             "target": num_queries,
         },

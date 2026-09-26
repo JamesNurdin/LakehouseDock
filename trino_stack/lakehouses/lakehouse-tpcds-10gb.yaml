@@ -22,14 +22,14 @@ trino:
     resources:
       cpu: "4"
       memory: "16Gi"
-    nodeName: "idagpu-05"  # or "" for random
+    nodeName: "idagpu-10"  # or "" for random
 
 test:
   pod:
     image: macavaney/idabox:py310-v93
 
 metastore:
-  nodeName: ""  # or "" for random 
+  nodeName: "idagpu-11"  # or "" for random 
   hive:
     pod:
       image: bde2020/hive:latest

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Optional, Sequence
 
 from sklearn.neural_network import MLPRegressor
@@ -67,3 +68,24 @@ class MLPRuntimeRegressor(BaseRuntimeRegressor):
             ("scaler", StandardScaler()),
             ("mlp", mlp),
         ])
+
+    def fit(self, x: Any, y: Any, **fit_kwargs: Any) -> "MLPRuntimeRegressor":
+        # sklearn's early stopping holds out ceil(n * validation_fraction) rows
+        # and raises if that is < 2, so any training set under ~20 rows would
+        # fail outright. Fall back to training-loss stopping for those.
+        if self._can_early_stop(x):
+            super().fit(x, y, **fit_kwargs)
+        else:
+            self._fit_without_early_stopping(x, y, **fit_kwargs)
+        return self
+
+    def _can_early_stop(self, x: Any) -> bool:
+        return not self.early_stopping or math.ceil(len(self._to_numpy(x)) * self.validation_fraction) >= 2
+
+    def _fit_without_early_stopping(self, x: Any, y: Any, **fit_kwargs: Any) -> None:
+        early_stopping = self.early_stopping
+        self.early_stopping = False
+        try:
+            super().fit(x, y, **fit_kwargs)
+        finally:
+            self.early_stopping = early_stopping
