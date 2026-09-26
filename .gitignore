@@ -62,3 +62,6 @@ carbon_scheduling/CI_data
 carbon_scheduling/gurobi/gurobi.lic
 carbon_scheduling/Studies
 
+
+# LLM planning work (not yet committed)
+llm_planning/
